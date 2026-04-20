@@ -96,6 +96,7 @@ echo -e "${CYAN}${BOLD}Configuration${RESET}" >&3
 INSTALL_WEB_UI=$(ask "Do you want to install the Web UI?" "Y")
 INSTALL_REDIS=$(ask "Do you want to install Redis via Docker?" "Y")
 INSTALL_OPENSHELL=$(ask "Do you want to install OpenShell (or reuse existing one)?" "Y")
+START_NOW=$(ask "Do you want to start the MirrorNeuron server automatically after install?" "Y")
 echo "" >&3
 
 INSTALL_DIR="${HOME}/.mirror_neuron"
@@ -104,21 +105,44 @@ VENV_DIR="${HOME}/.local/share/mn_venv"
 
 print_step "Checking Dependencies"
 
-for cmd in git mix python3; do
+for cmd in git python3; do
     if ! command -v $cmd &> /dev/null; then
         print_error "'$cmd' is required but not installed."
         exit 1
     fi
 done
+
+if ! command -v mix &> /dev/null; then
+    print_warning "'mix' (Elixir) is not installed."
+    if [ "$(uname)" = "Darwin" ] && command -v brew &> /dev/null; then
+        print_step "Installing Elixir via Homebrew..."
+        brew install elixir
+    elif command -v apt-get &> /dev/null; then
+        print_step "Installing Elixir via apt-get..."
+        sudo apt-get update && sudo apt-get install -y elixir erlang-dev erlang-xmerl
+    else
+        print_error "Automatic installation not supported on this OS. Please install Elixir manually."
+        exit 1
+    fi
+fi
+
 if [ "$INSTALL_WEB_UI" = "Y" ] && ! command -v npm &> /dev/null; then
     print_error "'npm' is required for Web UI but not installed."
     exit 1
 fi
-if [ "$INSTALL_REDIS" = "Y" ] && ! command -v docker &> /dev/null; then
-    print_error "'docker' is required for Redis but not installed."
-    exit 1
+
+if [[ "$INSTALL_REDIS" = "Y" || "$INSTALL_OPENSHELL" = "Y" ]]; then
+    if ! command -v docker &> /dev/null; then
+        print_error "'docker' is required but not installed."
+        exit 1
+    fi
+    if ! docker info >/dev/null 2>&1; then
+        print_error "Docker is not running. Please start Docker first."
+        exit 1
+    fi
 fi
-print_success "All dependencies found."
+
+print_success "All dependencies found or installed."
 
 print_step "Installing MirrorNeuron Core"
 
@@ -128,7 +152,7 @@ print_step "Installing MirrorNeuron Core"
         git fetch origin >/dev/null 2>&1
         git pull origin main >/dev/null 2>&1 || true
     else
-        git clone git@github.com:homerquan/MirrorNeuron.git "$INSTALL_DIR" >/dev/null 2>&1
+        git clone https://github.com/homerquan/MirrorNeuron.git "$INSTALL_DIR" >/dev/null 2>&1
         cd "$INSTALL_DIR"
     fi
     mix deps.get >/dev/null 2>&1
@@ -140,9 +164,9 @@ print_step "Installing Python CLI & API"
 (
     python3 -m venv "$VENV_DIR" >/dev/null 2>&1
     "$VENV_DIR/bin/pip" install --upgrade pip >/dev/null 2>&1
-    "$VENV_DIR/bin/pip" install git+ssh://git@github.com/MirrorNeuronLab/mn-python-sdk.git >/dev/null 2>&1
-    "$VENV_DIR/bin/pip" install git+ssh://git@github.com/MirrorNeuronLab/mn-cli.git >/dev/null 2>&1
-    "$VENV_DIR/bin/pip" install git+ssh://git@github.com/MirrorNeuronLab/mn-api.git >/dev/null 2>&1
+    "$VENV_DIR/bin/pip" install git+https://github.com/MirrorNeuronLab/mn-python-sdk.git >/dev/null 2>&1
+    "$VENV_DIR/bin/pip" install git+https://github.com/MirrorNeuronLab/mn-cli.git >/dev/null 2>&1
+    "$VENV_DIR/bin/pip" install git+https://github.com/MirrorNeuronLab/mn-api.git >/dev/null 2>&1
 ) &
 spinner $! "Setting up virtualenv and installing Python packages"
 
@@ -154,7 +178,7 @@ if [ "$INSTALL_WEB_UI" = "Y" ]; then
             cd "$UI_DIR"
             git pull origin main >/dev/null 2>&1 || true
         else
-            git clone git@github.com:MirrorNeuronLab/mn-web-ui.git "$UI_DIR" >/dev/null 2>&1
+            git clone https://github.com/MirrorNeuronLab/mn-web-ui.git "$UI_DIR" >/dev/null 2>&1
             cd "$UI_DIR"
         fi
         npm install >/dev/null 2>&1
@@ -188,10 +212,11 @@ fi
 
 print_step "Creating Symlinks"
 mkdir -p "$BIN_DIR"
-rm -f "$BIN_DIR/mn" "$BIN_DIR/mn-api"
+rm -f "$BIN_DIR/mn" "$BIN_DIR/mn-api" "$INSTALL_DIR/mn"
 ln -s "$VENV_DIR/bin/mn" "$BIN_DIR/mn"
 ln -s "$VENV_DIR/bin/mn-api" "$BIN_DIR/mn-api"
-print_success "Symlinks created in $BIN_DIR."
+ln -s "$VENV_DIR/bin/mn" "$INSTALL_DIR/mn"
+print_success "Symlinks created in $BIN_DIR and $INSTALL_DIR."
 
 echo "" >&3
 print_success "MirrorNeuron installation successfully completed! 🚀" >&3
@@ -199,13 +224,37 @@ echo -e "CLI is available as ${YELLOW}mn${RESET}." >&3
 echo -e "API is available as ${YELLOW}mn-api${RESET}." >&3
 
 if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
-    echo -e "\n${YELLOW}${BOLD}WARNING:${RESET} ${YELLOW}$BIN_DIR is not in your PATH.${RESET}" >&3
-    echo -e "Add ${CYAN}export PATH=\"$BIN_DIR:\$PATH\"${RESET} to your ~/.bashrc or ~/.zshrc." >&3
+    echo -e "\n${YELLOW}${BOLD}Note:${RESET} ${YELLOW}$BIN_DIR is not in your PATH.${RESET}" >&3
+    
+    DETECTED_PROFILES=()
+    [ -f "$HOME/.zshrc" ] && DETECTED_PROFILES+=("$HOME/.zshrc")
+    [ -f "$HOME/.bashrc" ] && DETECTED_PROFILES+=("$HOME/.bashrc")
+    [ -f "$HOME/.bash_profile" ] && DETECTED_PROFILES+=("$HOME/.bash_profile")
+    [ -f "$HOME/.profile" ] && DETECTED_PROFILES+=("$HOME/.profile")
+
+    if [ ${#DETECTED_PROFILES[@]} -eq 0 ]; then
+        DETECTED_PROFILES+=("$HOME/.profile")
+    fi
+
+    for profile in "${DETECTED_PROFILES[@]}"; do
+        if ! grep -q "$BIN_DIR" "$profile" 2>/dev/null; then
+            echo -e "\n# Added by MirrorNeuron Installer" >> "$profile"
+            echo "export PATH=\"\$BIN_DIR:\$PATH\"" >> "$profile"
+            echo -e "Automatically added to ${CYAN}$profile${RESET}" >&3
+        fi
+    done
+    
+    echo -e "${YELLOW}Please restart your terminal or run \`source ~/.zshrc\` (or your shell's configuration file) to use the 'mn' command.${RESET}" >&3
 fi
 
 echo -e "\n${BOLD}Quick Start:${RESET}" >&3
-echo -e "  1. Start the core: ${GREEN}cd $INSTALL_DIR && mix run --no-halt${RESET}" >&3
+echo -e "  1. Start the server (Core & API): ${GREEN}mn start${RESET}" >&3
 if [ "$INSTALL_WEB_UI" = "Y" ]; then
     echo -e "  2. Start the UI:   ${GREEN}cd ${INSTALL_DIR}_ui && npm run dev${RESET}" >&3
 fi
 echo -e "  3. Use the CLI:    ${GREEN}mn nodes${RESET}\n" >&3
+
+if [ "$START_NOW" = "Y" ]; then
+    print_step "Starting MirrorNeuron Server..."
+    "$VENV_DIR/bin/mn" start
+fi
