@@ -276,9 +276,9 @@ if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
     fi
 
     for profile in "${DETECTED_PROFILES[@]}"; do
-        if ! grep -q "$BIN_DIR" "$profile" 2>/dev/null; then
+        if ! grep -q "export PATH=\"$BIN_DIR:\$PATH\"" "$profile" 2>/dev/null; then
             echo -e "\n# Added by MirrorNeuron Installer" >> "$profile"
-            echo "export PATH=\"\$BIN_DIR:\$PATH\"" >> "$profile"
+            echo "export PATH=\"$BIN_DIR:\$PATH\"" >> "$profile"
             echo -e "Automatically added to ${CYAN}$profile${RESET}" >&3
         fi
     done
