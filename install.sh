@@ -112,39 +112,23 @@ for cmd in git python3; do
     fi
 done
 
-if ! command -v mix &> /dev/null; then
-    print_warning "'mix' (Elixir) is not installed."
-    if [ "$(uname)" = "Darwin" ] && command -v brew &> /dev/null; then
-        print_step "Installing Elixir via Homebrew..."
-        brew install elixir
-    elif command -v apt-get &> /dev/null; then
-        print_step "Installing Elixir via apt-get..."
-        sudo apt-get update && sudo apt-get install -y elixir erlang-dev erlang-xmerl
-    else
-        print_error "Automatic installation not supported on this OS. Please install Elixir manually."
-        exit 1
-    fi
-fi
-
 if [ "$INSTALL_WEB_UI" = "Y" ] && ! command -v npm &> /dev/null; then
     print_error "'npm' is required for Web UI but not installed."
     exit 1
 fi
 
-if [[ "$INSTALL_REDIS" = "Y" || "$INSTALL_OPENSHELL" = "Y" ]]; then
-    if ! command -v docker &> /dev/null; then
-        print_error "'docker' is required but not installed."
-        exit 1
-    fi
-    if ! docker info >/dev/null 2>&1; then
-        print_error "Docker is not running. Please start Docker first."
-        exit 1
-    fi
+if ! command -v docker &> /dev/null; then
+    print_error "'docker' is required but not installed."
+    exit 1
+fi
+if ! docker info >/dev/null 2>&1; then
+    print_error "Docker is not running. Please start Docker first."
+    exit 1
 fi
 
 print_success "All dependencies found or installed."
 
-print_step "Installing MirrorNeuron Core"
+print_step "Installing MirrorNeuron Core (Docker)"
 
 (
     if [ -d "$INSTALL_DIR" ]; then
@@ -155,18 +139,73 @@ print_step "Installing MirrorNeuron Core"
         git clone https://github.com/homerquan/MirrorNeuron.git "$INSTALL_DIR" >/dev/null 2>&1
         cd "$INSTALL_DIR"
     fi
-    mix deps.get >/dev/null 2>&1
-    mix compile >/dev/null 2>&1
+    
+    if [ ! -f "Dockerfile" ]; then
+        cat << 'EOF' > Dockerfile
+FROM elixir:1.16-slim
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    git \
+    make \
+    g++ \
+    libssl-dev \
+    protobuf-compiler \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install hex and rebar
+RUN mix local.rebar --force && mix local.hex --force
+
+WORKDIR /app
+
+# Copy dependency files and fetch deps
+COPY mix.exs mix.lock ./
+RUN mix deps.get
+
+# Copy the rest of the application
+COPY . .
+
+# Compile the application
+RUN mix compile
+
+EXPOSE 50051
+
+# Set the default command
+CMD ["mix", "run", "--no-halt"]
+EOF
+    fi
+
+    docker build -t mirror-neuron-core . >/dev/null 2>&1
 ) &
-spinner $! "Cloning and compiling Core (Elixir)"
+spinner $! "Cloning and building Core (Docker image mirror-neuron-core)"
 
 print_step "Installing Python CLI & API"
 (
     python3 -m venv "$VENV_DIR" >/dev/null 2>&1
     "$VENV_DIR/bin/pip" install --upgrade pip >/dev/null 2>&1
-    "$VENV_DIR/bin/pip" install git+https://github.com/MirrorNeuronLab/mn-python-sdk.git >/dev/null 2>&1
-    "$VENV_DIR/bin/pip" install git+https://github.com/MirrorNeuronLab/mn-cli.git >/dev/null 2>&1
-    "$VENV_DIR/bin/pip" install git+https://github.com/MirrorNeuronLab/mn-api.git >/dev/null 2>&1
+    
+    # Use local directories if available (for testing/development)
+    SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+    PARENT_DIR="$( dirname "$SCRIPT_DIR" )"
+    
+    if [ -d "$PARENT_DIR/mn-python-sdk" ]; then
+        "$VENV_DIR/bin/pip" install "$PARENT_DIR/mn-python-sdk" >/dev/null 2>&1
+    else
+        "$VENV_DIR/bin/pip" install git+https://github.com/MirrorNeuronLab/mn-python-sdk.git >/dev/null 2>&1
+    fi
+    
+    if [ -d "$PARENT_DIR/mn-cli" ]; then
+        "$VENV_DIR/bin/pip" install "$PARENT_DIR/mn-cli" >/dev/null 2>&1
+    else
+        "$VENV_DIR/bin/pip" install git+https://github.com/MirrorNeuronLab/mn-cli.git >/dev/null 2>&1
+    fi
+    
+    if [ -d "$PARENT_DIR/mn-api" ]; then
+        "$VENV_DIR/bin/pip" install "$PARENT_DIR/mn-api" >/dev/null 2>&1
+    else
+        "$VENV_DIR/bin/pip" install git+https://github.com/MirrorNeuronLab/mn-api.git >/dev/null 2>&1
+    fi
 ) &
 spinner $! "Setting up virtualenv and installing Python packages"
 

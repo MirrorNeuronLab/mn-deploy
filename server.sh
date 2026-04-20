@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 
-DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-cd "$DIR"
-
+DIR="${HOME}/.mirror_neuron"
 PID_DIR="${DIR}/.pids"
 LOG_DIR="${DIR}/.logs"
 BEAM_PID_FILE="${PID_DIR}/beam.pid"
@@ -51,8 +49,13 @@ kill_tree() {
 
 start_services() {
     print_ascii_art
-    if check_status "$BEAM_PID_FILE" || check_status "$API_PID_FILE"; then
-        echo "=> Error: MirrorNeuron is already running."
+    if check_status "$API_PID_FILE"; then
+        echo "=> Error: MirrorNeuron API is already running."
+        echo "=> Use '$0 status' to check, or '$0 stop' to stop."
+        exit 1
+    fi
+    if docker ps --format '{{.Names}}' | grep -q "^mirror-neuron-core$"; then
+        echo "=> Error: MirrorNeuron Core (Docker) is already running."
         echo "=> Use '$0 status' to check, or '$0 stop' to stop."
         exit 1
     fi
@@ -63,11 +66,10 @@ start_services() {
     echo "Starting Services in Detached Mode..."
     echo "==========================================="
 
-    echo "=> Starting MirrorNeuron Core Service (gRPC on port 50051)..."
-    nohup mix run --no-halt > "$BEAM_LOG" 2>&1 &
-    BEAM_PID=$!
-    echo $BEAM_PID > "$BEAM_PID_FILE"
-    echo "   [Started] Core Service (PID: $BEAM_PID)"
+    echo "=> Starting MirrorNeuron Core Service (Docker)..."
+    docker rm -f mirror-neuron-core >/dev/null 2>&1 || true
+    docker run -d --name mirror-neuron-core --network host mirror-neuron-core:latest >/dev/null
+    echo "   [Started] Core Service (Docker: mirror-neuron-core)"
 
     echo "=> Waiting for Elixir to boot..."
     sleep 3
@@ -98,6 +100,10 @@ start_services() {
 stop_services() {
     echo "=> Stopping MirrorNeuron Services..."
     
+    echo "   Stopping Core Service (Docker: mirror-neuron-core)..."
+    docker stop mirror-neuron-core >/dev/null 2>&1 || true
+    docker rm mirror-neuron-core >/dev/null 2>&1 || true
+    
     for pid_file in "$API_PID_FILE" "$BEAM_PID_FILE"; do
         if [ -f "$pid_file" ]; then
             local pid=$(cat "$pid_file")
@@ -105,7 +111,7 @@ stop_services() {
                 if [ "$pid_file" == "$API_PID_FILE" ]; then
                     echo "   Stopping REST API (PID: $pid)..."
                 else
-                    echo "   Stopping Core Service (PID: $pid)..."
+                    echo "   Stopping Legacy Core Service (PID: $pid)..."
                 fi
                 kill_tree "$pid"
                 sleep 1
@@ -121,15 +127,10 @@ status_services() {
     print_ascii_art
     echo "Service Status:"
     
-    check_status "$BEAM_PID_FILE"
-    local beam_stat=$?
-    if [ $beam_stat -eq 0 ]; then
-        echo "  [OK] Core Service is running (PID: $(cat "$BEAM_PID_FILE"))"
-    elif [ $beam_stat -eq 1 ]; then
-        echo "  [!!] Core Service PID file exists but process is dead."
-        rm -f "$BEAM_PID_FILE"
+    if docker ps --format '{{.Names}}' | grep -q "^mirror-neuron-core$"; then
+        echo "  [OK] Core Service (Docker: mirror-neuron-core) is running"
     else
-        echo "  [--] Core Service is not running."
+        echo "  [--] Core Service (Docker: mirror-neuron-core) is not running"
     fi
 
     check_status "$API_PID_FILE"

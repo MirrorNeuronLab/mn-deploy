@@ -108,6 +108,21 @@ fi
 
 print_step "Removing Docker Containers and Images"
 if command -v docker &> /dev/null; then
+    REMOVE_CORE=$(ask "Do you want to stop and remove the Core container (mirror-neuron-core)?" "Y")
+    if [ "$REMOVE_CORE" = "Y" ]; then
+        if docker ps -a | grep -q mirror-neuron-core; then
+            docker stop mirror-neuron-core >/dev/null 2>&1 || true
+            docker rm mirror-neuron-core >/dev/null 2>&1 || true
+            print_success "Removed Core container."
+        else
+            print_success "Core container not found, skipping."
+        fi
+        if docker images | grep -q mirror-neuron-core; then
+            docker rmi mirror-neuron-core:latest >/dev/null 2>&1 || true
+            print_success "Removed Core image."
+        fi
+    fi
+
     REMOVE_REDIS=$(ask "Do you want to stop and remove the Redis container (mirror-neuron-redis)?" "Y")
     if [ "$REMOVE_REDIS" = "Y" ]; then
         if docker ps -a | grep -q mirror-neuron-redis; then
