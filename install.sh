@@ -91,6 +91,22 @@ function ask() {
 
 print_header
 
+INSTALL_DIR="${HOME}/.mirror_neuron"
+BIN_DIR="${HOME}/.local/bin"
+VENV_DIR="${HOME}/.local/share/mn_venv"
+
+if [ -d "$INSTALL_DIR" ] || [ -f "$BIN_DIR/mn" ]; then
+    print_warning "MirrorNeuron appears to be already installed."
+    REINSTALL=$(ask "Do you want to reinstall (overwrite old ones)?" "Y")
+    if [ "$REINSTALL" = "N" ]; then
+        echo -e "${YELLOW}Installation cancelled by user.${RESET}" >&3
+        exit 0
+    fi
+    echo "" >&3
+    # Clean up to ensure a fresh overwrite
+    rm -rf "$INSTALL_DIR" "$VENV_DIR" "${INSTALL_DIR}_ui" "$BIN_DIR/mn" "$BIN_DIR/mn-api"
+fi
+
 # Interactive Prompts
 echo -e "${CYAN}${BOLD}Configuration${RESET}" >&3
 INSTALL_WEB_UI=$(ask "Do you want to install the Web UI?" "Y")
@@ -98,10 +114,6 @@ INSTALL_REDIS=$(ask "Do you want to install Redis via Docker?" "Y")
 INSTALL_OPENSHELL=$(ask "Do you want to install OpenShell (or reuse existing one)?" "Y")
 START_NOW=$(ask "Do you want to start the MirrorNeuron server automatically after install?" "Y")
 echo "" >&3
-
-INSTALL_DIR="${HOME}/.mirror_neuron"
-BIN_DIR="${HOME}/.local/bin"
-VENV_DIR="${HOME}/.local/share/mn_venv"
 
 print_step "Checking Dependencies"
 
@@ -152,6 +164,7 @@ RUN apt-get update && apt-get install -y \
     libssl-dev \
     protobuf-compiler \
     curl \
+    python3 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install hex and rebar
