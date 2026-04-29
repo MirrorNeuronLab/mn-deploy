@@ -189,6 +189,34 @@ function replace_symlink() {
     ln -s "$source" "$target"
 }
 
+function core_container_running() {
+    docker ps --format '{{.Names}}' | grep -q '^mirror-neuron-core$'
+}
+
+function start_core_container() {
+    local cmd=("docker" "run" "-d" "--name" "mirror-neuron-core")
+
+    if [ "$(uname -s)" = "Darwin" ]; then
+        cmd+=("-p" "50051:50051" "-p" "4369:4369")
+        for port in $(seq 9000 9010); do
+            cmd+=("-p" "${port}:${port}")
+        done
+        cmd+=("-e" "MIRROR_NEURON_REDIS_URL=redis://host.docker.internal:6379/0")
+        cmd+=("-e" "MIRROR_NEURON_EXECUTOR_MAX_CONCURRENCY=50")
+    else
+        cmd+=("--network" "host")
+        cmd+=("-e" "MIRROR_NEURON_EXECUTOR_MAX_CONCURRENCY=50")
+    fi
+
+    cmd+=("mirror-neuron-core:latest")
+    "${cmd[@]}" >/dev/null
+}
+
+function restart_core_container() {
+    docker rm -f mirror-neuron-core >/dev/null 2>&1 || true
+    start_core_container
+}
+
 function ensure_path_export() {
     if [[ ":$PATH:" == *":$BIN_DIR:"* ]]; then
         return
@@ -278,6 +306,11 @@ if ! docker info >/dev/null 2>&1; then
 fi
 print_success "Dependencies look good."
 
+CORE_WAS_RUNNING="N"
+if core_container_running; then
+    CORE_WAS_RUNNING="Y"
+fi
+
 print_step "Preparing local install state"
 mkdir -p "$INSTALL_DIR" "$BIN_DIR" "$INSTALL_DIR/.pids" "$INSTALL_DIR/.logs"
 
@@ -297,6 +330,14 @@ print_step "Building MirrorNeuron Core Docker image from local source"
     docker build -t mirror-neuron-core:latest . >/dev/null
 ) &
 spinner $! "Built local core image mirror-neuron-core:latest"
+
+if [ "$CORE_WAS_RUNNING" = "Y" ]; then
+    print_step "Restarting MirrorNeuron gRPC Core from rebuilt image"
+    (
+        restart_core_container
+    ) &
+    spinner $! "Restarted MirrorNeuron gRPC Core"
+fi
 
 print_step "Installing Python components from local source"
 (
