@@ -36,7 +36,7 @@ function spinner() {
     local pid=$1
     local msg=$2
     local delay=0.1
-    local spinstr='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+    local spinstr='|/-\'
     tput civis >&3 2>/dev/null || true
     while kill -0 $pid 2>/dev/null; do
         local temp=${spinstr#?}
