@@ -208,6 +208,18 @@ function start_core_container() {
         cmd+=("-e" "MIRROR_NEURON_EXECUTOR_MAX_CONCURRENCY=50")
     fi
 
+    for env_name in \
+        SLACK_BOT_TOKEN \
+        SLACK_DEFAULT_CHANNEL \
+        SLACK_API_BASE_URL \
+        MIRROR_NEURON_SLACK_BOT_TOKEN \
+        MIRROR_NEURON_SLACK_DEFAULT_CHANNEL \
+        MIRROR_NEURON_SLACK_API_BASE_URL; do
+        if [ -n "${!env_name:-}" ]; then
+            cmd+=("-e" "$env_name")
+        fi
+    done
+
     cmd+=("mirror-neuron-core:latest")
     "${cmd[@]}" >/dev/null
 }
