@@ -195,16 +195,30 @@ function core_container_running() {
 
 function start_core_container() {
     local cmd=("docker" "run" "-d" "--name" "mirror-neuron-core")
+    local core_host="${MIRROR_NEURON_CORE_HOST:-localhost}"
+    local redis_host="${MIRROR_NEURON_REDIS_HOST:-localhost}"
+    local epmd_host="${MIRROR_NEURON_EPMD_HOST:-localhost}"
+    local dist_host="${MIRROR_NEURON_DIST_HOST:-localhost}"
+    local core_publish_host="$core_host"
+    local epmd_publish_host="$epmd_host"
+    local dist_publish_host="$dist_host"
+    [ "$core_publish_host" = "localhost" ] && core_publish_host="127.0.0.1"
+    [ "$epmd_publish_host" = "localhost" ] && epmd_publish_host="127.0.0.1"
+    [ "$dist_publish_host" = "localhost" ] && dist_publish_host="127.0.0.1"
 
     if [ "$(uname -s)" = "Darwin" ]; then
-        cmd+=("-p" "50051:50051" "-p" "4369:4369")
+        cmd+=("-p" "${core_publish_host}:50051:50051" "-p" "${epmd_publish_host}:4369:4369")
         for port in $(seq 9000 9010); do
-            cmd+=("-p" "${port}:${port}")
+            cmd+=("-p" "${dist_publish_host}:${port}:${port}")
         done
         cmd+=("-e" "MIRROR_NEURON_REDIS_URL=redis://host.docker.internal:6379/0")
+        cmd+=("-e" "MIRROR_NEURON_CORE_HOST=0.0.0.0")
         cmd+=("-e" "MIRROR_NEURON_EXECUTOR_MAX_CONCURRENCY=50")
     else
         cmd+=("--network" "host")
+        cmd+=("-e" "MIRROR_NEURON_CORE_HOST=${core_host}")
+        cmd+=("-e" "MIRROR_NEURON_REDIS_HOST=${redis_host}")
+        cmd+=("-e" "ERL_EPMD_ADDRESS=${epmd_host}")
         cmd+=("-e" "MIRROR_NEURON_EXECUTOR_MAX_CONCURRENCY=50")
     fi
 
