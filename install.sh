@@ -207,6 +207,12 @@ print_step "Installing Python CLI & API"
     else
         "$VENV_DIR/bin/pip" install git+https://github.com/MirrorNeuronLab/mn-python-sdk.git >/dev/null 2>&1
     fi
+
+    if [ -d "$PARENT_DIR/mn-skills/blueprint_support_skill" ]; then
+        "$VENV_DIR/bin/pip" install "$PARENT_DIR/mn-skills/blueprint_support_skill" >/dev/null 2>&1
+    else
+        "$VENV_DIR/bin/pip" install "git+https://github.com/MirrorNeuronLab/mn-skills.git#subdirectory=blueprint_support_skill" >/dev/null 2>&1
+    fi
     
     if [ -d "$PARENT_DIR/mn-cli" ]; then
         "$VENV_DIR/bin/pip" install "$PARENT_DIR/mn-cli" >/dev/null 2>&1

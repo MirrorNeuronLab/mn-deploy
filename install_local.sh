@@ -27,7 +27,6 @@ CORE_DIR="${WORKSPACE_DIR}/MirrorNeuron"
 CLI_DIR="${WORKSPACE_DIR}/mn-cli"
 API_DIR="${WORKSPACE_DIR}/mn-api"
 PY_SDK_DIR="${WORKSPACE_DIR}/mn-python-sdk"
-TS_SDK_DIR="${WORKSPACE_DIR}/mn-ts-sdk"
 WEB_UI_DIR="${WORKSPACE_DIR}/mn-web-ui"
 SKILLS_DIR="${WORKSPACE_DIR}/mn-skills"
 BLUEPRINTS_DIR="${WORKSPACE_DIR}/mn-blueprints"
@@ -38,7 +37,6 @@ INSTALL_WEB_UI="Y"
 INSTALL_REDIS="Y"
 INSTALL_OPENSHELL="N"
 INSTALL_SKILLS="Y"
-INSTALL_TS_SDK="Y"
 START_NOW="N"
 REINSTALL="Y"
 NON_INTERACTIVE="N"
@@ -73,7 +71,6 @@ Options:
   --no-redis            Skip Redis Docker setup.
   --openshell           Try to use a local OpenShell folder if present.
   --no-skills           Skip editable install of packages under mn-skills.
-  --no-ts-sdk           Skip local TypeScript SDK npm install/build.
   --start               Start MirrorNeuron after install.
   -h, --help            Show this help.
 EOF
@@ -87,7 +84,6 @@ for arg in "$@"; do
         --no-redis) INSTALL_REDIS="N" ;;
         --openshell) INSTALL_OPENSHELL="Y" ;;
         --no-skills) INSTALL_SKILLS="N" ;;
-        --no-ts-sdk) INSTALL_TS_SDK="N" ;;
         --start) START_NOW="Y" ;;
         -h|--help) usage; exit 0 ;;
         *)
@@ -195,10 +191,10 @@ function core_container_running() {
 
 function start_core_container() {
     local cmd=("docker" "run" "-d" "--name" "mirror-neuron-core")
-    local core_host="${MIRROR_NEURON_CORE_HOST:-localhost}"
-    local redis_host="${MIRROR_NEURON_REDIS_HOST:-localhost}"
-    local epmd_host="${MIRROR_NEURON_EPMD_HOST:-localhost}"
-    local dist_host="${MIRROR_NEURON_DIST_HOST:-localhost}"
+    local core_host="${MN_CORE_HOST:-localhost}"
+    local redis_host="${MN_REDIS_HOST:-localhost}"
+    local epmd_host="${MN_EPMD_HOST:-localhost}"
+    local dist_host="${MN_DIST_HOST:-localhost}"
     local core_publish_host="$core_host"
     local epmd_publish_host="$epmd_host"
     local dist_publish_host="$dist_host"
@@ -211,24 +207,24 @@ function start_core_container() {
         for port in $(seq 9000 9010); do
             cmd+=("-p" "${dist_publish_host}:${port}:${port}")
         done
-        cmd+=("-e" "MIRROR_NEURON_REDIS_URL=redis://host.docker.internal:6379/0")
-        cmd+=("-e" "MIRROR_NEURON_CORE_HOST=0.0.0.0")
-        cmd+=("-e" "MIRROR_NEURON_EXECUTOR_MAX_CONCURRENCY=50")
+        cmd+=("-e" "MN_REDIS_URL=redis://host.docker.internal:6379/0")
+        cmd+=("-e" "MN_CORE_HOST=0.0.0.0")
+        cmd+=("-e" "MN_EXECUTOR_MAX_CONCURRENCY=50")
     else
         cmd+=("--network" "host")
-        cmd+=("-e" "MIRROR_NEURON_CORE_HOST=${core_host}")
-        cmd+=("-e" "MIRROR_NEURON_REDIS_HOST=${redis_host}")
+        cmd+=("-e" "MN_CORE_HOST=${core_host}")
+        cmd+=("-e" "MN_REDIS_HOST=${redis_host}")
         cmd+=("-e" "ERL_EPMD_ADDRESS=${epmd_host}")
-        cmd+=("-e" "MIRROR_NEURON_EXECUTOR_MAX_CONCURRENCY=50")
+        cmd+=("-e" "MN_EXECUTOR_MAX_CONCURRENCY=50")
     fi
 
     for env_name in \
         SLACK_BOT_TOKEN \
         SLACK_DEFAULT_CHANNEL \
         SLACK_API_BASE_URL \
-        MIRROR_NEURON_SLACK_BOT_TOKEN \
-        MIRROR_NEURON_SLACK_DEFAULT_CHANNEL \
-        MIRROR_NEURON_SLACK_API_BASE_URL; do
+        MN_SLACK_BOT_TOKEN \
+        MN_SLACK_DEFAULT_CHANNEL \
+        MN_SLACK_API_BASE_URL; do
         if [ -n "${!env_name:-}" ]; then
             cmd+=("-e" "$env_name")
         fi
@@ -278,7 +274,6 @@ require_dir "$API_DIR" "mn-api"
 require_dir "$PY_SDK_DIR" "mn-python-sdk"
 
 if [ "$INSTALL_WEB_UI" = "Y" ]; then require_dir "$WEB_UI_DIR" "mn-web-ui"; fi
-if [ "$INSTALL_TS_SDK" = "Y" ]; then require_dir "$TS_SDK_DIR" "mn-ts-sdk"; fi
 if [ "$INSTALL_SKILLS" = "Y" ]; then require_dir "$SKILLS_DIR" "mn-skills"; fi
 
 if [ -d "$INSTALL_DIR" ] || [ -L "$INSTALL_DIR" ] || [ -d "$VENV_DIR" ] || [ -f "$BIN_DIR/mn" ]; then
@@ -305,7 +300,6 @@ if [ "$NON_INTERACTIVE" != "Y" ]; then
     INSTALL_WEB_UI=$(ask "Install/build local Web UI?" "$INSTALL_WEB_UI")
     INSTALL_REDIS=$(ask "Install/start Redis via Docker?" "$INSTALL_REDIS")
     INSTALL_SKILLS=$(ask "Install local mn-skills packages in editable mode?" "$INSTALL_SKILLS")
-    INSTALL_TS_SDK=$(ask "Install/build local TypeScript SDK?" "$INSTALL_TS_SDK")
     INSTALL_OPENSHELL=$(ask "Use local OpenShell if a sibling folder exists?" "$INSTALL_OPENSHELL")
     START_NOW=$(ask "Start MirrorNeuron server automatically after install?" "$START_NOW")
 fi
@@ -319,9 +313,9 @@ for cmd in python3 docker; do
     fi
 done
 
-if [ "$INSTALL_WEB_UI" = "Y" ] || [ "$INSTALL_TS_SDK" = "Y" ]; then
+if [ "$INSTALL_WEB_UI" = "Y" ]; then
     if ! command -v npm >/dev/null 2>&1; then
-        print_error "'npm' is required for local Web UI or TypeScript SDK install."
+        print_error "'npm' is required for local Web UI install."
         exit 1
     fi
 fi
@@ -370,12 +364,18 @@ print_step "Installing Python components from local source"
     python3 -m venv "$VENV_DIR" >/dev/null
     "$VENV_DIR/bin/pip" install --upgrade pip >/dev/null
     "$VENV_DIR/bin/pip" install -e "$PY_SDK_DIR" >/dev/null
+    if [ -d "$SKILLS_DIR/blueprint_support_skill" ]; then
+        "$VENV_DIR/bin/pip" install -e "$SKILLS_DIR/blueprint_support_skill" >/dev/null
+    fi
     "$VENV_DIR/bin/pip" install -e "$CLI_DIR" >/dev/null
     "$VENV_DIR/bin/pip" install -e "$API_DIR" >/dev/null
 
     if [ "$INSTALL_SKILLS" = "Y" ]; then
         shopt -s nullglob
         for skill_pyproject in "$SKILLS_DIR"/*/pyproject.toml; do
+            if [ "$(dirname "$skill_pyproject")" = "$SKILLS_DIR/blueprint_support_skill" ]; then
+                continue
+            fi
             "$VENV_DIR/bin/pip" install -e "$(dirname "$skill_pyproject")" >/dev/null
         done
     fi
@@ -395,17 +395,6 @@ if [ "$INSTALL_WEB_UI" = "Y" ]; then
     fi
     replace_symlink "$WEB_UI_DIR" "$UI_LINK_DIR"
     replace_symlink "$WEB_UI_DIR" "$INSTALL_DIR/web-ui-source"
-fi
-
-if [ "$INSTALL_TS_SDK" = "Y" ]; then
-    print_step "Installing TypeScript SDK from local source"
-    (
-        cd "$TS_SDK_DIR"
-        npm install >/dev/null
-        npm run build >/dev/null
-    ) &
-    spinner $! "Installed and built local TypeScript SDK"
-    replace_symlink "$TS_SDK_DIR" "$INSTALL_DIR/ts-sdk-source"
 fi
 
 if [ "$INSTALL_REDIS" = "Y" ]; then
@@ -458,7 +447,7 @@ if [ "$INSTALL_WEB_UI" = "Y" ]; then
     echo -e "  2. Start UI:     ${GREEN}cd ${UI_LINK_DIR} && npm run dev${RESET}" >&3
 fi
 echo -e "  3. Use CLI:      ${GREEN}mn nodes${RESET}" >&3
-echo -e "  4. Rebuild core after Elixir changes: ${GREEN}${SCRIPT_DIR}/install_local.sh --yes --no-web-ui --no-ts-sdk --no-skills${RESET}\n" >&3
+echo -e "  4. Rebuild core after Elixir changes: ${GREEN}${SCRIPT_DIR}/install_local.sh --yes --no-web-ui --no-skills${RESET}\n" >&3
 
 if [ "$START_NOW" = "Y" ]; then
     print_step "Starting MirrorNeuron Server"

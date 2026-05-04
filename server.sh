@@ -69,9 +69,9 @@ start_services() {
     echo "=> Starting MirrorNeuron Core Service (Docker)..."
     docker rm -f mirror-neuron-core >/dev/null 2>&1 || true
     docker run -d --name mirror-neuron-core --network host \
-        -e "MIRROR_NEURON_CORE_HOST=${MIRROR_NEURON_CORE_HOST:-localhost}" \
-        -e "MIRROR_NEURON_REDIS_HOST=${MIRROR_NEURON_REDIS_HOST:-localhost}" \
-        -e "ERL_EPMD_ADDRESS=${MIRROR_NEURON_EPMD_HOST:-localhost}" \
+        -e "MN_CORE_HOST=${MN_CORE_HOST:-localhost}" \
+        -e "MN_REDIS_HOST=${MN_REDIS_HOST:-localhost}" \
+        -e "ERL_EPMD_ADDRESS=${MN_EPMD_HOST:-localhost}" \
         mirror-neuron-core:latest >/dev/null
     echo "   [Started] Core Service (Docker: mirror-neuron-core)"
 
