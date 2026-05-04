@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 
-set -e
+set -euo pipefail
 
-# Make sure we can read from tty even if piped
-exec 3<&1
+# Keep installer output visible even when a subcommand redirects stdout/stderr.
+exec 3>&1
+
+# Never let git/pip block the installer by asking for GitHub credentials.
+export GIT_TERMINAL_PROMPT="${GIT_TERMINAL_PROMPT:-0}"
+export PIP_NO_INPUT="${PIP_NO_INPUT:-1}"
 
 # Define Colors
 BOLD="\033[1m"
@@ -32,21 +36,65 @@ function print_success() { echo -e "${GREEN}${BOLD}==>${RESET} ${GREEN}$1${RESET
 function print_error() { echo -e "${RED}${BOLD}==>${RESET} ${RED}$1${RESET}" >&3; }
 function print_warning() { echo -e "${YELLOW}${BOLD}==>${RESET} ${YELLOW}$1${RESET}" >&3; }
 
+function find_source_workspace() {
+    local script_dir
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+    local candidates=()
+    [ -n "${MN_SOURCE_DIR:-}" ] && candidates+=("$MN_SOURCE_DIR")
+    candidates+=(
+        "$PWD"
+        "$(dirname "$PWD")"
+        "$(dirname "$script_dir")"
+        "$HOME/Projects/mirror-neuron-set"
+    )
+
+    local candidate
+    for candidate in "${candidates[@]}"; do
+        [ -n "$candidate" ] || continue
+        if [ -d "$candidate/mn-python-sdk" ] &&
+           [ -d "$candidate/mn-skills/blueprint_support_skill" ] &&
+           [ -d "$candidate/mn-cli" ] &&
+           [ -d "$candidate/mn-api" ]; then
+            (cd "$candidate" && pwd)
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+function run_quiet() {
+    local label="$1"
+    shift
+    local log_dir="${TMPDIR:-/tmp}/mirror_neuron_install"
+    mkdir -p "$log_dir"
+    local log_file="${log_dir}/${label//[^A-Za-z0-9_.-]/_}.$$.log"
+
+    if ! "$@" >"$log_file" 2>&1; then
+        print_error "$label failed. Log: $log_file"
+        tail -n 20 "$log_file" >&3 2>/dev/null || true
+        exit 1
+    fi
+}
+
 function spinner() {
     local pid=$1
     local msg=$2
     local delay=0.1
     local spinstr='|/-\'
     tput civis >&3 2>/dev/null || true
-    while kill -0 $pid 2>/dev/null; do
+    while kill -0 "$pid" 2>/dev/null; do
         local temp=${spinstr#?}
         printf "\r${MAGENTA}${BOLD}[%c]${RESET} ${msg}" "$spinstr" >&3
-        local spinstr=$temp${spinstr%"$temp"}
+        spinstr=$temp${spinstr%"$temp"}
         sleep $delay
     done
-    wait $pid
+    set +e
+    wait "$pid"
     local exit_code=$?
-    if [ $exit_code -eq 0 ]; then
+    set -e
+    if [ "$exit_code" -eq 0 ]; then
         printf "\r${GREEN}${BOLD}[✔]${RESET} ${msg}                               \n" >&3
     else
         printf "\r${RED}${BOLD}[✖]${RESET} ${msg} (Failed)                      \n" >&3
@@ -94,6 +142,7 @@ print_header
 INSTALL_DIR="${HOME}/.mirror_neuron"
 BIN_DIR="${HOME}/.local/bin"
 VENV_DIR="${HOME}/.local/share/mn_venv"
+SOURCE_WORKSPACE="$(find_source_workspace || true)"
 
 if [ -d "$INSTALL_DIR" ] || [ -f "$BIN_DIR/mn" ]; then
     print_warning "MirrorNeuron appears to be already installed."
@@ -194,53 +243,66 @@ EOF
 spinner $! "Cloning and building Core (Docker image mirror-neuron-core)"
 
 print_step "Installing Python CLI & API"
+if [ -n "$SOURCE_WORKSPACE" ]; then
+    print_success "Using local Python sources from $SOURCE_WORKSPACE."
+else
+    print_warning "Local Python sources were not found; falling back to anonymous GitHub installs."
+    print_warning "Run from a mirror-neuron-set checkout or set MN_SOURCE_DIR=/path/to/mirror-neuron-set to use local packages."
+fi
 (
     python3 -m venv "$VENV_DIR" >/dev/null 2>&1
-    "$VENV_DIR/bin/pip" install --upgrade pip >/dev/null 2>&1
+    run_quiet "pip-upgrade" "$VENV_DIR/bin/pip" install --upgrade pip
     
-    # Use local directories if available (for testing/development)
-    SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-    PARENT_DIR="$( dirname "$SCRIPT_DIR" )"
-    
-    if [ -d "$PARENT_DIR/mn-python-sdk" ]; then
-        "$VENV_DIR/bin/pip" install "$PARENT_DIR/mn-python-sdk" >/dev/null 2>&1
+    if [ -n "$SOURCE_WORKSPACE" ]; then
+        run_quiet "install-mn-python-sdk-local" "$VENV_DIR/bin/pip" install "$SOURCE_WORKSPACE/mn-python-sdk"
     else
-        "$VENV_DIR/bin/pip" install git+https://github.com/MirrorNeuronLab/mn-python-sdk.git >/dev/null 2>&1
+        run_quiet "install-mn-python-sdk-github" "$VENV_DIR/bin/pip" install git+https://github.com/MirrorNeuronLab/mn-python-sdk.git
     fi
 
-    if [ -d "$PARENT_DIR/mn-skills/blueprint_support_skill" ]; then
-        "$VENV_DIR/bin/pip" install "$PARENT_DIR/mn-skills/blueprint_support_skill" >/dev/null 2>&1
+    if [ -n "$SOURCE_WORKSPACE" ]; then
+        run_quiet "install-blueprint-support-skill-local" "$VENV_DIR/bin/pip" install "$SOURCE_WORKSPACE/mn-skills/blueprint_support_skill"
     else
-        "$VENV_DIR/bin/pip" install "git+https://github.com/MirrorNeuronLab/mn-skills.git#subdirectory=blueprint_support_skill" >/dev/null 2>&1
+        run_quiet "install-blueprint-support-skill-github" "$VENV_DIR/bin/pip" install "git+https://github.com/MirrorNeuronLab/mn-skills.git#subdirectory=blueprint_support_skill"
     fi
     
-    if [ -d "$PARENT_DIR/mn-cli" ]; then
-        "$VENV_DIR/bin/pip" install "$PARENT_DIR/mn-cli" >/dev/null 2>&1
+    if [ -n "$SOURCE_WORKSPACE" ]; then
+        run_quiet "install-mn-cli-local" "$VENV_DIR/bin/pip" install "$SOURCE_WORKSPACE/mn-cli"
     else
-        "$VENV_DIR/bin/pip" install git+https://github.com/MirrorNeuronLab/mn-cli.git >/dev/null 2>&1
+        run_quiet "install-mn-cli-github" "$VENV_DIR/bin/pip" install git+https://github.com/MirrorNeuronLab/mn-cli.git
     fi
     
-    if [ -d "$PARENT_DIR/mn-api" ]; then
-        "$VENV_DIR/bin/pip" install "$PARENT_DIR/mn-api" >/dev/null 2>&1
+    if [ -n "$SOURCE_WORKSPACE" ]; then
+        run_quiet "install-mn-api-local" "$VENV_DIR/bin/pip" install "$SOURCE_WORKSPACE/mn-api"
     else
-        "$VENV_DIR/bin/pip" install git+https://github.com/MirrorNeuronLab/mn-api.git >/dev/null 2>&1
+        run_quiet "install-mn-api-github" "$VENV_DIR/bin/pip" install git+https://github.com/MirrorNeuronLab/mn-api.git
     fi
 ) &
 spinner $! "Setting up virtualenv and installing Python packages"
 
 if [ "$INSTALL_WEB_UI" = "Y" ]; then
     print_step "Installing Web UI"
+    if [ -n "$SOURCE_WORKSPACE" ] && [ -d "$SOURCE_WORKSPACE/mn-web-ui" ]; then
+        print_success "Using local Web UI source from $SOURCE_WORKSPACE/mn-web-ui."
+    fi
     (
         UI_DIR="${INSTALL_DIR}_ui"
-        if [ -d "$UI_DIR" ]; then
+        if [ -n "$SOURCE_WORKSPACE" ] && [ -d "$SOURCE_WORKSPACE/mn-web-ui" ]; then
+            cd "$SOURCE_WORKSPACE/mn-web-ui"
+            run_quiet "web-ui-npm-install-local" npm install
+            run_quiet "web-ui-npm-build-local" npm run build
+            rm -rf "$UI_DIR"
+            ln -s "$SOURCE_WORKSPACE/mn-web-ui" "$UI_DIR"
+        elif [ -d "$UI_DIR" ]; then
             cd "$UI_DIR"
             git pull origin main >/dev/null 2>&1 || true
+            run_quiet "web-ui-npm-install-existing" npm install
+            run_quiet "web-ui-npm-build-existing" npm run build
         else
-            git clone https://github.com/MirrorNeuronLab/mn-web-ui.git "$UI_DIR" >/dev/null 2>&1
+            run_quiet "web-ui-git-clone" git clone https://github.com/MirrorNeuronLab/mn-web-ui.git "$UI_DIR"
             cd "$UI_DIR"
+            run_quiet "web-ui-npm-install-github" npm install
+            run_quiet "web-ui-npm-build-github" npm run build
         fi
-        npm install >/dev/null 2>&1
-        npm run build >/dev/null 2>&1
     ) &
     spinner $! "Cloning and building Web UI (React)"
 fi
