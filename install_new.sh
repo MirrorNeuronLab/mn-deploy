@@ -22,6 +22,7 @@ VENV_DIR="${HOME}/.local/share/mn_venv"
 UI_DIR="${INSTALL_DIR}_ui"
 CORE_REPO="${MN_CORE_REPO:-MirrorNeuronLab/MirrorNeuron}"
 CORE_RELEASE_TAG="${MN_CORE_RELEASE_TAG:-latest}"
+INSTALL_METADATA_FILE="${INSTALL_DIR}/install_metadata.json"
 
 function print_header() {
     echo -e "${MAGENTA}${BOLD}" >&3
@@ -227,13 +228,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /opt/mirror_neuron
 COPY mirror_neuron /opt/mirror_neuron
 
+ARG CORE_RELEASE_TAG
+LABEL org.opencontainers.image.version="${CORE_RELEASE_TAG}"
+
 ENV HOME=/opt/mirror_neuron
 EXPOSE 50051 4369 9000-9010
 
 CMD ["bin/mirror_neuron", "foreground"]
 EOF
 
-    docker build -t mirror-neuron-core:latest "$context_dir" >/dev/null
+    docker build --build-arg "CORE_RELEASE_TAG=$tag" -t mirror-neuron-core:latest "$context_dir" >/dev/null
+    cat > "$INSTALL_METADATA_FILE" <<EOF
+{
+  "core_release_tag": "$tag",
+  "core_platform": "$platform",
+  "core_asset_url": "$asset_url",
+  "updated_at": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+}
+EOF
     rm -rf "$work_dir"
 }
 
