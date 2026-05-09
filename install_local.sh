@@ -32,6 +32,7 @@ SKILLS_DIR="${WORKSPACE_DIR}/mn-skills"
 BLUEPRINTS_DIR="${WORKSPACE_DIR}/mn-blueprints"
 DOCS_DIR="${WORKSPACE_DIR}/mn-docs"
 SYSTEM_TESTS_DIR="${WORKSPACE_DIR}/mn-system-tests"
+MN_PYTHON_BIN=""
 
 INSTALL_WEB_UI="Y"
 INSTALL_REDIS="Y"
@@ -57,6 +58,70 @@ function print_success() { echo -e "${GREEN}${BOLD}==>${RESET} ${GREEN}$1${RESET
 function print_error() { echo -e "${RED}${BOLD}==>${RESET} ${RED}$1${RESET}" >&3; }
 function print_warning() { echo -e "${YELLOW}${BOLD}==>${RESET} ${YELLOW}$1${RESET}" >&3; }
 
+function python_version() {
+    "$1" -c 'import sys; print(".".join(str(part) for part in sys.version_info[:3]))' 2>/dev/null
+}
+
+function python_is_supported() {
+    "$1" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)' >/dev/null 2>&1
+}
+
+function print_python_requirement_error() {
+    local selected="${1:-}"
+    local version=""
+
+    print_error "MirrorNeuron Python components require Python 3.11 or newer."
+    if [ -n "$selected" ]; then
+        version="$(python_version "$selected" || true)"
+        if [ -n "$version" ]; then
+            print_error "Selected Python '$selected' is version $version."
+        else
+            print_error "Selected Python '$selected' could not be run."
+        fi
+    fi
+    print_error "Install Python 3.11 with Homebrew, for example: brew install python@3.11"
+    print_error "Then rerun with: MN_PYTHON=/opt/homebrew/bin/python3.11 ./$(basename "$0")"
+}
+
+function resolve_python_runtime() {
+    local candidate resolved
+    local candidates=()
+
+    if [ -n "$MN_PYTHON_BIN" ]; then
+        return
+    fi
+
+    if [ -n "${MN_PYTHON:-}" ]; then
+        candidates+=("$MN_PYTHON")
+    else
+        candidates+=(python3.11 python3.12 python3)
+    fi
+
+    for candidate in "${candidates[@]}"; do
+        resolved="$(command -v "$candidate" 2>/dev/null || true)"
+        if [ -z "$resolved" ]; then
+            if [ -n "${MN_PYTHON:-}" ]; then
+                print_python_requirement_error "$candidate"
+                exit 1
+            fi
+            continue
+        fi
+        if python_is_supported "$resolved"; then
+            MN_PYTHON_BIN="$resolved"
+            print_success "Using Python $(python_version "$MN_PYTHON_BIN") at $MN_PYTHON_BIN."
+            return
+        fi
+        if [ -n "${MN_PYTHON:-}" ]; then
+            print_python_requirement_error "$resolved"
+            exit 1
+        fi
+    done
+
+    resolved="$(command -v python3 2>/dev/null || true)"
+    print_python_requirement_error "$resolved"
+    exit 1
+}
+
 function usage() {
     cat >&3 <<EOF
 Usage: ./install_local.sh [options]
@@ -72,6 +137,7 @@ Options:
   --openshell           Try to use a local OpenShell folder if present.
   --no-skills           Skip editable install of packages under mn-skills.
   --start               Start MirrorNeuron after install.
+  MN_PYTHON=/path       Use a specific Python 3.11+ interpreter.
   -h, --help            Show this help.
 EOF
 }
@@ -276,6 +342,9 @@ require_dir "$PY_SDK_DIR" "mn-python-sdk"
 if [ "$INSTALL_WEB_UI" = "Y" ]; then require_dir "$WEB_UI_DIR" "mn-web-ui"; fi
 if [ "$INSTALL_SKILLS" = "Y" ]; then require_dir "$SKILLS_DIR" "mn-skills"; fi
 
+print_step "Checking Python runtime"
+resolve_python_runtime
+
 if [ -d "$INSTALL_DIR" ] || [ -L "$INSTALL_DIR" ] || [ -d "$VENV_DIR" ] || [ -f "$BIN_DIR/mn" ]; then
     print_warning "MirrorNeuron appears to be already installed."
     if [ "$REINSTALL" != "N" ]; then
@@ -306,12 +375,13 @@ fi
 echo "" >&3
 
 print_step "Checking dependencies"
-for cmd in python3 docker; do
+for cmd in docker; do
     if ! command -v "$cmd" >/dev/null 2>&1; then
         print_error "'$cmd' is required but not installed."
         exit 1
     fi
 done
+resolve_python_runtime
 
 if [ "$INSTALL_WEB_UI" = "Y" ]; then
     if ! command -v npm >/dev/null 2>&1; then
@@ -361,7 +431,7 @@ fi
 
 print_step "Installing Python components from local source"
 (
-    python3 -m venv "$VENV_DIR" >/dev/null
+    "$MN_PYTHON_BIN" -m venv "$VENV_DIR" >/dev/null
     "$VENV_DIR/bin/pip" install --upgrade pip >/dev/null
     "$VENV_DIR/bin/pip" install -e "$PY_SDK_DIR" >/dev/null
     if [ -d "$SKILLS_DIR/blueprint_support_skill" ]; then

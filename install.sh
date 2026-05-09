@@ -20,6 +20,12 @@ CYAN="\033[36m"
 MAGENTA="\033[35m"
 RESET="\033[0m"
 
+MN_MANAGED_PYTHON="${MN_MANAGED_PYTHON:-1}"
+MN_MANAGED_PYTHON_VERSION="${MN_MANAGED_PYTHON_VERSION:-3.11}"
+MN_MANAGED_PYTHON_ROOT="${MN_MANAGED_PYTHON_DIR:-${HOME}/.local/share/mn_python}"
+MN_UV_ROOT="${MN_UV_DIR:-${HOME}/.local/share/mn_uv}"
+MN_UV_BIN=""
+
 function print_header() {
     echo -e "${MAGENTA}${BOLD}" >&3
     echo "  __  __ _                     _   _                           " >&3
@@ -137,12 +143,223 @@ function ask() {
     esac
 }
 
+function python_version() {
+    "$1" -c 'import sys; print(".".join(str(part) for part in sys.version_info[:3]))' 2>/dev/null
+}
+
+function python_is_supported() {
+    "$1" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)' >/dev/null 2>&1
+}
+
+function python_minor_version() {
+    "$1" -c 'import sys; print(".".join(str(part) for part in sys.version_info[:2]))' 2>/dev/null
+}
+
+function curl_github() {
+    local token="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+    if [ -n "$token" ]; then
+        curl -H "Authorization: Bearer $token" "$@"
+    else
+        curl "$@"
+    fi
+}
+
+function managed_python_enabled() {
+    case "$MN_MANAGED_PYTHON" in
+        0|false|FALSE|False|no|NO|No|n|N) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+function validate_managed_python_version() {
+    if [[ ! "$MN_MANAGED_PYTHON_VERSION" =~ ^[0-9]+[.][0-9]+$ ]]; then
+        print_error "MN_MANAGED_PYTHON_VERSION must be a Python minor version like 3.11."
+        exit 1
+    fi
+}
+
+function install_uv() {
+    local os uv_bin_dir installer
+    os="$(uname -s)"
+
+    case "$os" in
+        Darwin|Linux) ;;
+        *)
+            print_error "Unsupported platform for uv-managed Python: ${os}."
+            print_error "Set MN_PYTHON=/path/to/python3.11 and rerun."
+            exit 1
+            ;;
+    esac
+
+    if ! command -v curl >/dev/null 2>&1; then
+        print_error "'curl' is required to install uv."
+        exit 1
+    fi
+
+    uv_bin_dir="${MN_UV_ROOT}/bin"
+    installer="$(mktemp "${TMPDIR:-/tmp}/mn-uv-install.XXXXXX")"
+    mkdir -p "$uv_bin_dir"
+
+    print_step "Installing uv for private Python management"
+    if ! curl_github -fsSL "https://astral.sh/uv/install.sh" -o "$installer"; then
+        rm -f "$installer"
+        print_error "Could not download the uv installer."
+        print_error "Install uv manually or set MN_PYTHON=/path/to/python3.11."
+        exit 1
+    fi
+
+    if ! UV_UNMANAGED_INSTALL="$uv_bin_dir" sh "$installer" >/dev/null 2>&1; then
+        rm -f "$installer"
+        print_error "Could not install uv."
+        print_error "Install uv manually or set MN_PYTHON=/path/to/python3.11."
+        exit 1
+    fi
+    rm -f "$installer"
+
+    MN_UV_BIN="$uv_bin_dir/uv"
+    if [ ! -x "$MN_UV_BIN" ]; then
+        print_error "uv installer did not create $MN_UV_BIN."
+        exit 1
+    fi
+
+    print_success "Installed uv at $MN_UV_BIN."
+}
+
+function resolve_uv() {
+    if [ -n "$MN_UV_BIN" ]; then
+        return
+    fi
+
+    MN_UV_BIN="$(command -v uv 2>/dev/null || true)"
+    if [ -n "$MN_UV_BIN" ]; then
+        return
+    fi
+
+    MN_UV_BIN="${MN_UV_ROOT}/bin/uv"
+    if [ -x "$MN_UV_BIN" ]; then
+        return
+    fi
+
+    install_uv
+}
+
+function managed_python_is_expected() {
+    local python_bin="$1"
+    [ -x "$python_bin" ] && \
+    python_is_supported "$python_bin" && \
+    [ "$(python_minor_version "$python_bin" || true)" = "$MN_MANAGED_PYTHON_VERSION" ]
+}
+
+function find_uv_managed_python() {
+    UV_PYTHON_INSTALL_DIR="$MN_MANAGED_PYTHON_ROOT" \
+    UV_CACHE_DIR="${MN_UV_ROOT}/cache" \
+    "$MN_UV_BIN" python find --managed-python --no-python-downloads "$MN_MANAGED_PYTHON_VERSION" 2>/dev/null || true
+}
+
+function install_managed_python() {
+    validate_managed_python_version
+
+    local managed_bin
+
+    print_step "Resolving private Python ${MN_MANAGED_PYTHON_VERSION} runtime with uv"
+    print_warning "No Python 3.11+ interpreter was found; uv will manage a private runtime under ${MN_MANAGED_PYTHON_ROOT}."
+    resolve_uv
+
+    managed_bin="$(find_uv_managed_python)"
+    if ! managed_python_is_expected "$managed_bin"; then
+        run_quiet "uv-python-install" env \
+            "UV_PYTHON_INSTALL_DIR=$MN_MANAGED_PYTHON_ROOT" \
+            "UV_CACHE_DIR=${MN_UV_ROOT}/cache" \
+            "UV_NO_PROGRESS=1" \
+            "$MN_UV_BIN" python install "$MN_MANAGED_PYTHON_VERSION"
+        managed_bin="$(find_uv_managed_python)"
+    fi
+    if [ -z "$managed_bin" ]; then
+        managed_bin="$(find "$MN_MANAGED_PYTHON_ROOT" -path '*/bin/python3' -print | head -n 1 || true)"
+    fi
+
+    if ! managed_python_is_expected "$managed_bin"; then
+        print_error "Managed Python install did not produce Python ${MN_MANAGED_PYTHON_VERSION} at ${managed_bin}."
+        exit 1
+    fi
+
+    MN_PYTHON_BIN="$managed_bin"
+    print_success "Using uv-managed Python $(python_version "$managed_bin") at $managed_bin."
+}
+
+function print_python_requirement_error() {
+    local selected="${1:-}"
+    local version=""
+
+    print_error "MirrorNeuron Python components require Python 3.11 or newer."
+    if [ -n "$selected" ]; then
+        version="$(python_version "$selected" || true)"
+        if [ -n "$version" ]; then
+            print_error "Selected Python '$selected' is version $version."
+        else
+            print_error "Selected Python '$selected' could not be run."
+        fi
+    fi
+    print_error "Install Python 3.11 yourself, or allow the uv-managed private runtime fallback."
+    print_error "You can also rerun with: MN_PYTHON=/opt/homebrew/bin/python3.11 ./$(basename "$0")"
+}
+
+function resolve_python_runtime() {
+    local candidate resolved
+    local candidates=()
+
+    if [ -n "$MN_PYTHON_BIN" ]; then
+        return
+    fi
+
+    if [ -n "${MN_PYTHON:-}" ]; then
+        candidates+=("$MN_PYTHON")
+    else
+        candidates+=(python3.11 python3.12 python3)
+    fi
+
+    for candidate in "${candidates[@]}"; do
+        resolved="$(command -v "$candidate" 2>/dev/null || true)"
+        if [ -z "$resolved" ]; then
+            if [ -n "${MN_PYTHON:-}" ]; then
+                print_python_requirement_error "$candidate"
+                exit 1
+            fi
+            continue
+        fi
+        if python_is_supported "$resolved"; then
+            MN_PYTHON_BIN="$resolved"
+            print_success "Using Python $(python_version "$MN_PYTHON_BIN") at $MN_PYTHON_BIN."
+            return
+        fi
+        if [ -n "${MN_PYTHON:-}" ]; then
+            print_python_requirement_error "$resolved"
+            exit 1
+        fi
+    done
+
+    if managed_python_enabled; then
+        install_managed_python
+        print_success "Using Python $(python_version "$MN_PYTHON_BIN") at $MN_PYTHON_BIN."
+        return
+    fi
+
+    print_warning "Managed Python fallback is disabled."
+    resolved="$(command -v python3 2>/dev/null || true)"
+    print_python_requirement_error "$resolved"
+    exit 1
+}
+
 print_header
 
 INSTALL_DIR="${HOME}/.mirror_neuron"
 BIN_DIR="${HOME}/.local/bin"
 VENV_DIR="${HOME}/.local/share/mn_venv"
+MN_PYTHON_BIN=""
 SOURCE_WORKSPACE="$(find_source_workspace || true)"
+
+print_step "Checking Python runtime"
+resolve_python_runtime
 
 if [ -d "$INSTALL_DIR" ] || [ -f "$BIN_DIR/mn" ]; then
     print_warning "MirrorNeuron appears to be already installed."
@@ -166,12 +383,13 @@ echo "" >&3
 
 print_step "Checking Dependencies"
 
-for cmd in git python3; do
+for cmd in git; do
     if ! command -v $cmd &> /dev/null; then
         print_error "'$cmd' is required but not installed."
         exit 1
     fi
 done
+resolve_python_runtime
 
 if [ "$INSTALL_WEB_UI" = "Y" ] && ! command -v npm &> /dev/null; then
     print_error "'npm' is required for Web UI but not installed."
@@ -250,7 +468,7 @@ else
     print_warning "Run from a mirror-neuron-set checkout or set MN_SOURCE_DIR=/path/to/mirror-neuron-set to use local packages."
 fi
 (
-    python3 -m venv "$VENV_DIR" >/dev/null 2>&1
+    "$MN_PYTHON_BIN" -m venv "$VENV_DIR" >/dev/null 2>&1
     run_quiet "pip-upgrade" "$VENV_DIR/bin/pip" install --upgrade pip
     
     if [ -n "$SOURCE_WORKSPACE" ]; then
