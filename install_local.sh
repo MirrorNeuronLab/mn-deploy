@@ -33,6 +33,11 @@ BLUEPRINTS_DIR="${WORKSPACE_DIR}/mn-blueprints"
 DOCS_DIR="${WORKSPACE_DIR}/mn-docs"
 SYSTEM_TESTS_DIR="${WORKSPACE_DIR}/mn-system-tests"
 MN_PYTHON_BIN=""
+MN_MANAGED_PYTHON="${MN_MANAGED_PYTHON:-1}"
+MN_MANAGED_PYTHON_VERSION="${MN_MANAGED_PYTHON_VERSION:-3.11}"
+MN_MANAGED_PYTHON_ROOT="${MN_MANAGED_PYTHON_DIR:-${HOME}/.local/share/mn_python}"
+MN_UV_ROOT="${MN_UV_DIR:-${HOME}/.local/share/mn_uv}"
+MN_UV_BIN=""
 
 INSTALL_WEB_UI="Y"
 INSTALL_REDIS="Y"
@@ -58,12 +63,162 @@ function print_success() { echo -e "${GREEN}${BOLD}==>${RESET} ${GREEN}$1${RESET
 function print_error() { echo -e "${RED}${BOLD}==>${RESET} ${RED}$1${RESET}" >&3; }
 function print_warning() { echo -e "${YELLOW}${BOLD}==>${RESET} ${YELLOW}$1${RESET}" >&3; }
 
+function run_quiet() {
+    local label="$1"
+    shift
+    local log_dir="${TMPDIR:-/tmp}/mirror_neuron_install"
+    mkdir -p "$log_dir"
+    local log_file="${log_dir}/${label//[^A-Za-z0-9_.-]/_}.$$.log"
+
+    if ! "$@" >"$log_file" 2>&1; then
+        print_error "$label failed. Log: $log_file"
+        tail -n 20 "$log_file" >&3 2>/dev/null || true
+        exit 1
+    fi
+}
+
 function python_version() {
     "$1" -c 'import sys; print(".".join(str(part) for part in sys.version_info[:3]))' 2>/dev/null
 }
 
 function python_is_supported() {
     "$1" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)' >/dev/null 2>&1
+}
+
+function python_minor_version() {
+    "$1" -c 'import sys; print(".".join(str(part) for part in sys.version_info[:2]))' 2>/dev/null
+}
+
+function curl_github() {
+    local token="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+    if [ -n "$token" ]; then
+        curl -H "Authorization: Bearer $token" "$@"
+    else
+        curl "$@"
+    fi
+}
+
+function managed_python_enabled() {
+    case "$MN_MANAGED_PYTHON" in
+        0|false|FALSE|False|no|NO|No|n|N) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+function validate_managed_python_version() {
+    if [[ ! "$MN_MANAGED_PYTHON_VERSION" =~ ^[0-9]+[.][0-9]+$ ]]; then
+        print_error "MN_MANAGED_PYTHON_VERSION must be a Python minor version like 3.11."
+        exit 1
+    fi
+}
+
+function install_uv() {
+    local os uv_bin_dir installer
+    os="$(uname -s)"
+
+    case "$os" in
+        Darwin|Linux) ;;
+        *)
+            print_error "Unsupported platform for uv-managed Python: ${os}."
+            print_error "Set MN_PYTHON=/path/to/python3.11 and rerun."
+            exit 1
+            ;;
+    esac
+
+    if ! command -v curl >/dev/null 2>&1; then
+        print_error "'curl' is required to install uv."
+        exit 1
+    fi
+
+    uv_bin_dir="${MN_UV_ROOT}/bin"
+    installer="$(mktemp "${TMPDIR:-/tmp}/mn-uv-install.XXXXXX")"
+    mkdir -p "$uv_bin_dir"
+
+    print_step "Installing uv for private Python management"
+    if ! curl_github -fsSL "https://astral.sh/uv/install.sh" -o "$installer"; then
+        rm -f "$installer"
+        print_error "Could not download the uv installer."
+        print_error "Install uv manually or set MN_PYTHON=/path/to/python3.11."
+        exit 1
+    fi
+
+    if ! UV_UNMANAGED_INSTALL="$uv_bin_dir" sh "$installer" >/dev/null 2>&1; then
+        rm -f "$installer"
+        print_error "Could not install uv."
+        print_error "Install uv manually or set MN_PYTHON=/path/to/python3.11."
+        exit 1
+    fi
+    rm -f "$installer"
+
+    MN_UV_BIN="$uv_bin_dir/uv"
+    if [ ! -x "$MN_UV_BIN" ]; then
+        print_error "uv installer did not create $MN_UV_BIN."
+        exit 1
+    fi
+
+    print_success "Installed uv at $MN_UV_BIN."
+}
+
+function resolve_uv() {
+    if [ -n "$MN_UV_BIN" ]; then
+        return
+    fi
+
+    MN_UV_BIN="$(command -v uv 2>/dev/null || true)"
+    if [ -n "$MN_UV_BIN" ]; then
+        return
+    fi
+
+    MN_UV_BIN="${MN_UV_ROOT}/bin/uv"
+    if [ -x "$MN_UV_BIN" ]; then
+        return
+    fi
+
+    install_uv
+}
+
+function managed_python_is_expected() {
+    local python_bin="$1"
+    [ -x "$python_bin" ] && \
+    python_is_supported "$python_bin" && \
+    [ "$(python_minor_version "$python_bin" || true)" = "$MN_MANAGED_PYTHON_VERSION" ]
+}
+
+function find_uv_managed_python() {
+    UV_PYTHON_INSTALL_DIR="$MN_MANAGED_PYTHON_ROOT" \
+    UV_CACHE_DIR="${MN_UV_ROOT}/cache" \
+    "$MN_UV_BIN" python find --managed-python --no-python-downloads "$MN_MANAGED_PYTHON_VERSION" 2>/dev/null || true
+}
+
+function install_managed_python() {
+    validate_managed_python_version
+
+    local managed_bin
+
+    print_step "Resolving private Python ${MN_MANAGED_PYTHON_VERSION} runtime with uv"
+    print_warning "No Python 3.11+ interpreter was found; uv will manage a private runtime under ${MN_MANAGED_PYTHON_ROOT}."
+    resolve_uv
+
+    managed_bin="$(find_uv_managed_python)"
+    if ! managed_python_is_expected "$managed_bin"; then
+        run_quiet "uv-python-install" env \
+            "UV_PYTHON_INSTALL_DIR=$MN_MANAGED_PYTHON_ROOT" \
+            "UV_CACHE_DIR=${MN_UV_ROOT}/cache" \
+            "UV_NO_PROGRESS=1" \
+            "$MN_UV_BIN" python install "$MN_MANAGED_PYTHON_VERSION"
+        managed_bin="$(find_uv_managed_python)"
+    fi
+    if [ -z "$managed_bin" ]; then
+        managed_bin="$(find "$MN_MANAGED_PYTHON_ROOT" -path '*/bin/python3' -print | head -n 1 || true)"
+    fi
+
+    if ! managed_python_is_expected "$managed_bin"; then
+        print_error "Managed Python install did not produce Python ${MN_MANAGED_PYTHON_VERSION} at ${managed_bin}."
+        exit 1
+    fi
+
+    MN_PYTHON_BIN="$managed_bin"
+    print_success "Using uv-managed Python $(python_version "$managed_bin") at $managed_bin."
 }
 
 function print_python_requirement_error() {
@@ -79,8 +234,8 @@ function print_python_requirement_error() {
             print_error "Selected Python '$selected' could not be run."
         fi
     fi
-    print_error "Install Python 3.11 with Homebrew, for example: brew install python@3.11"
-    print_error "Then rerun with: MN_PYTHON=/opt/homebrew/bin/python3.11 ./$(basename "$0")"
+    print_error "Install Python 3.11 yourself, or allow the uv-managed private runtime fallback."
+    print_error "You can also rerun with: MN_PYTHON=/opt/homebrew/bin/python3.11 ./$(basename "$0")"
 }
 
 function resolve_python_runtime() {
@@ -118,6 +273,12 @@ function resolve_python_runtime() {
     done
 
     resolved="$(command -v python3 2>/dev/null || true)"
+    if managed_python_enabled; then
+        install_managed_python
+        return
+    fi
+
+    print_warning "Managed Python fallback is disabled."
     print_python_requirement_error "$resolved"
     exit 1
 }
@@ -137,7 +298,9 @@ Options:
   --openshell           Try to use a local OpenShell folder if present.
   --no-skills           Skip editable install of packages under mn-skills.
   --start               Start MirrorNeuron after install.
+  --no-managed-python   Do not use uv to install a private Python runtime.
   MN_PYTHON=/path       Use a specific Python 3.11+ interpreter.
+  MN_MANAGED_PYTHON=0   Disable uv-managed private Python fallback.
   -h, --help            Show this help.
 EOF
 }
@@ -151,6 +314,7 @@ for arg in "$@"; do
         --openshell) INSTALL_OPENSHELL="Y" ;;
         --no-skills) INSTALL_SKILLS="N" ;;
         --start) START_NOW="Y" ;;
+        --no-managed-python) MN_MANAGED_PYTHON=0 ;;
         -h|--help) usage; exit 0 ;;
         *)
             print_error "Unknown option: $arg"

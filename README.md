@@ -22,7 +22,7 @@ This repository keeps shell scripts used to install, start, stop, and remove a l
 - macOS, Linux, or WSL2.
 - `curl`
 - `docker` with a running Docker daemon.
-- Python 3.11 or newer when installing Python components. If none is found, `install_bin.sh` installs `uv`, lets `uv` download a private Python 3.11 runtime under `~/.local/share/mn_python`, and creates the MirrorNeuron venv from it.
+- Python 3.11 or newer when installing Python components. If none is found, `install_bin.sh`, `install_new.sh`, `install.sh`, and `install_local.sh` install `uv`, let `uv` download a private Python 3.11 runtime under `~/.local/share/mn_python`, and create the MirrorNeuron venv from it.
 - `pip` or Python `ensurepip` for the selected Python interpreter.
 - `npm` when installing the Web UI.
 - Network access to GitHub Releases, PyPI, npm, and Docker registries.
