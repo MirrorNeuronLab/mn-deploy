@@ -440,6 +440,10 @@ function start_core_container() {
         cmd+=("-e" "MN_REDIS_URL=redis://host.docker.internal:6379/0")
         cmd+=("-e" "MN_CORE_HOST=0.0.0.0")
         cmd+=("-e" "MN_EXECUTOR_MAX_CONCURRENCY=50")
+        if [ -d "$HOME/.config/openshell/gateways/openshell" ]; then
+            cmd+=("-v" "$HOME/.config/openshell:/root/.config/openshell:ro")
+            cmd+=("-e" "OPENSHELL_GATEWAY_ENDPOINT=${OPENSHELL_GATEWAY_ENDPOINT:-https://host.docker.internal:${OPENSHELL_GATEWAY_PORT:-8080}}")
+        fi
     else
         cmd+=("--network" "host")
         cmd+=("-e" "MN_CORE_HOST=${core_host}")
