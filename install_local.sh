@@ -41,7 +41,7 @@ MN_UV_BIN=""
 
 INSTALL_WEB_UI="Y"
 INSTALL_REDIS="Y"
-INSTALL_OPENSHELL="N"
+INSTALL_OPENSHELL="Y"
 INSTALL_SKILLS="Y"
 START_NOW="N"
 REINSTALL="Y"
@@ -295,7 +295,8 @@ Options:
   --no-reinstall        Keep the existing venv/state where possible.
   --no-web-ui           Skip local Web UI npm install/build.
   --no-redis            Skip Redis Docker setup.
-  --openshell           Try to use a local OpenShell folder if present.
+  --openshell           Install/start OpenShell gateway for sandbox workers.
+  --no-openshell        Skip OpenShell gateway setup.
   --no-skills           Skip editable install of packages under mn-skills.
   --start               Start MirrorNeuron after install.
   --no-managed-python   Do not use uv to install a private Python runtime.
@@ -312,6 +313,7 @@ for arg in "$@"; do
         --no-web-ui) INSTALL_WEB_UI="N" ;;
         --no-redis) INSTALL_REDIS="N" ;;
         --openshell) INSTALL_OPENSHELL="Y" ;;
+        --no-openshell) INSTALL_OPENSHELL="N" ;;
         --no-skills) INSTALL_SKILLS="N" ;;
         --start) START_NOW="Y" ;;
         --no-managed-python) MN_MANAGED_PYTHON=0 ;;
@@ -421,6 +423,9 @@ function core_container_running() {
 
 function start_core_container() {
     local cmd=("docker" "run" "-d" "--name" "mirror-neuron-core")
+    local openshell_config_dir="$HOME/.config/openshell"
+    local openshell_container_config_dir="${OPENSHELL_CONTAINER_CONFIG_DIR:-$HOME/.config/openshell-mirror-neuron}"
+    local openshell_mount_dir="$openshell_config_dir"
     local core_host="${MN_CORE_HOST:-localhost}"
     local redis_host="${MN_REDIS_HOST:-localhost}"
     local epmd_host="${MN_EPMD_HOST:-localhost}"
@@ -440,16 +445,20 @@ function start_core_container() {
         cmd+=("-e" "MN_REDIS_URL=redis://host.docker.internal:6379/0")
         cmd+=("-e" "MN_CORE_HOST=0.0.0.0")
         cmd+=("-e" "MN_EXECUTOR_MAX_CONCURRENCY=50")
-        if [ -d "$HOME/.config/openshell/gateways/openshell" ]; then
-            cmd+=("-v" "$HOME/.config/openshell:/root/.config/openshell:ro")
-            cmd+=("-e" "OPENSHELL_GATEWAY_ENDPOINT=${OPENSHELL_GATEWAY_ENDPOINT:-https://host.docker.internal:${OPENSHELL_GATEWAY_PORT:-8080}}")
-        fi
     else
         cmd+=("--network" "host")
         cmd+=("-e" "MN_CORE_HOST=${core_host}")
         cmd+=("-e" "MN_REDIS_HOST=${redis_host}")
         cmd+=("-e" "ERL_EPMD_ADDRESS=${epmd_host}")
         cmd+=("-e" "MN_EXECUTOR_MAX_CONCURRENCY=50")
+    fi
+
+    if [ -d "$openshell_container_config_dir/gateways/openshell" ]; then
+        openshell_mount_dir="$openshell_container_config_dir"
+    fi
+    if [ -d "$openshell_mount_dir/gateways/openshell" ]; then
+        cmd+=("-v" "$openshell_mount_dir:/root/.config/openshell:ro")
+        cmd+=("-v" "$openshell_mount_dir:/opt/mirror_neuron/.config/openshell:ro")
     fi
 
     for env_name in \
@@ -471,6 +480,119 @@ function start_core_container() {
 function restart_core_container() {
     docker rm -f mirror-neuron-core >/dev/null 2>&1 || true
     start_core_container
+}
+
+function resolve_openshell_bin() {
+    if [ -n "${OPENSHELL_BIN:-}" ]; then
+        if [ -x "$OPENSHELL_BIN" ]; then
+            printf '%s\n' "$OPENSHELL_BIN"
+            return 0
+        fi
+        if command -v "$OPENSHELL_BIN" >/dev/null 2>&1; then
+            command -v "$OPENSHELL_BIN"
+            return 0
+        fi
+    fi
+
+    if command -v openshell >/dev/null 2>&1; then
+        command -v openshell
+        return 0
+    fi
+
+    if [ -x "$BIN_DIR/openshell" ]; then
+        printf '%s\n' "$BIN_DIR/openshell"
+        return 0
+    fi
+
+    if [ -x "$HOME/.local/bin/openshell" ]; then
+        printf '%s\n' "$HOME/.local/bin/openshell"
+        return 0
+    fi
+
+    return 1
+}
+
+function prepare_openshell_container_config() {
+    local gateway_host="$1"
+    local gateway_port="$2"
+    local source_root="$HOME/.config/openshell"
+    local source_gateway_dir="$source_root/gateways/openshell"
+    local target_root="${OPENSHELL_CONTAINER_CONFIG_DIR:-$HOME/.config/openshell-mirror-neuron}"
+    local target_gateway_dir="$target_root/gateways/openshell"
+
+    if [ -z "$gateway_host" ]; then
+        return 0
+    fi
+
+    if [ ! -d "$source_gateway_dir/mtls" ]; then
+        return 1
+    fi
+
+    rm -rf "$target_root"
+    mkdir -p "$target_gateway_dir"
+    cp "$source_root/active_gateway" "$target_root/active_gateway"
+    cp -R "$source_gateway_dir/mtls" "$target_gateway_dir/mtls"
+    if [ -f "$source_gateway_dir/last_sandbox" ]; then
+        cp "$source_gateway_dir/last_sandbox" "$target_gateway_dir/last_sandbox"
+    fi
+    cat > "$target_gateway_dir/metadata.json" <<EOF
+{
+  "name": "openshell",
+  "gateway_endpoint": "https://${gateway_host}:${gateway_port}",
+  "is_remote": false,
+  "gateway_port": ${gateway_port}
+}
+EOF
+}
+
+function setup_openshell_gateway() {
+    local version="${OPENSHELL_VERSION:-v0.0.16}"
+    local image_tag="${OPENSHELL_GATEWAY_IMAGE_TAG:-${version#v}}"
+    local gateway_image="${OPENSHELL_GATEWAY_IMAGE:-ghcr.io/nvidia/openshell/cluster:${image_tag}}"
+    local gateway_port="${OPENSHELL_GATEWAY_PORT:-8080}"
+    local container_gateway_host="${OPENSHELL_GATEWAY_HOST:-}"
+    local gateway_start_args=("gateway" "start" "--port" "$gateway_port")
+    local openshell_bin
+
+    if [ "$(uname -s)" = "Darwin" ] && [ -z "$container_gateway_host" ]; then
+        container_gateway_host="host.docker.internal"
+    fi
+
+    if [ -d "$WORKSPACE_DIR/OpenShell" ] && [ -f "$WORKSPACE_DIR/OpenShell/Dockerfile" ]; then
+        (
+            cd "$WORKSPACE_DIR/OpenShell"
+            docker build -t mirror-neuron-openshell:latest . >/dev/null
+        )
+    fi
+
+    openshell_bin="$(resolve_openshell_bin || true)"
+    if [ -z "$openshell_bin" ]; then
+        local installer="${TMPDIR:-/tmp}/mirror_neuron_openshell_install.sh"
+        curl -fLsS https://raw.githubusercontent.com/NVIDIA/OpenShell/main/install.sh -o "$installer"
+        OPENSHELL_VERSION="$version" sh "$installer" >/dev/null
+        rm -f "$installer"
+        openshell_bin="$(resolve_openshell_bin || true)"
+    fi
+
+    if [ -z "$openshell_bin" ]; then
+        print_error "OpenShell CLI install finished, but no openshell binary was found."
+        print_error "Set OPENSHELL_BIN=/path/to/openshell and rerun."
+        exit 1
+    fi
+
+    docker pull "$gateway_image" >/dev/null
+
+    if "$openshell_bin" status >/dev/null 2>&1 && NO_COLOR=1 "$openshell_bin" sandbox list >/dev/null 2>&1; then
+        prepare_openshell_container_config "$container_gateway_host" "$gateway_port"
+        return
+    fi
+
+    "$openshell_bin" "${gateway_start_args[@]}" >/dev/null 2>&1 || true
+    if ! NO_COLOR=1 "$openshell_bin" sandbox list >/dev/null 2>&1; then
+        "$openshell_bin" "${gateway_start_args[@]}" --recreate >/dev/null
+    fi
+    NO_COLOR=1 "$openshell_bin" sandbox list >/dev/null
+    prepare_openshell_container_config "$container_gateway_host" "$gateway_port"
 }
 
 function ensure_path_export() {
@@ -537,7 +659,7 @@ if [ "$NON_INTERACTIVE" != "Y" ]; then
     INSTALL_WEB_UI=$(ask "Install/build local Web UI?" "$INSTALL_WEB_UI")
     INSTALL_REDIS=$(ask "Install/start Redis via Docker?" "$INSTALL_REDIS")
     INSTALL_SKILLS=$(ask "Install local mn-skills packages in editable mode?" "$INSTALL_SKILLS")
-    INSTALL_OPENSHELL=$(ask "Use local OpenShell if a sibling folder exists?" "$INSTALL_OPENSHELL")
+    INSTALL_OPENSHELL=$(ask "Install/start OpenShell gateway for sandbox workers?" "$INSTALL_OPENSHELL")
     START_NOW=$(ask "Start MirrorNeuron server automatically after install?" "$START_NOW")
 fi
 echo "" >&3
@@ -549,6 +671,10 @@ for cmd in docker; do
         exit 1
     fi
 done
+if [ "$INSTALL_OPENSHELL" = "Y" ] && ! command -v curl >/dev/null 2>&1; then
+    print_error "'curl' is required to install/start OpenShell."
+    exit 1
+fi
 resolve_python_runtime
 
 if [ "$INSTALL_WEB_UI" = "Y" ]; then
@@ -588,14 +714,6 @@ print_step "Building MirrorNeuron Core Docker image from local source"
     docker build -t mirror-neuron-core:latest . >/dev/null
 ) &
 spinner $! "Built local core image mirror-neuron-core:latest"
-
-if [ "$CORE_WAS_RUNNING" = "Y" ]; then
-    print_step "Restarting MirrorNeuron gRPC Core from rebuilt image"
-    (
-        restart_core_container
-    ) &
-    spinner $! "Restarted MirrorNeuron gRPC Core"
-fi
 
 print_step "Installing Python components from local source"
 (
@@ -647,18 +765,17 @@ if [ "$INSTALL_REDIS" = "Y" ]; then
 fi
 
 if [ "$INSTALL_OPENSHELL" = "Y" ]; then
-    print_step "Checking local OpenShell"
-    if [ -d "$WORKSPACE_DIR/OpenShell" ]; then
-        (
-            cd "$WORKSPACE_DIR/OpenShell"
-            if [ -f Dockerfile ]; then
-                docker build -t mirror-neuron-openshell:latest . >/dev/null
-            fi
-        ) &
-        spinner $! "Configured local OpenShell"
-    else
-        print_warning "No local OpenShell folder found at ${WORKSPACE_DIR}/OpenShell. Skipping remote pull."
-    fi
+    print_step "Setting up OpenShell"
+    ( setup_openshell_gateway ) &
+    spinner $! "OpenShell gateway is available"
+fi
+
+if [ "$CORE_WAS_RUNNING" = "Y" ]; then
+    print_step "Restarting MirrorNeuron gRPC Core from rebuilt image"
+    (
+        restart_core_container
+    ) &
+    spinner $! "Restarted MirrorNeuron gRPC Core"
 fi
 
 print_step "Creating command symlinks"

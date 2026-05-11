@@ -68,11 +68,24 @@ start_services() {
 
     echo "=> Starting MirrorNeuron Core Service (Docker)..."
     docker rm -f mirror-neuron-core >/dev/null 2>&1 || true
-    docker run -d --name mirror-neuron-core --network host \
-        -e "MN_CORE_HOST=${MN_CORE_HOST:-localhost}" \
-        -e "MN_REDIS_HOST=${MN_REDIS_HOST:-localhost}" \
-        -e "ERL_EPMD_ADDRESS=${MN_EPMD_HOST:-localhost}" \
-        mirror-neuron-core:latest >/dev/null
+    core_cmd=(
+        docker run -d --name mirror-neuron-core --network host
+        -e "MN_CORE_HOST=${MN_CORE_HOST:-localhost}"
+        -e "MN_REDIS_HOST=${MN_REDIS_HOST:-localhost}"
+        -e "ERL_EPMD_ADDRESS=${MN_EPMD_HOST:-localhost}"
+    )
+    openshell_config_dir="$HOME/.config/openshell"
+    openshell_container_config_dir="${OPENSHELL_CONTAINER_CONFIG_DIR:-$HOME/.config/openshell-mirror-neuron}"
+    openshell_mount_dir="$openshell_config_dir"
+    if [ -d "$openshell_container_config_dir/gateways/openshell" ]; then
+        openshell_mount_dir="$openshell_container_config_dir"
+    fi
+    if [ -d "$openshell_mount_dir/gateways/openshell" ]; then
+        core_cmd+=("-v" "$openshell_mount_dir:/root/.config/openshell:ro")
+        core_cmd+=("-v" "$openshell_mount_dir:/opt/mirror_neuron/.config/openshell:ro")
+    fi
+    core_cmd+=(mirror-neuron-core:latest)
+    "${core_cmd[@]}" >/dev/null
     echo "   [Started] Core Service (Docker: mirror-neuron-core)"
 
     echo "=> Waiting for Elixir to boot..."

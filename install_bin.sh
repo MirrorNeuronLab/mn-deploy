@@ -74,7 +74,7 @@ Options:
   --no-reinstall                Keep an existing install instead of overwriting it.
   --web-ui / --no-web-ui        Enable or skip the Web UI npm package.
   --redis / --no-redis          Enable or skip Redis Docker setup.
-  --openshell / --no-openshell  Enable or skip OpenShell Docker setup.
+  --openshell / --no-openshell  Enable or skip OpenShell gateway setup.
   --start / --no-start          Start or skip starting MirrorNeuron after install.
 
 Python component options:
@@ -348,6 +348,112 @@ function require_cmd() {
         print_error "'$1' is required but not installed."
         exit 1
     fi
+}
+
+function resolve_openshell_bin() {
+    if [ -n "${OPENSHELL_BIN:-}" ]; then
+        if [ -x "$OPENSHELL_BIN" ]; then
+            printf '%s\n' "$OPENSHELL_BIN"
+            return 0
+        fi
+        if command -v "$OPENSHELL_BIN" >/dev/null 2>&1; then
+            command -v "$OPENSHELL_BIN"
+            return 0
+        fi
+    fi
+
+    if command -v openshell >/dev/null 2>&1; then
+        command -v openshell
+        return 0
+    fi
+
+    if [ -x "$BIN_DIR/openshell" ]; then
+        printf '%s\n' "$BIN_DIR/openshell"
+        return 0
+    fi
+
+    if [ -x "$HOME/.local/bin/openshell" ]; then
+        printf '%s\n' "$HOME/.local/bin/openshell"
+        return 0
+    fi
+
+    return 1
+}
+
+function prepare_openshell_container_config() {
+    local gateway_host="$1"
+    local gateway_port="$2"
+    local source_root="$HOME/.config/openshell"
+    local source_gateway_dir="$source_root/gateways/openshell"
+    local target_root="${OPENSHELL_CONTAINER_CONFIG_DIR:-$HOME/.config/openshell-mirror-neuron}"
+    local target_gateway_dir="$target_root/gateways/openshell"
+
+    if [ -z "$gateway_host" ]; then
+        return 0
+    fi
+
+    if [ ! -d "$source_gateway_dir/mtls" ]; then
+        return 1
+    fi
+
+    rm -rf "$target_root"
+    mkdir -p "$target_gateway_dir"
+    cp "$source_root/active_gateway" "$target_root/active_gateway"
+    cp -R "$source_gateway_dir/mtls" "$target_gateway_dir/mtls"
+    if [ -f "$source_gateway_dir/last_sandbox" ]; then
+        cp "$source_gateway_dir/last_sandbox" "$target_gateway_dir/last_sandbox"
+    fi
+    cat > "$target_gateway_dir/metadata.json" <<EOF
+{
+  "name": "openshell",
+  "gateway_endpoint": "https://${gateway_host}:${gateway_port}",
+  "is_remote": false,
+  "gateway_port": ${gateway_port}
+}
+EOF
+}
+
+function setup_openshell_gateway() {
+    local version="${OPENSHELL_VERSION:-v0.0.16}"
+    local image_tag="${OPENSHELL_GATEWAY_IMAGE_TAG:-${version#v}}"
+    local gateway_image="${OPENSHELL_GATEWAY_IMAGE:-ghcr.io/nvidia/openshell/cluster:${image_tag}}"
+    local gateway_port="${OPENSHELL_GATEWAY_PORT:-8080}"
+    local container_gateway_host="${OPENSHELL_GATEWAY_HOST:-}"
+    local gateway_start_args=("gateway" "start" "--port" "$gateway_port")
+    local openshell_bin
+
+    if [ "$(uname -s)" = "Darwin" ] && [ -z "$container_gateway_host" ]; then
+        container_gateway_host="host.docker.internal"
+    fi
+
+    openshell_bin="$(resolve_openshell_bin || true)"
+    if [ -z "$openshell_bin" ]; then
+        local installer="${TMPDIR:-/tmp}/mirror_neuron_openshell_install.sh"
+        curl_github -fLsS https://raw.githubusercontent.com/NVIDIA/OpenShell/main/install.sh -o "$installer"
+        OPENSHELL_VERSION="$version" sh "$installer" >/dev/null
+        rm -f "$installer"
+        openshell_bin="$(resolve_openshell_bin || true)"
+    fi
+
+    if [ -z "$openshell_bin" ]; then
+        print_error "OpenShell CLI install finished, but no openshell binary was found."
+        print_error "Set OPENSHELL_BIN=/path/to/openshell and rerun."
+        exit 1
+    fi
+
+    docker pull "$gateway_image" >/dev/null
+
+    if "$openshell_bin" status >/dev/null 2>&1 && NO_COLOR=1 "$openshell_bin" sandbox list >/dev/null 2>&1; then
+        prepare_openshell_container_config "$container_gateway_host" "$gateway_port"
+        return
+    fi
+
+    "$openshell_bin" "${gateway_start_args[@]}" >/dev/null 2>&1 || true
+    if ! NO_COLOR=1 "$openshell_bin" sandbox list >/dev/null 2>&1; then
+        "$openshell_bin" "${gateway_start_args[@]}" --recreate >/dev/null
+    fi
+    NO_COLOR=1 "$openshell_bin" sandbox list >/dev/null
+    prepare_openshell_container_config "$container_gateway_host" "$gateway_port"
 }
 
 function ensure_pip() {
@@ -661,6 +767,7 @@ FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
     ca-certificates \
+    curl \
     libgcc-s1 \
     libstdc++6 \
     libssl3 \
@@ -862,7 +969,7 @@ print_header
 echo -e "${CYAN}${BOLD}Configuration${RESET}" >&3
 INSTALL_WEB_UI=$(ask "Do you want to install the Web UI from npm?" "$INSTALL_WEB_UI")
 INSTALL_REDIS=$(ask "Do you want to install Redis via Docker?" "$INSTALL_REDIS")
-INSTALL_OPENSHELL=$(ask "Do you want to install OpenShell (or reuse existing one)?" "$INSTALL_OPENSHELL")
+INSTALL_OPENSHELL=$(ask "Do you want to install/start the OpenShell gateway for sandbox workers?" "$INSTALL_OPENSHELL")
 INSTALL_PYTHON_SDK=$(ask "Do you want to install the Python SDK from PyPI?" "$INSTALL_PYTHON_SDK")
 INSTALL_BLUEPRINT_SUPPORT_SKILL=$(ask "Do you want to install the blueprint support skill from GitHub?" "$INSTALL_BLUEPRINT_SUPPORT_SKILL")
 INSTALL_CLI=$(ask "Do you want to install the CLI from PyPI?" "$INSTALL_CLI")
@@ -936,10 +1043,8 @@ fi
 
 if [ "$INSTALL_OPENSHELL" = "Y" ]; then
     print_step "Setting up OpenShell"
-    (
-        docker pull mirrorneuronlab/openshell:latest >/dev/null 2>&1 || true
-    ) &
-    spinner $! "Configuring OpenShell sandbox environment"
+    ( setup_openshell_gateway ) &
+    spinner $! "OpenShell gateway is available"
 fi
 
 print_step "Creating symlinks"

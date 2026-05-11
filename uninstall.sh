@@ -2,8 +2,8 @@
 
 set -e
 
-# Make sure we can read from tty even if piped
-exec 3<&1
+# Keep uninstaller output visible even when prompts are piped.
+exec 3>&1
 
 # Define Colors
 BOLD="\033[1m"
@@ -30,10 +30,39 @@ function print_step() { echo -e "${CYAN}${BOLD}==>${RESET} ${BOLD}$1${RESET}" >&
 function print_success() { echo -e "${GREEN}${BOLD}==>${RESET} ${GREEN}$1${RESET}" >&3; }
 function print_warning() { echo -e "${YELLOW}${BOLD}==>${RESET} ${YELLOW}$1${RESET}" >&3; }
 
+ASSUME_YES="N"
+
+function usage() {
+    cat >&3 <<EOF
+Usage: ./uninstall.sh [options]
+
+Options:
+  --yes, -y   Run non-interactively and answer yes to prompts.
+  -h, --help  Show this help.
+EOF
+}
+
+for arg in "$@"; do
+    case "$arg" in
+        --yes|-y) ASSUME_YES="Y" ;;
+        -h|--help) usage; exit 0 ;;
+        *)
+            print_warning "Unknown option: $arg"
+            usage
+            exit 1
+            ;;
+    esac
+done
+
 function ask() {
     local prompt="$1"
     local default="$2"
     local answer
+
+    if [ "$ASSUME_YES" = "Y" ]; then
+        echo "Y"
+        return
+    fi
     
     if [ "$default" = "Y" ]; then
         prompt="${prompt} [Y/n]: "
@@ -134,13 +163,42 @@ if command -v docker &> /dev/null; then
         fi
     fi
 
-    REMOVE_OPENSHELL=$(ask "Do you want to remove the OpenShell Docker image (mirrorneuronlab/openshell:latest)?" "Y")
+    REMOVE_OPENSHELL=$(ask "Do you want to remove MirrorNeuron OpenShell gateway artifacts?" "Y")
     if [ "$REMOVE_OPENSHELL" = "Y" ]; then
-        if docker images | grep -q mirrorneuronlab/openshell; then
-            docker rmi mirrorneuronlab/openshell:latest >/dev/null 2>&1 || true
-            print_success "Removed OpenShell image."
+        if command -v openshell >/dev/null 2>&1; then
+            openshell gateway destroy --name openshell >/dev/null 2>&1 || true
+        fi
+
+        if docker ps -a --format '{{.Names}}' | grep -q '^openshell-cluster-openshell$'; then
+            docker rm -f openshell-cluster-openshell >/dev/null 2>&1 || true
+            print_success "Removed OpenShell gateway container."
         else
-            print_success "OpenShell image not found, skipping."
+            print_success "OpenShell gateway container not found, skipping."
+        fi
+
+        removed_image="N"
+        for image in \
+            "ghcr.io/nvidia/openshell/cluster:0.0.16" \
+            "ghcr.io/nvidia/openshell/cluster:latest" \
+            "mirrorneuronlab/openshell:latest"; do
+            if docker image inspect "$image" >/dev/null 2>&1; then
+                docker rmi "$image" >/dev/null 2>&1 || true
+                removed_image="Y"
+            fi
+        done
+
+        if [ "$removed_image" = "Y" ]; then
+            print_success "Removed OpenShell Docker image(s)."
+        else
+            print_success "OpenShell Docker images not found, skipping."
+        fi
+
+        OPENSHELL_CONTAINER_CONFIG_DIR="${OPENSHELL_CONTAINER_CONFIG_DIR:-$HOME/.config/openshell-mirror-neuron}"
+        if [ -d "$OPENSHELL_CONTAINER_CONFIG_DIR" ]; then
+            rm -rf "$OPENSHELL_CONTAINER_CONFIG_DIR"
+            print_success "Removed MirrorNeuron OpenShell container config at $OPENSHELL_CONTAINER_CONFIG_DIR."
+        else
+            print_success "MirrorNeuron OpenShell container config not found, skipping."
         fi
     fi
 else
