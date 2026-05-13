@@ -588,9 +588,9 @@ fi
     fi
 
     if [ -n "$SOURCE_WORKSPACE" ]; then
-        run_quiet "install-blueprint-support-skill-local" "$VENV_DIR/bin/pip" install "$SOURCE_WORKSPACE/mn-skills/blueprint_support_skill"
+        run_quiet "install-blueprint-support-skill-local" "$VENV_DIR/bin/pip" install "$SOURCE_WORKSPACE/mn-skills/blueprint_support_skill[webui]"
     else
-        run_quiet "install-blueprint-support-skill-github" "$VENV_DIR/bin/pip" install "git+https://github.com/MirrorNeuronLab/mn-skills.git#subdirectory=blueprint_support_skill"
+        run_quiet "install-blueprint-support-skill-github" "$VENV_DIR/bin/pip" install "mirrorneuron-blueprint-support-skill[webui] @ git+https://github.com/MirrorNeuronLab/mn-skills.git#subdirectory=blueprint_support_skill"
     fi
     
     if [ -n "$SOURCE_WORKSPACE" ]; then

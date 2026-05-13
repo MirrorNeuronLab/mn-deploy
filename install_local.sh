@@ -721,7 +721,7 @@ print_step "Installing Python components from local source"
     "$VENV_DIR/bin/pip" install --upgrade pip >/dev/null
     "$VENV_DIR/bin/pip" install -e "$PY_SDK_DIR" >/dev/null
     if [ -d "$SKILLS_DIR/blueprint_support_skill" ]; then
-        "$VENV_DIR/bin/pip" install -e "$SKILLS_DIR/blueprint_support_skill" >/dev/null
+        "$VENV_DIR/bin/pip" install -e "$SKILLS_DIR/blueprint_support_skill[webui]" >/dev/null
     fi
     "$VENV_DIR/bin/pip" install -e "$CLI_DIR" >/dev/null
     "$VENV_DIR/bin/pip" install -e "$API_DIR" >/dev/null
