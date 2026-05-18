@@ -421,6 +421,45 @@ function core_container_running() {
     docker ps --format '{{.Names}}' | grep -q '^mirror-neuron-core$'
 }
 
+function generate_mn_cookie() {
+    if command -v openssl >/dev/null 2>&1; then
+        openssl rand -hex 32
+    else
+        od -An -N32 -tx1 /dev/urandom | tr -d ' \n'
+    fi
+}
+
+function resolve_mn_cookie() {
+    local env_cookie="${MN_COOKIE:-}"
+    local cookie_file="${INSTALL_DIR}/erlang.cookie"
+    local cookie
+
+    if [ -n "$env_cookie" ] && [ "$env_cookie" != "mirrorneuron" ]; then
+        printf '%s\n' "$env_cookie"
+        return 0
+    fi
+
+    mkdir -p "$INSTALL_DIR"
+    if [ -s "$cookie_file" ]; then
+        cookie="$(tr -d '[:space:]' < "$cookie_file")"
+        if [ -n "$cookie" ] && [ "$cookie" != "mirrorneuron" ]; then
+            chmod 600 "$cookie_file" 2>/dev/null || true
+            printf '%s\n' "$cookie"
+            return 0
+        fi
+    fi
+
+    cookie="$(generate_mn_cookie)"
+    if [ -z "$cookie" ]; then
+        print_error "Failed to generate MN_COOKIE."
+        exit 1
+    fi
+
+    printf '%s\n' "$cookie" > "$cookie_file"
+    chmod 600 "$cookie_file" 2>/dev/null || true
+    printf '%s\n' "$cookie"
+}
+
 function start_core_container() {
     local cmd=("docker" "run" "-d" "--name" "mirror-neuron-core")
     local openshell_config_dir="$HOME/.config/openshell"
@@ -433,9 +472,16 @@ function start_core_container() {
     local core_publish_host="$core_host"
     local epmd_publish_host="$epmd_host"
     local dist_publish_host="$dist_host"
+    local mn_cookie
+    mn_cookie="$(resolve_mn_cookie)"
     [ "$core_publish_host" = "localhost" ] && core_publish_host="127.0.0.1"
     [ "$epmd_publish_host" = "localhost" ] && epmd_publish_host="127.0.0.1"
     [ "$dist_publish_host" = "localhost" ] && dist_publish_host="127.0.0.1"
+
+    cmd+=("-e" "MN_COOKIE=${mn_cookie}")
+    if [ -n "${MN_NODE_NAME:-}" ]; then
+        cmd+=("-e" "MN_NODE_NAME=${MN_NODE_NAME}")
+    fi
 
     if [ "$(uname -s)" = "Darwin" ]; then
         cmd+=("-p" "${core_publish_host}:50051:50051" "-p" "${epmd_publish_host}:4369:4369")
@@ -792,6 +838,7 @@ print_success "MirrorNeuron local installation completed."
 echo -e "Core image: ${YELLOW}mirror-neuron-core:latest${RESET} built from ${CYAN}${CORE_DIR}${RESET}" >&3
 echo -e "CLI/API:    ${YELLOW}editable Python installs${RESET} from local workspace" >&3
 echo -e "State dir:  ${CYAN}${INSTALL_DIR}${RESET}" >&3
+echo -e "Cookie:     ${CYAN}${INSTALL_DIR}/erlang.cookie${RESET}" >&3
 if [ "$INSTALL_WEB_UI" = "Y" ]; then
     echo -e "Web UI:     ${CYAN}${UI_LINK_DIR}${RESET} -> ${WEB_UI_DIR}" >&3
 fi

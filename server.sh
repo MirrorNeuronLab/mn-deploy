@@ -9,6 +9,45 @@ BEAM_LOG="${LOG_DIR}/beam.log"
 API_LOG="${LOG_DIR}/api.log"
 VENV_DIR="${HOME}/.local/share/mn_venv"
 
+generate_mn_cookie() {
+    if command -v openssl >/dev/null 2>&1; then
+        openssl rand -hex 32
+    else
+        od -An -N32 -tx1 /dev/urandom | tr -d ' \n'
+    fi
+}
+
+resolve_mn_cookie() {
+    local env_cookie="${MN_COOKIE:-}"
+    local cookie_file="${DIR}/erlang.cookie"
+    local cookie
+
+    if [ -n "$env_cookie" ] && [ "$env_cookie" != "mirrorneuron" ]; then
+        printf '%s\n' "$env_cookie"
+        return 0
+    fi
+
+    mkdir -p "$DIR"
+    if [ -s "$cookie_file" ]; then
+        cookie="$(tr -d '[:space:]' < "$cookie_file")"
+        if [ -n "$cookie" ] && [ "$cookie" != "mirrorneuron" ]; then
+            chmod 600 "$cookie_file" 2>/dev/null || true
+            printf '%s\n' "$cookie"
+            return 0
+        fi
+    fi
+
+    cookie="$(generate_mn_cookie)"
+    if [ -z "$cookie" ]; then
+        echo "=> Error: failed to generate MN_COOKIE."
+        exit 1
+    fi
+
+    printf '%s\n' "$cookie" > "$cookie_file"
+    chmod 600 "$cookie_file" 2>/dev/null || true
+    printf '%s\n' "$cookie"
+}
+
 print_ascii_art() {
     cat << "ASCIIEOF"
   __  __ _                     _   _                     
@@ -68,12 +107,17 @@ start_services() {
 
     echo "=> Starting MirrorNeuron Core Service (Docker)..."
     docker rm -f mirror-neuron-core >/dev/null 2>&1 || true
+    mn_cookie="$(resolve_mn_cookie)"
     core_cmd=(
         docker run -d --name mirror-neuron-core --network host
+        -e "MN_COOKIE=${mn_cookie}"
         -e "MN_CORE_HOST=${MN_CORE_HOST:-localhost}"
         -e "MN_REDIS_HOST=${MN_REDIS_HOST:-localhost}"
         -e "ERL_EPMD_ADDRESS=${MN_EPMD_HOST:-localhost}"
     )
+    if [ -n "${MN_NODE_NAME:-}" ]; then
+        core_cmd+=("-e" "MN_NODE_NAME=${MN_NODE_NAME}")
+    fi
     openshell_config_dir="$HOME/.config/openshell"
     openshell_container_config_dir="${OPENSHELL_CONTAINER_CONFIG_DIR:-$HOME/.config/openshell-mirror-neuron}"
     openshell_mount_dir="$openshell_config_dir"
