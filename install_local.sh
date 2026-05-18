@@ -44,7 +44,6 @@ INSTALL_REDIS="Y"
 INSTALL_OPENSHELL="Y"
 INSTALL_SKILLS="Y"
 START_NOW="N"
-REINSTALL="Y"
 NON_INTERACTIVE="N"
 
 function print_header() {
@@ -292,7 +291,6 @@ Installs MirrorNeuron from local sibling folders under:
 
 Options:
   --yes                 Run non-interactively with defaults.
-  --no-reinstall        Keep the existing venv/state where possible.
   --no-web-ui           Skip local Web UI npm install/build.
   --no-redis            Skip Redis Docker setup.
   --openshell           Install/start OpenShell gateway for sandbox workers.
@@ -309,7 +307,7 @@ EOF
 for arg in "$@"; do
     case "$arg" in
         --yes) NON_INTERACTIVE="Y" ;;
-        --no-reinstall) REINSTALL="N" ;;
+        --no-reinstall) ;; # Backward-compatible no-op; local installs refresh in place.
         --no-web-ui) INSTALL_WEB_UI="N" ;;
         --no-redis) INSTALL_REDIS="N" ;;
         --openshell) INSTALL_OPENSHELL="Y" ;;
@@ -415,6 +413,19 @@ function replace_symlink() {
         rm -rf "$target"
     fi
     ln -s "$source" "$target"
+}
+
+function write_local_install_metadata() {
+    local metadata_file="${INSTALL_DIR}/install_metadata.json"
+    local updated_at
+    updated_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+    cat > "$metadata_file" <<EOF
+{
+  "install_type": "local_source",
+  "source_workspace": "${WORKSPACE_DIR}",
+  "updated_at": "${updated_at}"
+}
+EOF
 }
 
 function core_container_running() {
@@ -682,22 +693,7 @@ print_step "Checking Python runtime"
 resolve_python_runtime
 
 if [ -d "$INSTALL_DIR" ] || [ -L "$INSTALL_DIR" ] || [ -d "$VENV_DIR" ] || [ -f "$BIN_DIR/mn" ]; then
-    print_warning "MirrorNeuron appears to be already installed."
-    if [ "$REINSTALL" != "N" ]; then
-        REINSTALL=$(ask "Do you want to reinstall local components?" "Y")
-    fi
-    if [ "$REINSTALL" = "N" ]; then
-        print_warning "Keeping existing install directories and refreshing local links/packages."
-    else
-        print_step "Cleaning previous local install state"
-        rm -rf "$VENV_DIR" "$BIN_DIR/mn" "$BIN_DIR/mn-api"
-        if [ -L "$INSTALL_DIR" ] || [ -d "$INSTALL_DIR" ]; then
-            rm -rf "$INSTALL_DIR"
-        fi
-        if [ -L "$UI_LINK_DIR" ] || [ -d "$UI_LINK_DIR" ]; then
-            rm -rf "$UI_LINK_DIR"
-        fi
-    fi
+    print_warning "MirrorNeuron appears to be already installed; refreshing local source install."
 fi
 
 echo -e "${CYAN}${BOLD}Configuration${RESET}" >&3
@@ -752,6 +748,7 @@ replace_symlink "$CORE_DIR" "$INSTALL_DIR/core-source"
 replace_symlink "$CLI_DIR" "$INSTALL_DIR/cli-source"
 replace_symlink "$API_DIR" "$INSTALL_DIR/api-source"
 replace_symlink "$PY_SDK_DIR" "$INSTALL_DIR/python-sdk-source"
+write_local_install_metadata
 print_success "Local component links created under ${INSTALL_DIR}."
 
 print_step "Building MirrorNeuron Core Docker image from local source"
