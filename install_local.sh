@@ -429,7 +429,9 @@ EOF
 }
 
 function core_container_running() {
-    docker ps --format '{{.Names}}' | grep -q '^mirror-neuron-core$'
+    local names
+    names="$(docker ps --format '{{.Names}}')"
+    grep -qx 'mirror-neuron-core' <<< "$names"
 }
 
 function generate_mn_cookie() {
@@ -471,6 +473,37 @@ function resolve_mn_cookie() {
     printf '%s\n' "$cookie"
 }
 
+function resolve_grpc_auth_token() {
+    local env_token="${MN_GRPC_AUTH_TOKEN:-}"
+    local token_file="${INSTALL_DIR}/grpc_auth.token"
+    local token
+
+    if [ -n "$env_token" ]; then
+        printf '%s\n' "$env_token"
+        return 0
+    fi
+
+    mkdir -p "$INSTALL_DIR"
+    if [ -s "$token_file" ]; then
+        token="$(tr -d '[:space:]' < "$token_file")"
+        if [ -n "$token" ]; then
+            chmod 600 "$token_file" 2>/dev/null || true
+            printf '%s\n' "$token"
+            return 0
+        fi
+    fi
+
+    token="$(generate_mn_cookie)"
+    if [ -z "$token" ]; then
+        print_error "Failed to generate MN_GRPC_AUTH_TOKEN."
+        exit 1
+    fi
+
+    printf '%s\n' "$token" > "$token_file"
+    chmod 600 "$token_file" 2>/dev/null || true
+    printf '%s\n' "$token"
+}
+
 function start_core_container() {
     local cmd=("docker" "run" "-d" "--name" "mirror-neuron-core")
     local openshell_config_dir="$HOME/.config/openshell"
@@ -484,12 +517,15 @@ function start_core_container() {
     local epmd_publish_host="$epmd_host"
     local dist_publish_host="$dist_host"
     local mn_cookie
+    local grpc_auth_token
     mn_cookie="$(resolve_mn_cookie)"
+    grpc_auth_token="$(resolve_grpc_auth_token)"
     [ "$core_publish_host" = "localhost" ] && core_publish_host="127.0.0.1"
     [ "$epmd_publish_host" = "localhost" ] && epmd_publish_host="127.0.0.1"
     [ "$dist_publish_host" = "localhost" ] && dist_publish_host="127.0.0.1"
 
     cmd+=("-e" "MN_COOKIE=${mn_cookie}")
+    cmd+=("-e" "MN_GRPC_AUTH_TOKEN=${grpc_auth_token}")
     if [ -n "${MN_NODE_NAME:-}" ]; then
         cmd+=("-e" "MN_NODE_NAME=${MN_NODE_NAME}")
     fi
@@ -799,7 +835,8 @@ fi
 if [ "$INSTALL_REDIS" = "Y" ]; then
     print_step "Setting up Redis"
     (
-        if ! docker ps --format '{{.Names}}' | grep -q '^mirror-neuron-redis$'; then
+        docker_names="$(docker ps --format '{{.Names}}')"
+        if ! grep -qx 'mirror-neuron-redis' <<< "$docker_names"; then
             docker rm -f mirror-neuron-redis >/dev/null 2>&1 || true
             docker run -d --name mirror-neuron-redis -p 6379:6379 redis:7 >/dev/null
         fi
@@ -813,7 +850,7 @@ if [ "$INSTALL_OPENSHELL" = "Y" ]; then
     spinner $! "OpenShell gateway is available"
 fi
 
-if [ "$CORE_WAS_RUNNING" = "Y" ]; then
+if [ "$CORE_WAS_RUNNING" = "Y" ] && [ "$START_NOW" != "Y" ]; then
     print_step "Restarting MirrorNeuron gRPC Core from rebuilt image"
     (
         restart_core_container
@@ -850,5 +887,6 @@ echo -e "  4. Rebuild core after Elixir changes: ${GREEN}${SCRIPT_DIR}/install_l
 
 if [ "$START_NOW" = "Y" ]; then
     print_step "Starting MirrorNeuron Server"
+    "$VENV_DIR/bin/mn" stop >/dev/null 2>&1 || true
     "$VENV_DIR/bin/mn" start
 fi

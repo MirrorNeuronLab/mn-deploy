@@ -1033,7 +1033,8 @@ fi
 if [ "$INSTALL_REDIS" = "Y" ]; then
     print_step "Setting up Redis"
     (
-        if ! docker ps --format '{{.Names}}' | grep -q '^mirror-neuron-redis$'; then
+        docker_names="$(docker ps --format '{{.Names}}')"
+        if ! grep -qx 'mirror-neuron-redis' <<< "$docker_names"; then
             docker rm -f mirror-neuron-redis >/dev/null 2>&1 || true
             docker run -d --name mirror-neuron-redis -p 6379:6379 redis:7 >/dev/null
         fi

@@ -48,6 +48,37 @@ resolve_mn_cookie() {
     printf '%s\n' "$cookie"
 }
 
+resolve_grpc_auth_token() {
+    local env_token="${MN_GRPC_AUTH_TOKEN:-}"
+    local token_file="${DIR}/grpc_auth.token"
+    local token
+
+    if [ -n "$env_token" ]; then
+        printf '%s\n' "$env_token"
+        return 0
+    fi
+
+    mkdir -p "$DIR"
+    if [ -s "$token_file" ]; then
+        token="$(tr -d '[:space:]' < "$token_file")"
+        if [ -n "$token" ]; then
+            chmod 600 "$token_file" 2>/dev/null || true
+            printf '%s\n' "$token"
+            return 0
+        fi
+    fi
+
+    token="$(generate_mn_cookie)"
+    if [ -z "$token" ]; then
+        echo "=> Error: failed to generate MN_GRPC_AUTH_TOKEN."
+        exit 1
+    fi
+
+    printf '%s\n' "$token" > "$token_file"
+    chmod 600 "$token_file" 2>/dev/null || true
+    printf '%s\n' "$token"
+}
+
 print_ascii_art() {
     cat << "ASCIIEOF"
   __  __ _                     _   _                     
@@ -93,7 +124,8 @@ start_services() {
         echo "=> Use '$0 status' to check, or '$0 stop' to stop."
         exit 1
     fi
-    if docker ps --format '{{.Names}}' | grep -q "^mirror-neuron-core$"; then
+    docker_names="$(docker ps --format '{{.Names}}')"
+    if grep -qx "mirror-neuron-core" <<< "$docker_names"; then
         echo "=> Error: MirrorNeuron Core (Docker) is already running."
         echo "=> Use '$0 status' to check, or '$0 stop' to stop."
         exit 1
@@ -108,9 +140,12 @@ start_services() {
     echo "=> Starting MirrorNeuron Core Service (Docker)..."
     docker rm -f mirror-neuron-core >/dev/null 2>&1 || true
     mn_cookie="$(resolve_mn_cookie)"
+    grpc_auth_token="$(resolve_grpc_auth_token)"
+    export MN_GRPC_AUTH_TOKEN="${MN_GRPC_AUTH_TOKEN:-$grpc_auth_token}"
     core_cmd=(
         docker run -d --name mirror-neuron-core --network host
         -e "MN_COOKIE=${mn_cookie}"
+        -e "MN_GRPC_AUTH_TOKEN=${MN_GRPC_AUTH_TOKEN}"
         -e "MN_CORE_HOST=${MN_CORE_HOST:-localhost}"
         -e "MN_REDIS_HOST=${MN_REDIS_HOST:-localhost}"
         -e "ERL_EPMD_ADDRESS=${MN_EPMD_HOST:-localhost}"
@@ -188,7 +223,8 @@ status_services() {
     print_ascii_art
     echo "Service Status:"
     
-    if docker ps --format '{{.Names}}' | grep -q "^mirror-neuron-core$"; then
+    docker_names="$(docker ps --format '{{.Names}}')"
+    if grep -qx "mirror-neuron-core" <<< "$docker_names"; then
         echo "  [OK] Core Service (Docker: mirror-neuron-core) is running"
     else
         echo "  [--] Core Service (Docker: mirror-neuron-core) is not running"
