@@ -504,6 +504,37 @@ function resolve_grpc_auth_token() {
     printf '%s\n' "$token"
 }
 
+function resolve_grpc_admin_token() {
+    local env_token="${MN_MIRROR_NEURON_GRPC_ADMIN_TOKEN:-}"
+    local token_file="${INSTALL_DIR}/grpc_admin.token"
+    local token
+
+    if [ -n "$env_token" ]; then
+        printf '%s\n' "$env_token"
+        return 0
+    fi
+
+    mkdir -p "$INSTALL_DIR"
+    if [ -s "$token_file" ]; then
+        token="$(tr -d '[:space:]' < "$token_file")"
+        if [ -n "$token" ]; then
+            chmod 600 "$token_file" 2>/dev/null || true
+            printf '%s\n' "$token"
+            return 0
+        fi
+    fi
+
+    token="$(generate_mn_cookie)"
+    if [ -z "$token" ]; then
+        print_error "Failed to generate MN_MIRROR_NEURON_GRPC_ADMIN_TOKEN."
+        exit 1
+    fi
+
+    printf '%s\n' "$token" > "$token_file"
+    chmod 600 "$token_file" 2>/dev/null || true
+    printf '%s\n' "$token"
+}
+
 function start_core_container() {
     local cmd=("docker" "run" "-d" "--name" "mirror-neuron-core")
     local openshell_config_dir="$HOME/.config/openshell"
@@ -518,14 +549,17 @@ function start_core_container() {
     local dist_publish_host="$dist_host"
     local mn_cookie
     local grpc_auth_token
+    local grpc_admin_token
     mn_cookie="$(resolve_mn_cookie)"
     grpc_auth_token="$(resolve_grpc_auth_token)"
+    grpc_admin_token="$(resolve_grpc_admin_token)"
     [ "$core_publish_host" = "localhost" ] && core_publish_host="127.0.0.1"
     [ "$epmd_publish_host" = "localhost" ] && epmd_publish_host="127.0.0.1"
     [ "$dist_publish_host" = "localhost" ] && dist_publish_host="127.0.0.1"
 
     cmd+=("-e" "MN_COOKIE=${mn_cookie}")
     cmd+=("-e" "MN_GRPC_AUTH_TOKEN=${grpc_auth_token}")
+    cmd+=("-e" "MN_MIRROR_NEURON_GRPC_ADMIN_TOKEN=${grpc_admin_token}")
     if [ -n "${MN_NODE_NAME:-}" ]; then
         cmd+=("-e" "MN_NODE_NAME=${MN_NODE_NAME}")
     fi
