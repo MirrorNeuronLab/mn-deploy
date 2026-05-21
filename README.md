@@ -10,7 +10,7 @@ This repository keeps shell scripts used to install, start, stop, and remove a l
 | --- | --- |
 | MirrorNeuron core | GitHub Release OTP tarball from `MirrorNeuronLab/MirrorNeuron` |
 | Python SDK | PyPI package `mirrorneuron-python-sdk` |
-| Blueprint support skill | GitHub repository `MirrorNeuronLab/mn-skills`, subdirectory `blueprint_support_skill` |
+| Blueprint support skill | GitHub repository `MirrorNeuronLab/mn-skills`, subdirectory `blueprint-support-skill` |
 | CLI | PyPI package `mirrorneuron-cli` |
 | API | PyPI package `mirrorneuron-api` |
 | Web UI | npm package `mirrorneuron-web-ui` |

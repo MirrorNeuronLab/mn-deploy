@@ -833,8 +833,8 @@ print_step "Installing Python components from local source"
     "$MN_PYTHON_BIN" -m venv "$VENV_DIR" >/dev/null
     "$VENV_DIR/bin/pip" install --upgrade pip >/dev/null
     "$VENV_DIR/bin/pip" install -e "$PY_SDK_DIR" >/dev/null
-    if [ -d "$SKILLS_DIR/blueprint_support_skill" ]; then
-        "$VENV_DIR/bin/pip" install -e "$SKILLS_DIR/blueprint_support_skill[webui]" >/dev/null
+    if [ -d "$SKILLS_DIR/blueprint-support-skill" ]; then
+        "$VENV_DIR/bin/pip" install -e "$SKILLS_DIR/blueprint-support-skill[webui]" >/dev/null
     fi
     "$VENV_DIR/bin/pip" install -e "$CLI_DIR" >/dev/null
     "$VENV_DIR/bin/pip" install -e "$API_DIR" >/dev/null
@@ -842,7 +842,7 @@ print_step "Installing Python components from local source"
     if [ "$INSTALL_SKILLS" = "Y" ]; then
         shopt -s nullglob
         for skill_pyproject in "$SKILLS_DIR"/*/pyproject.toml; do
-            if [ "$(dirname "$skill_pyproject")" = "$SKILLS_DIR/blueprint_support_skill" ]; then
+            if [ "$(dirname "$skill_pyproject")" = "$SKILLS_DIR/blueprint-support-skill" ]; then
                 continue
             fi
             "$VENV_DIR/bin/pip" install -e "$(dirname "$skill_pyproject")" >/dev/null

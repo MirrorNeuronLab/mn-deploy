@@ -850,9 +850,9 @@ function skill_requirement_for_url() {
     fi
 
     if [[ "$url" != *"#"* ]]; then
-        url="${url}#subdirectory=blueprint_support_skill"
+        url="${url}#subdirectory=blueprint-support-skill"
     elif [[ "$url" != *"subdirectory="* ]]; then
-        url="${url}&subdirectory=blueprint_support_skill"
+        url="${url}&subdirectory=blueprint-support-skill"
     fi
 
     printf 'mirrorneuron-blueprint-support-skill[webui] @ %s' "$url"
