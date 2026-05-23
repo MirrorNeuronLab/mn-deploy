@@ -59,7 +59,7 @@ function find_source_workspace() {
     for candidate in "${candidates[@]}"; do
         [ -n "$candidate" ] || continue
         if [ -d "$candidate/mn-python-sdk" ] &&
-           [ -d "$candidate/mn-skills/blueprint-support-skill" ] &&
+           { [ -d "$candidate/mn-skills/blueprint_support_skill" ] || [ -d "$candidate/mn-skills/blueprint-support-skill" ]; } &&
            [ -d "$candidate/mn-cli" ] &&
            [ -d "$candidate/mn-api" ]; then
             (cd "$candidate" && pwd)
@@ -352,116 +352,196 @@ function resolve_python_runtime() {
 
 print_header
 
-INSTALL_DIR="${HOME}/.mirror_neuron"
+INSTALL_DIR="${MN_HOME:-${MIRROR_NEURON_HOME:-${HOME}/.mn}}"
 BIN_DIR="${HOME}/.local/bin"
 VENV_DIR="${HOME}/.local/share/mn_venv"
 MN_PYTHON_BIN=""
 SOURCE_WORKSPACE="$(find_source_workspace || true)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RUNTIME_COMPOSE_TEMPLATE="${SCRIPT_DIR}/docker-compose.yml"
+RUNTIME_COMPOSE_FILE="${INSTALL_DIR}/docker-compose.yml"
+RUNTIME_COMPOSE_ENV="${INSTALL_DIR}/docker-compose.env"
+LEGACY_UI_DIR="${INSTALL_DIR}_ui"
+INSTALL_CONTEXT_ENGINE="Y"
+MEMBRANE_REPO="${MN_MEMBRANE_REPO:-MirrorNeuronLab/Membrane}"
+MEMBRANE_GIT_URL="${MN_MEMBRANE_GIT_URL:-}"
+MEMBRANE_DIR="${MN_MEMBRANE_DIR:-${INSTALL_DIR}/Membrane}"
+MN_HOST_MN_DIR="${MN_HOST_MN_DIR:-${INSTALL_DIR}}"
+MN_HOST_OPENSHELL_CONFIG_DIR="${OPENSHELL_CONTAINER_CONFIG_DIR:-${HOME}/.config/openshell-mirror-neuron}"
+MN_HOST_OPENSHELL_STATE_DIR="${MN_HOST_OPENSHELL_STATE_DIR:-${INSTALL_DIR}/openshell-state}"
+OPENSHELL_GATEWAY_USER="${OPENSHELL_GATEWAY_USER:-$(id -u):$(id -g)}"
+OPENSHELL_GATEWAY_DOCKER_GROUP="${OPENSHELL_GATEWAY_DOCKER_GROUP:-0}"
 
-function resolve_openshell_bin() {
-    if [ -n "${OPENSHELL_BIN:-}" ]; then
-        if [ -x "$OPENSHELL_BIN" ]; then
-            printf '%s\n' "$OPENSHELL_BIN"
-            return 0
-        fi
-        if command -v "$OPENSHELL_BIN" >/dev/null 2>&1; then
-            command -v "$OPENSHELL_BIN"
-            return 0
-        fi
+function context_engine_git_url() {
+    if [ -n "$MEMBRANE_GIT_URL" ]; then
+        printf '%s' "$MEMBRANE_GIT_URL"
+    else
+        printf 'https://github.com/%s.git' "$MEMBRANE_REPO"
     fi
-
-    if command -v openshell >/dev/null 2>&1; then
-        command -v openshell
-        return 0
-    fi
-
-    if [ -x "$BIN_DIR/openshell" ]; then
-        printf '%s\n' "$BIN_DIR/openshell"
-        return 0
-    fi
-
-    if [ -x "$HOME/.local/bin/openshell" ]; then
-        printf '%s\n' "$HOME/.local/bin/openshell"
-        return 0
-    fi
-
-    return 1
 }
 
-function prepare_openshell_container_config() {
-    local gateway_host="$1"
-    local gateway_port="$2"
-    local source_root="$HOME/.config/openshell"
-    local source_gateway_dir="$source_root/gateways/openshell"
-    local target_root="${OPENSHELL_CONTAINER_CONFIG_DIR:-$HOME/.config/openshell-mirror-neuron}"
-    local target_gateway_dir="$target_root/gateways/openshell"
-
-    if [ -z "$gateway_host" ]; then
+function context_engine_source_dir() {
+    if [ -n "$SOURCE_WORKSPACE" ] && [ -f "$SOURCE_WORKSPACE/Membrane/Dockerfile" ]; then
+        printf '%s' "$SOURCE_WORKSPACE/Membrane"
         return 0
     fi
-
-    if [ ! -d "$source_gateway_dir/mtls" ]; then
-        return 1
+    if [ -n "${MN_MEMBRANE_DIR:-}" ] && [ -f "$MN_MEMBRANE_DIR/Dockerfile" ]; then
+        printf '%s' "$MN_MEMBRANE_DIR"
+        return 0
     fi
-
-    rm -rf "$target_root"
-    mkdir -p "$target_gateway_dir"
-    cp "$source_root/active_gateway" "$target_root/active_gateway"
-    cp -R "$source_gateway_dir/mtls" "$target_gateway_dir/mtls"
-    if [ -f "$source_gateway_dir/last_sandbox" ]; then
-        cp "$source_gateway_dir/last_sandbox" "$target_gateway_dir/last_sandbox"
+    if [ ! -d "$MEMBRANE_DIR" ]; then
+        run_quiet "clone-membrane-context-engine" git clone "$(context_engine_git_url)" "$MEMBRANE_DIR"
+    else
+        (
+            cd "$MEMBRANE_DIR"
+            git pull --ff-only >/dev/null 2>&1 || true
+        )
     fi
-    cat > "$target_gateway_dir/metadata.json" <<EOF
+    printf '%s' "$MEMBRANE_DIR"
+}
+
+function setup_context_engine() {
+    context_engine_source_dir >/dev/null
+    runtime_compose up -d context-engine-model membrane-context-engine >/dev/null
+}
+
+function context_model_target() {
+    local requested="${MN_DOCKER_TARGET:-auto}"
+    case "$requested" in
+        cpu|mac|nvidia|amd|intel) echo "$requested"; return 0 ;;
+        auto) ;;
+        *) echo "cpu"; return 0 ;;
+    esac
+
+    if command -v nvidia-smi >/dev/null 2>&1; then
+        echo "nvidia"
+    elif [ -e /dev/kfd ] || command -v rocminfo >/dev/null 2>&1 || command -v rocm-smi >/dev/null 2>&1; then
+        echo "amd"
+    elif [ -e /dev/dri ] && { command -v sycl-ls >/dev/null 2>&1 || lspci 2>/dev/null | grep -Eiq 'intel.*(vga|3d|display)'; }; then
+        echo "intel"
+    elif [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
+        echo "mac"
+    else
+        echo "cpu"
+    fi
+}
+
+function context_model_build_target() {
+    case "$1" in
+        mac) echo "mac-arm64-context-model" ;;
+        nvidia) echo "nvidia-context-model" ;;
+        amd) echo "amd-context-model" ;;
+        intel) echo "intel-context-model" ;;
+        *) echo "context-model-cpu" ;;
+    esac
+}
+
+function context_model_image() {
+    case "$1" in
+        mac) echo "mirror-enuron-context-model:mac-arm64" ;;
+        nvidia) echo "mirror-enuron-context-model:nvidia" ;;
+        amd) echo "mirror-enuron-context-model:amd" ;;
+        intel) echo "mirror-enuron-context-model:intel" ;;
+        *) echo "mirror-enuron-context-model:cpu" ;;
+    esac
+}
+
+function compose_profiles() {
+    local profiles=()
+    [ "$INSTALL_OPENSHELL" = "Y" ] && profiles+=("openshell")
+    [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] && profiles+=("context")
+    local IFS=,
+    printf '%s' "${profiles[*]}"
+}
+
+function write_openshell_compose_config() {
+    local gateway_dir="${MN_HOST_OPENSHELL_CONFIG_DIR}/gateways/openshell"
+    mkdir -p "$gateway_dir"
+    printf 'openshell\n' > "${MN_HOST_OPENSHELL_CONFIG_DIR}/active_gateway"
+    cat > "${gateway_dir}/metadata.json" <<'EOF'
 {
   "name": "openshell",
-  "gateway_endpoint": "https://${gateway_host}:${gateway_port}",
+  "gateway_endpoint": "http://openshell:8080",
   "is_remote": false,
-  "gateway_port": ${gateway_port}
+  "gateway_port": 8080
 }
 EOF
 }
 
-function setup_openshell_gateway() {
-    local version="${OPENSHELL_VERSION:-v0.0.16}"
-    local image_tag="${OPENSHELL_GATEWAY_IMAGE_TAG:-${version#v}}"
-    local gateway_image="${OPENSHELL_GATEWAY_IMAGE:-ghcr.io/nvidia/openshell/cluster:${image_tag}}"
-    local gateway_port="${OPENSHELL_GATEWAY_PORT:-8080}"
-    local container_gateway_host="${OPENSHELL_GATEWAY_HOST:-}"
-    local gateway_start_args=("gateway" "start" "--port" "$gateway_port")
-    local openshell_bin
-
-    if [ "$(uname -s)" = "Darwin" ] && [ -z "$container_gateway_host" ]; then
-        container_gateway_host="host.docker.internal"
+function install_openshell_cli() {
+    if command -v openshell >/dev/null 2>&1; then
+        return 0
     fi
+    local installer="${TMPDIR:-/tmp}/mirror_neuron_openshell_install.sh"
+    curl_github -fLsS https://raw.githubusercontent.com/NVIDIA/OpenShell/main/install.sh -o "$installer"
+    OPENSHELL_VERSION="${OPENSHELL_VERSION:-v0.0.47}" sh "$installer" >/dev/null
+    rm -f "$installer"
+}
 
-    openshell_bin="$(resolve_openshell_bin || true)"
-    if [ -z "$openshell_bin" ]; then
-        local installer="${TMPDIR:-/tmp}/mirror_neuron_openshell_install.sh"
-        curl_github -fLsS https://raw.githubusercontent.com/NVIDIA/OpenShell/main/install.sh -o "$installer"
-        OPENSHELL_VERSION="$version" sh "$installer" >/dev/null
-        rm -f "$installer"
-        openshell_bin="$(resolve_openshell_bin || true)"
+function write_runtime_compose_files() {
+    local target build_target model_image profiles
+    if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
+        context_engine_source_dir >/dev/null
     fi
+    target="$(context_model_target)"
+    build_target="$(context_model_build_target "$target")"
+    model_image="$(context_model_image "$target")"
+    profiles="$(compose_profiles)"
 
-    if [ -z "$openshell_bin" ]; then
-        print_error "OpenShell CLI install finished, but no openshell binary was found."
-        print_error "Set OPENSHELL_BIN=/path/to/openshell and rerun."
-        exit 1
+    mkdir -p "$INSTALL_DIR" "$MN_HOST_MN_DIR" "$MN_HOST_OPENSHELL_CONFIG_DIR" "$MN_HOST_OPENSHELL_STATE_DIR"
+    cp "$RUNTIME_COMPOSE_TEMPLATE" "$RUNTIME_COMPOSE_FILE"
+    if [ "$INSTALL_OPENSHELL" = "Y" ]; then
+        write_openshell_compose_config
     fi
+    cat > "$RUNTIME_COMPOSE_ENV" <<EOF
+COMPOSE_PROJECT_NAME=mirror-neuron
+COMPOSE_PROFILES=${profiles}
+MN_HOST_STATE_DIR=${INSTALL_DIR}
+MN_HOST_MN_DIR=${MN_HOST_MN_DIR}
+MN_HOST_OPENSHELL_CONFIG_DIR=${MN_HOST_OPENSHELL_CONFIG_DIR}
+MN_HOST_OPENSHELL_STATE_DIR=${MN_HOST_OPENSHELL_STATE_DIR}
+MEMBRANE_DIR=${MEMBRANE_DIR}
+ENGINE_IMAGE=mirror-enuron-memory-engine:latest
+MN_CONTEXT_MODEL_BUILD_TARGET=${build_target}
+MN_CONTEXT_MODEL_IMAGE=${model_image}
+MN_GRPC_BIND_HOST=${MN_GRPC_BIND_HOST:-127.0.0.1}
+MN_GRPC_PORT=${MN_GRPC_PORT:-50051}
+MN_EPMD_BIND_HOST=${MN_EPMD_BIND_HOST:-127.0.0.1}
+MN_EPMD_PORT=${MN_EPMD_PORT:-4369}
+MN_DIST_BIND_HOST=${MN_DIST_BIND_HOST:-127.0.0.1}
+MN_DIST_PORT=${MN_DIST_PORT:-4370}
+MN_NODE_NAME=${MN_NODE_NAME:-}
+MN_NODE_ROLE=${MN_NODE_ROLE:-runtime}
+MN_CLUSTER_NODES=${MN_CLUSTER_NODES:-}
+MN_REDIS_URL=${MN_REDIS_URL:-redis://redis:6379/0}
+ERL_EPMD_ADDRESS=${ERL_EPMD_ADDRESS:-0.0.0.0}
+ERL_AFLAGS=${ERL_AFLAGS:--kernel inet_dist_listen_min ${MN_DIST_PORT:-4370} inet_dist_listen_max ${MN_DIST_PORT:-4370}}
+OPENSHELL_GATEWAY_BIND_HOST=${OPENSHELL_GATEWAY_BIND_HOST:-127.0.0.1}
+OPENSHELL_GATEWAY_PORT=${OPENSHELL_GATEWAY_PORT:-8080}
+OPENSHELL_GATEWAY_ENDPOINT=${OPENSHELL_GATEWAY_ENDPOINT:-http://127.0.0.1:${OPENSHELL_GATEWAY_PORT:-8080}}
+OPENSHELL_GATEWAY_USER=${OPENSHELL_GATEWAY_USER}
+OPENSHELL_GATEWAY_DOCKER_GROUP=${OPENSHELL_GATEWAY_DOCKER_GROUP}
+MN_COOKIE=$(resolve_mn_cookie)
+MN_GRPC_AUTH_TOKEN=$(resolve_grpc_auth_token)
+MN_MIRROR_NEURON_GRPC_ADMIN_TOKEN=$(resolve_grpc_admin_token)
+EOF
+    chmod 600 "$RUNTIME_COMPOSE_ENV" 2>/dev/null || true
+}
 
-    docker pull "$gateway_image" >/dev/null
+function runtime_compose() {
+    docker compose --env-file "$RUNTIME_COMPOSE_ENV" -f "$RUNTIME_COMPOSE_FILE" "$@"
+}
 
-    if "$openshell_bin" status >/dev/null 2>&1 && NO_COLOR=1 "$openshell_bin" sandbox list >/dev/null 2>&1; then
-        prepare_openshell_container_config "$container_gateway_host" "$gateway_port"
-        return
+function start_runtime_compose_sidecars() {
+    local services=()
+    [ "$INSTALL_REDIS" = "Y" ] && services+=("redis")
+    [ "$INSTALL_OPENSHELL" = "Y" ] && services+=("openshell")
+    if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
+        services+=("context-engine-model" "membrane-context-engine")
     fi
-
-    "$openshell_bin" "${gateway_start_args[@]}" >/dev/null 2>&1 || true
-    if ! NO_COLOR=1 "$openshell_bin" sandbox list >/dev/null 2>&1; then
-        "$openshell_bin" "${gateway_start_args[@]}" --recreate >/dev/null
+    if [ "${#services[@]}" -gt 0 ]; then
+        runtime_compose up -d "${services[@]}" >/dev/null
     fi
-    NO_COLOR=1 "$openshell_bin" sandbox list >/dev/null
-    prepare_openshell_container_config "$container_gateway_host" "$gateway_port"
 }
 
 print_step "Checking Python runtime"
@@ -476,13 +556,14 @@ if [ -d "$INSTALL_DIR" ] || [ -f "$BIN_DIR/mn" ]; then
     fi
     echo "" >&3
     # Clean up to ensure a fresh overwrite
-    rm -rf "$INSTALL_DIR" "$VENV_DIR" "${INSTALL_DIR}_ui" "$BIN_DIR/mn" "$BIN_DIR/mn-api"
+    rm -rf "$INSTALL_DIR" "$VENV_DIR" "$LEGACY_UI_DIR" "$BIN_DIR/mn" "$BIN_DIR/mn-api"
 fi
 
 # Interactive Prompts
 echo -e "${CYAN}${BOLD}Configuration${RESET}" >&3
 INSTALL_WEB_UI=$(ask "Do you want to install the Web UI?" "Y")
 INSTALL_REDIS=$(ask "Do you want to install Redis via Docker?" "Y")
+INSTALL_CONTEXT_ENGINE=$(ask "Do you want to install/start the Membrane context engine?" "$INSTALL_CONTEXT_ENGINE")
 INSTALL_OPENSHELL=$(ask "Do you want to install/start the OpenShell gateway for sandbox workers?" "Y")
 START_NOW=$(ask "Do you want to start the MirrorNeuron server automatically after install?" "Y")
 echo "" >&3
@@ -506,8 +587,8 @@ if ! command -v docker &> /dev/null; then
     print_error "'docker' is required but not installed."
     exit 1
 fi
-if [ "$INSTALL_OPENSHELL" = "Y" ] && ! command -v curl >/dev/null 2>&1; then
-    print_error "'curl' is required to install/start OpenShell."
+if [ ! -f "$RUNTIME_COMPOSE_TEMPLATE" ]; then
+    print_error "MirrorNeuron runtime Docker Compose template is missing: $RUNTIME_COMPOSE_TEMPLATE"
     exit 1
 fi
 if ! docker info >/dev/null 2>&1; then
@@ -569,6 +650,7 @@ EOF
     docker build -t mirror-neuron-core . >/dev/null 2>&1
 ) &
 spinner $! "Cloning and building Core (Docker image mirror-neuron-core)"
+write_runtime_compose_files
 
 print_step "Installing Python CLI & API"
 if [ -n "$SOURCE_WORKSPACE" ]; then
@@ -588,9 +670,16 @@ fi
     fi
 
     if [ -n "$SOURCE_WORKSPACE" ]; then
-        run_quiet "install-blueprint-support-skill-local" "$VENV_DIR/bin/pip" install "$SOURCE_WORKSPACE/mn-skills/blueprint-support-skill[webui]"
+        if [ -f "$SOURCE_WORKSPACE/mn-skills/blueprint_support_skill/pyproject.toml" ]; then
+            run_quiet "install-blueprint-support-skill-local" "$VENV_DIR/bin/pip" install "$SOURCE_WORKSPACE/mn-skills/blueprint_support_skill[webui]"
+        elif [ -f "$SOURCE_WORKSPACE/mn-skills/blueprint-support-skill/pyproject.toml" ]; then
+            run_quiet "install-blueprint-support-skill-local" "$VENV_DIR/bin/pip" install "$SOURCE_WORKSPACE/mn-skills/blueprint-support-skill[webui]"
+        else
+            print_error "Could not find the blueprint support Python package under $SOURCE_WORKSPACE/mn-skills."
+            exit 1
+        fi
     else
-        run_quiet "install-blueprint-support-skill-github" "$VENV_DIR/bin/pip" install "mirrorneuron-blueprint-support-skill[webui] @ git+https://github.com/MirrorNeuronLab/mn-skills.git#subdirectory=blueprint-support-skill"
+        run_quiet "install-blueprint-support-skill-github" "$VENV_DIR/bin/pip" install "mirrorneuron-blueprint-support-skill[webui] @ git+https://github.com/MirrorNeuronLab/mn-skills.git#subdirectory=blueprint_support_skill"
     fi
     
     if [ -n "$SOURCE_WORKSPACE" ]; then
@@ -604,6 +693,14 @@ fi
     else
         run_quiet "install-mn-api-github" "$VENV_DIR/bin/pip" install git+https://github.com/MirrorNeuronLab/mn-api.git
     fi
+
+    if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
+        if [ -n "$SOURCE_WORKSPACE" ] && [ -d "$SOURCE_WORKSPACE/Membrane/mn-context-engine-python-sdk" ]; then
+            run_quiet "install-membrane-python-sdk-local" "$VENV_DIR/bin/pip" install "$SOURCE_WORKSPACE/Membrane/mn-context-engine-python-sdk"
+        else
+            run_quiet "install-membrane-python-sdk-pypi" "$VENV_DIR/bin/pip" install --upgrade mirrorneuron-membrane-python-sdk
+        fi
+    fi
 ) &
 spinner $! "Setting up virtualenv and installing Python packages"
 
@@ -613,7 +710,8 @@ if [ "$INSTALL_WEB_UI" = "Y" ]; then
         print_success "Using local Web UI source from $SOURCE_WORKSPACE/mn-web-ui."
     fi
     (
-        UI_DIR="${INSTALL_DIR}_ui"
+        UI_DIR="${INSTALL_DIR}/webui"
+        rm -rf "$LEGACY_UI_DIR"
         if [ -n "$SOURCE_WORKSPACE" ] && [ -d "$SOURCE_WORKSPACE/mn-web-ui" ]; then
             cd "$SOURCE_WORKSPACE/mn-web-ui"
             run_quiet "web-ui-npm-install-local" npm install
@@ -635,21 +733,13 @@ if [ "$INSTALL_WEB_UI" = "Y" ]; then
     spinner $! "Cloning and building Web UI (React)"
 fi
 
-if [ "$INSTALL_REDIS" = "Y" ]; then
-    print_step "Setting up Redis"
-    (
-        docker_names="$(docker ps --format '{{.Names}}')"
-        if ! grep -qx 'mirror-neuron-redis' <<< "$docker_names"; then
-            docker run -d --name mirror-neuron-redis -p 6379:6379 redis:7 >/dev/null 2>&1 || true
-        fi
-    ) &
-    spinner $! "Starting Redis via Docker"
-fi
-
-if [ "$INSTALL_OPENSHELL" = "Y" ]; then
-    print_step "Setting up OpenShell"
-    ( setup_openshell_gateway ) &
-    spinner $! "OpenShell gateway is available"
+if [ "$INSTALL_REDIS" = "Y" ] || [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] || [ "$INSTALL_OPENSHELL" = "Y" ]; then
+    print_step "Setting up Docker runtime services with Compose"
+    if [ "$INSTALL_OPENSHELL" = "Y" ]; then
+        install_openshell_cli
+    fi
+    ( start_runtime_compose_sidecars ) &
+    spinner $! "Docker runtime services are available"
 fi
 
 print_step "Creating Symlinks"
@@ -664,6 +754,9 @@ echo "" >&3
 print_success "MirrorNeuron installation successfully completed! 🚀" >&3
 echo -e "CLI is available as ${YELLOW}mn${RESET}." >&3
 echo -e "API is available as ${YELLOW}mn-api${RESET}." >&3
+if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
+    echo -e "Membrane context engine is available on ${YELLOW}${MN_CONTEXT_ADDR:-localhost:50052}${RESET}." >&3
+fi
 
 if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
     echo -e "\n${YELLOW}${BOLD}Note:${RESET} ${YELLOW}$BIN_DIR is not in your PATH.${RESET}" >&3
@@ -692,7 +785,7 @@ fi
 echo -e "\n${BOLD}Quick Start:${RESET}" >&3
 echo -e "  1. Start the server (Core & API): ${GREEN}mn start${RESET}" >&3
 if [ "$INSTALL_WEB_UI" = "Y" ]; then
-    echo -e "  2. Start the UI:   ${GREEN}cd ${INSTALL_DIR}_ui && npm run dev${RESET}" >&3
+    echo -e "  2. Start the UI:   ${GREEN}cd ${INSTALL_DIR}/webui && npm run dev${RESET}" >&3
 fi
 echo -e "  3. Use the CLI:    ${GREEN}mn nodes${RESET}\n" >&3
 

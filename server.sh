@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-DIR="${HOME}/.mirror_neuron"
+DIR="${MN_HOME:-${MIRROR_NEURON_HOME:-${HOME}/.mn}}"
 PID_DIR="${DIR}/.pids"
 LOG_DIR="${DIR}/.logs"
 BEAM_PID_FILE="${PID_DIR}/beam.pid"
@@ -8,6 +8,8 @@ API_PID_FILE="${PID_DIR}/api.pid"
 BEAM_LOG="${LOG_DIR}/beam.log"
 API_LOG="${LOG_DIR}/api.log"
 VENV_DIR="${HOME}/.local/share/mn_venv"
+RUNTIME_COMPOSE_FILE="${DIR}/docker-compose.yml"
+RUNTIME_COMPOSE_ENV="${DIR}/docker-compose.env"
 
 generate_mn_cookie() {
     if command -v openssl >/dev/null 2>&1; then
@@ -137,6 +139,14 @@ check_status() {
     return 2 # Not running
 }
 
+runtime_compose_available() {
+    [ -f "$RUNTIME_COMPOSE_FILE" ] && [ -f "$RUNTIME_COMPOSE_ENV" ]
+}
+
+runtime_compose() {
+    docker compose --env-file "$RUNTIME_COMPOSE_ENV" -f "$RUNTIME_COMPOSE_FILE" "$@"
+}
+
 kill_tree() {
     local parent=$1
     if kill -0 "$parent" 2>/dev/null; then
@@ -155,11 +165,13 @@ start_services() {
         echo "=> Use '$0 status' to check, or '$0 stop' to stop."
         exit 1
     fi
-    docker_names="$(docker ps --format '{{.Names}}')"
-    if grep -qx "mirror-neuron-core" <<< "$docker_names"; then
-        echo "=> Error: MirrorNeuron Core (Docker) is already running."
-        echo "=> Use '$0 status' to check, or '$0 stop' to stop."
-        exit 1
+    if ! runtime_compose_available; then
+        docker_names="$(docker ps --format '{{.Names}}')"
+        if grep -qx "mirror-neuron-core" <<< "$docker_names"; then
+            echo "=> Error: MirrorNeuron Core (Docker) is already running."
+            echo "=> Use '$0 status' to check, or '$0 stop' to stop."
+            exit 1
+        fi
     fi
 
     mkdir -p "$PID_DIR" "$LOG_DIR"
@@ -168,38 +180,45 @@ start_services() {
     echo "Starting Services in Detached Mode..."
     echo "==========================================="
 
-    echo "=> Starting MirrorNeuron Core Service (Docker)..."
-    docker rm -f mirror-neuron-core >/dev/null 2>&1 || true
     mn_cookie="$(resolve_mn_cookie)"
     grpc_auth_token="$(resolve_grpc_auth_token)"
     grpc_admin_token="$(resolve_grpc_admin_token)"
     export MN_GRPC_AUTH_TOKEN="${MN_GRPC_AUTH_TOKEN:-$grpc_auth_token}"
     export MN_MIRROR_NEURON_GRPC_ADMIN_TOKEN="${MN_MIRROR_NEURON_GRPC_ADMIN_TOKEN:-$grpc_admin_token}"
-    core_cmd=(
-        docker run -d --name mirror-neuron-core --network host
-        -e "MN_COOKIE=${mn_cookie}"
-        -e "MN_GRPC_AUTH_TOKEN=${MN_GRPC_AUTH_TOKEN}"
-        -e "MN_MIRROR_NEURON_GRPC_ADMIN_TOKEN=${MN_MIRROR_NEURON_GRPC_ADMIN_TOKEN}"
-        -e "MN_CORE_HOST=${MN_CORE_HOST:-localhost}"
-        -e "MN_REDIS_HOST=${MN_REDIS_HOST:-localhost}"
-        -e "ERL_EPMD_ADDRESS=${MN_EPMD_HOST:-localhost}"
-    )
-    if [ -n "${MN_NODE_NAME:-}" ]; then
-        core_cmd+=("-e" "MN_NODE_NAME=${MN_NODE_NAME}")
+    if runtime_compose_available; then
+        echo "=> Starting MirrorNeuron Docker runtime (Compose)..."
+        runtime_compose up -d >/dev/null
+        echo "   [Started] Docker runtime (Compose project: mirror-neuron)"
+    else
+        echo "=> Starting MirrorNeuron Core Service (Docker)..."
+        docker rm -f mirror-neuron-core >/dev/null 2>&1 || true
+        core_cmd=(
+            docker run -d --name mirror-neuron-core --network host
+            -e "MN_COOKIE=${mn_cookie}"
+            -e "MN_GRPC_AUTH_TOKEN=${MN_GRPC_AUTH_TOKEN}"
+            -e "MN_MIRROR_NEURON_GRPC_ADMIN_TOKEN=${MN_MIRROR_NEURON_GRPC_ADMIN_TOKEN}"
+            -e "MN_CORE_HOST=${MN_CORE_HOST:-localhost}"
+            -e "MN_REDIS_HOST=${MN_REDIS_HOST:-localhost}"
+            -e "ERL_EPMD_ADDRESS=${MN_EPMD_HOST:-localhost}"
+            -e "MN_DIST_PORT=${MN_DIST_PORT:-4370}"
+        )
+        if [ -n "${MN_NODE_NAME:-}" ]; then
+            core_cmd+=("-e" "MN_NODE_NAME=${MN_NODE_NAME}")
+        fi
+        openshell_config_dir="$HOME/.config/openshell"
+        openshell_container_config_dir="${OPENSHELL_CONTAINER_CONFIG_DIR:-$HOME/.config/openshell-mirror-neuron}"
+        openshell_mount_dir="$openshell_config_dir"
+        if [ -d "$openshell_container_config_dir/gateways/openshell" ]; then
+            openshell_mount_dir="$openshell_container_config_dir"
+        fi
+        if [ -d "$openshell_mount_dir/gateways/openshell" ]; then
+            core_cmd+=("-v" "$openshell_mount_dir:/root/.config/openshell:ro")
+            core_cmd+=("-v" "$openshell_mount_dir:/opt/mirror_neuron/.config/openshell:ro")
+        fi
+        core_cmd+=(mirror-neuron-core:latest)
+        "${core_cmd[@]}" >/dev/null
+        echo "   [Started] Core Service (Docker: mirror-neuron-core)"
     fi
-    openshell_config_dir="$HOME/.config/openshell"
-    openshell_container_config_dir="${OPENSHELL_CONTAINER_CONFIG_DIR:-$HOME/.config/openshell-mirror-neuron}"
-    openshell_mount_dir="$openshell_config_dir"
-    if [ -d "$openshell_container_config_dir/gateways/openshell" ]; then
-        openshell_mount_dir="$openshell_container_config_dir"
-    fi
-    if [ -d "$openshell_mount_dir/gateways/openshell" ]; then
-        core_cmd+=("-v" "$openshell_mount_dir:/root/.config/openshell:ro")
-        core_cmd+=("-v" "$openshell_mount_dir:/opt/mirror_neuron/.config/openshell:ro")
-    fi
-    core_cmd+=(mirror-neuron-core:latest)
-    "${core_cmd[@]}" >/dev/null
-    echo "   [Started] Core Service (Docker: mirror-neuron-core)"
 
     echo "=> Waiting for Elixir to boot..."
     sleep 3
@@ -230,9 +249,14 @@ start_services() {
 stop_services() {
     echo "=> Stopping MirrorNeuron Services..."
     
-    echo "   Stopping Core Service (Docker: mirror-neuron-core)..."
-    docker stop mirror-neuron-core >/dev/null 2>&1 || true
-    docker rm mirror-neuron-core >/dev/null 2>&1 || true
+    if runtime_compose_available; then
+        echo "   Stopping Docker runtime (Compose)..."
+        runtime_compose down >/dev/null 2>&1 || true
+    else
+        echo "   Stopping Core Service (Docker: mirror-neuron-core)..."
+        docker stop mirror-neuron-core >/dev/null 2>&1 || true
+        docker rm mirror-neuron-core >/dev/null 2>&1 || true
+    fi
     
     for pid_file in "$API_PID_FILE" "$BEAM_PID_FILE"; do
         if [ -f "$pid_file" ]; then
@@ -257,11 +281,19 @@ status_services() {
     print_ascii_art
     echo "Service Status:"
     
-    docker_names="$(docker ps --format '{{.Names}}')"
-    if grep -qx "mirror-neuron-core" <<< "$docker_names"; then
-        echo "  [OK] Core Service (Docker: mirror-neuron-core) is running"
+    if runtime_compose_available; then
+        if runtime_compose ps --status running --services 2>/dev/null | grep -qx "mirror-neuron-core"; then
+            echo "  [OK] Docker runtime (Compose) is running"
+        else
+            echo "  [--] Docker runtime (Compose) is not running"
+        fi
     else
-        echo "  [--] Core Service (Docker: mirror-neuron-core) is not running"
+        docker_names="$(docker ps --format '{{.Names}}')"
+        if grep -qx "mirror-neuron-core" <<< "$docker_names"; then
+            echo "  [OK] Core Service (Docker: mirror-neuron-core) is running"
+        else
+            echo "  [--] Core Service (Docker: mirror-neuron-core) is not running"
+        fi
     fi
 
     check_status "$API_PID_FILE"

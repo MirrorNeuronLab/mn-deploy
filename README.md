@@ -9,13 +9,15 @@ This repository keeps shell scripts used to install, start, stop, and remove a l
 | Component | Source |
 | --- | --- |
 | MirrorNeuron core | GitHub Release OTP tarball from `MirrorNeuronLab/MirrorNeuron` |
-| Python SDK | PyPI package `mirrorneuron-python-sdk` |
-| Blueprint support skill | GitHub repository `MirrorNeuronLab/mn-skills`, subdirectory `blueprint-support-skill` |
-| CLI | PyPI package `mirrorneuron-cli` |
-| API | PyPI package `mirrorneuron-api` |
+| Python SDK | Native PyPI package `mirrorneuron-python-sdk` in `~/.local/share/mn_venv` |
+| Blueprint support skill | GitHub repository `MirrorNeuronLab/mn-skills`, subdirectory `blueprint_support_skill` |
+| CLI | Native PyPI package `mirrorneuron-cli` in `~/.local/share/mn_venv` |
+| API | Native PyPI package `mirrorneuron-api` in `~/.local/share/mn_venv` |
 | Web UI | npm package `mirrorneuron-web-ui` |
-| Redis | Docker image `redis:7`, if selected |
-| OpenShell | Docker image `mirrorneuronlab/openshell:latest`, if selected |
+| Docker runtime | One Compose project for Core, Redis, OpenShell gateway, Membrane context engine, and context model |
+| Redis | Compose service using Docker image `redis:7` |
+| Membrane context engine | Compose services built from `MirrorNeuronLab/Membrane` plus native `mirrorneuron-membrane-python-sdk`, if selected |
+| OpenShell | Compose service using Docker image `ghcr.io/nvidia/openshell/gateway:0.0.47`, if selected |
 
 ## Prerequisites
 
@@ -39,6 +41,7 @@ Run non-interactively with preselected choices:
 
 ```bash
 ./install_bin.sh --yes --no-web-ui
+./install_bin.sh --yes --no-context-engine
 ./install_bin.sh --yes --no-web-ui --python-components sdk,api
 MN_PYTHON=/opt/homebrew/bin/python3.11 ./install_bin.sh --yes
 MN_MANAGED_PYTHON=0 ./install_bin.sh --yes
@@ -60,8 +63,9 @@ MN_CORE_REPO=MirrorNeuronLab/MirrorNeuron ./install_bin.sh
 The installer prompts for:
 
 - Web UI installation.
-- Redis installation through Docker.
-- OpenShell setup.
+- Docker runtime setup. Core, Redis, OpenShell, the Membrane context engine, and the context model share one Compose project so services can talk by service name.
+- Membrane context engine installation and startup through Docker Compose. The default is yes.
+- OpenShell gateway startup through Docker Compose.
 - Python components: SDK, blueprint support skill, CLI, and API.
 - Whether to start MirrorNeuron after installation.
 
@@ -71,14 +75,19 @@ Use `./install_bin.sh --help` for all non-interactive flags.
 
 | Path | Purpose |
 | --- | --- |
-| `~/.mirror_neuron` | Core install metadata and extracted core release files. |
+| `~/.mn` | Core install metadata, extracted core release files, runtime state, and generated Compose files. |
+| `~/.mn/docker-compose.yml` | Generated Compose file for the local Docker runtime. |
+| `~/.mn/docker-compose.env` | Generated Compose environment file with host paths and runtime tokens. |
+| `~/.mn/openshell-state` | OpenShell gateway SQLite state mounted into the Compose service. |
+| `~/.mn` | Native runtime data mapped into the Core container. |
+| `~/.config/openshell-mirror-neuron` | Container-facing OpenShell gateway config for the Compose network. |
 | `~/.local/share/mn_python` | Private uv-managed Python runtime, only when no Python 3.11+ is already available. |
 | `~/.local/share/mn_uv` | Private uv install used to manage Python when uv is not already installed. |
 | `~/.local/share/mn_venv` | Python virtual environment for CLI, API, SDK, and skills. |
-| `~/.mirror_neuron_ui` | Installed Web UI package output. |
+| `~/.mn/webui` | Installed Web UI package output. |
 | `~/.local/bin/mn` | CLI symlink. |
 | `~/.local/bin/mn-api` | API symlink. |
-| `~/.mirror_neuron/install_metadata.json` | Installed core release tag, platform, asset URL, and update time. |
+| `~/.mn/install_metadata.json` | Installed core release tag, platform, asset URL, and update time. |
 
 ## Runtime Commands
 
@@ -90,7 +99,30 @@ mn nodes
 mn stop
 ```
 
-The CLI manages the local core container, API process, and Web UI when installed.
+The CLI manages the Compose runtime, native API process, and Web UI when installed. The Core gRPC port and OpenShell gateway port are exposed on loopback for the native CLI. Redis stays inside the Compose network and is not published to the host. The API port remains native because `mn-api` is installed outside Docker.
+
+For a two-machine Compose cluster, keep the native `mn` CLI and Python SDK installed on each host, then use an externally reachable Redis or Redis Sentinel endpoint for shared cluster state. The local Compose Redis is internal-only and is intended for a single host.
+
+```bash
+# machine 1
+MN_NODE_NAME=mn1@192.168.4.10 \
+MN_CLUSTER_NODES=mn1@192.168.4.10,mn2@192.168.4.173 \
+MN_REDIS_URL=redis://192.168.4.10:6379/0 \
+MN_GRPC_BIND_HOST=0.0.0.0 \
+MN_EPMD_BIND_HOST=0.0.0.0 \
+MN_DIST_BIND_HOST=0.0.0.0 \
+mn start
+
+# machine 2
+MN_NODE_NAME=mn2@192.168.4.173 \
+MN_CLUSTER_NODES=mn1@192.168.4.10,mn2@192.168.4.173 \
+MN_REDIS_URL=redis://192.168.4.10:6379/0 \
+MN_EPMD_BIND_HOST=0.0.0.0 \
+MN_DIST_BIND_HOST=0.0.0.0 \
+mn start
+```
+
+The default host-facing cluster ports are gRPC `50051`, EPMD `4369`, fixed BEAM distribution `4370`, and OpenShell `8080`.
 
 ## Update Behavior
 
@@ -130,6 +162,27 @@ Updating stops running jobs. Run it only when no important jobs are active.
 | `MN_UV_DIR` | `~/.local/share/mn_uv` | Private uv install root when no `uv` command is already available. |
 | `MN_SKILLS_REPO` | `MirrorNeuronLab/mn-skills` | GitHub repository used to install Python skills. |
 | `MN_SKILLS_GIT_URL` | unset | Direct Git URL for skills. When set, overrides `MN_SKILLS_REPO`. |
+| `MN_MEMBRANE_REPO` | `MirrorNeuronLab/Membrane` | GitHub repository used to install the Membrane context engine. |
+| `MN_MEMBRANE_GIT_URL` | unset | Direct Git URL for Membrane. When set, overrides `MN_MEMBRANE_REPO`. |
+| `MN_MEMBRANE_DIR` | `~/.mn/Membrane` | Local Membrane checkout or source path used by installers. |
+| `MN_CONTEXT_ADDR` | `localhost:50052` | Context engine address used by blueprints and OtterDesk conversation memory. |
+| `MN_GRPC_BIND_HOST` | `127.0.0.1` | Native host address used for the Core gRPC Compose port binding. |
+| `MN_GRPC_PORT` | `50051` | Native host port mapped to Core gRPC in Docker. |
+| `MN_EPMD_BIND_HOST` | `127.0.0.1` | Native host address used for Erlang EPMD in Compose. |
+| `MN_EPMD_PORT` | `4369` | Native host port mapped to Erlang EPMD. |
+| `MN_DIST_BIND_HOST` | `127.0.0.1` | Native host address used for the fixed BEAM distribution port in Compose. |
+| `MN_DIST_PORT` | `4370` | Fixed BEAM distribution port used for cluster communication. |
+| `MN_NODE_NAME` | unset | Erlang node name for cluster mode, for example `mn1@192.168.4.10`. |
+| `MN_CLUSTER_NODES` | unset | Comma-separated Erlang node names expected in the cluster. |
+| `MN_REDIS_URL` | `redis://redis:6379/0` | Redis URL used by Core. The default points to the internal Compose Redis; use an externally reachable Redis or Sentinel setup for multi-host clusters. |
+| `MN_HOST_MN_DIR` | `~/.mn` | Native runtime-data directory mounted into Core. |
+| `MN_HOST_OPENSHELL_STATE_DIR` | `~/.mn/openshell-state` | Host directory mounted at the same absolute path inside the OpenShell gateway so Docker-backed sandbox supervisor bind mounts resolve correctly. |
+| `OPENSHELL_GATEWAY_BIND_HOST` | `127.0.0.1` | Native host address used for the OpenShell gateway Compose port binding. |
+| `OPENSHELL_GATEWAY_PORT` | `8080` | Native host port mapped to the OpenShell gateway for custom image builds and sandbox utilities. |
+| `OPENSHELL_GATEWAY_ENDPOINT` | `http://127.0.0.1:8080` | Endpoint used by native OpenShell CLI commands. |
+| `OPENSHELL_GATEWAY_USER` | current host uid/gid | Numeric user used for the OpenShell gateway container so it can access the Docker socket and its SQLite state directory. |
+| `OPENSHELL_GATEWAY_DOCKER_GROUP` | `0` | Supplemental container group used for Docker socket access on Docker Desktop. |
+| `OPENSHELL_GATEWAY_IMAGE` | `ghcr.io/nvidia/openshell/gateway:0.0.47` | OpenShell gateway image used by the Compose runtime; keep this aligned with the installed OpenShell CLI. |
 | `GITHUB_TOKEN` / `GH_TOKEN` | unset | Optional token passed to GitHub release download requests. |
 | `PIP_NO_INPUT` | `1` | Prevents interactive pip prompts during install. |
 | `MN_API_HOST` | `localhost` | API host used by generated Web UI proxy config. |

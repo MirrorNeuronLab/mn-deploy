@@ -102,10 +102,21 @@ if [ "$CONFIRM" != "Y" ]; then
     exit 0
 fi
 
-INSTALL_DIR="${HOME}/.mirror_neuron"
-UI_DIR="${INSTALL_DIR}_ui"
+INSTALL_DIR="${MN_HOME:-${MIRROR_NEURON_HOME:-${HOME}/.mn}}"
+UI_DIR="${INSTALL_DIR}/webui"
+LEGACY_UI_DIR="${INSTALL_DIR}_ui"
 BIN_DIR="${HOME}/.local/bin"
 VENV_DIR="${HOME}/.local/share/mn_venv"
+
+if command -v docker >/dev/null 2>&1 && [ -f "$INSTALL_DIR/docker-compose.yml" ]; then
+    print_step "Stopping Docker Compose Runtime"
+    if [ -f "$INSTALL_DIR/docker-compose.env" ]; then
+        docker compose --env-file "$INSTALL_DIR/docker-compose.env" -f "$INSTALL_DIR/docker-compose.yml" down >/dev/null 2>&1 || true
+    else
+        docker compose -f "$INSTALL_DIR/docker-compose.yml" down >/dev/null 2>&1 || true
+    fi
+    print_success "Stopped Docker Compose runtime."
+fi
 
 print_step "Removing Symlinks"
 rm -f "$BIN_DIR/mn" "$BIN_DIR/mn-api"
@@ -128,11 +139,15 @@ else
 fi
 
 print_step "Removing Web UI Installation"
-if [ -d "$UI_DIR" ]; then
+if [ -d "$UI_DIR" ] || [ -L "$UI_DIR" ]; then
     rm -rf "$UI_DIR"
     print_success "Removed Web UI installation at $UI_DIR"
 else
     print_success "Web UI installation not found, skipping."
+fi
+if [ -d "$LEGACY_UI_DIR" ] || [ -L "$LEGACY_UI_DIR" ]; then
+    rm -rf "$LEGACY_UI_DIR"
+    print_success "Removed legacy Web UI installation at $LEGACY_UI_DIR"
 fi
 
 print_step "Removing Docker Containers and Images"
@@ -178,6 +193,8 @@ if command -v docker &> /dev/null; then
 
         removed_image="N"
         for image in \
+            "ghcr.io/nvidia/openshell/gateway:latest" \
+            "ghcr.io/nvidia/openshell/gateway:0.0.47" \
             "ghcr.io/nvidia/openshell/cluster:0.0.16" \
             "ghcr.io/nvidia/openshell/cluster:latest" \
             "mirrorneuronlab/openshell:latest"; do
