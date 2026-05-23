@@ -137,6 +137,11 @@ if [ -d "$INSTALL_DIR" ]; then
 else
     print_success "Core installation not found, skipping."
 fi
+LEGACY_INSTALL_DIR="${HOME}/.mirror_neuron"
+if [ "$LEGACY_INSTALL_DIR" != "$INSTALL_DIR" ] && [ -d "$LEGACY_INSTALL_DIR" ]; then
+    rm -rf "$LEGACY_INSTALL_DIR"
+    print_success "Removed legacy core installation at $LEGACY_INSTALL_DIR"
+fi
 
 print_step "Removing Web UI Installation"
 if [ -d "$UI_DIR" ] || [ -L "$UI_DIR" ]; then
