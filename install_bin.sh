@@ -889,6 +889,7 @@ function ensure_context_engine_source() {
 
 function setup_context_engine() {
     ensure_context_engine_source >/dev/null
+    remove_stale_runtime_containers_for_services context-engine-model membrane-context-engine
     runtime_compose up -d context-engine-model membrane-context-engine >/dev/null
 }
 
@@ -1230,6 +1231,41 @@ function runtime_compose() {
     docker compose --env-file "$RUNTIME_COMPOSE_ENV" -f "$RUNTIME_COMPOSE_FILE" "$@"
 }
 
+function runtime_container_name_for_service() {
+    case "$1" in
+        redis) echo "mirror-neuron-redis" ;;
+        openshell) echo "openshell-cluster-openshell" ;;
+        context-engine-model) echo "mirror-neuron-context-engine-model" ;;
+        membrane-context-engine) echo "mirror-neuron-context-engine" ;;
+        mirror-neuron-core) echo "mirror-neuron-core" ;;
+        *) return 1 ;;
+    esac
+}
+
+function remove_stale_runtime_container() {
+    local name="$1"
+    local project
+
+    if ! docker container inspect "$name" >/dev/null 2>&1; then
+        return 0
+    fi
+
+    project="$(docker container inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' "$name" 2>/dev/null || true)"
+    if [ "$project" = "mirror-neuron" ]; then
+        return 0
+    fi
+
+    docker rm -f "$name" >/dev/null 2>&1 || true
+}
+
+function remove_stale_runtime_containers_for_services() {
+    local service name
+    for service in "$@"; do
+        name="$(runtime_container_name_for_service "$service" || true)"
+        [ -n "$name" ] && remove_stale_runtime_container "$name"
+    done
+}
+
 function start_runtime_compose_sidecars() {
     local services=()
     [ "$INSTALL_REDIS" = "Y" ] && services+=("redis")
@@ -1238,6 +1274,7 @@ function start_runtime_compose_sidecars() {
         services+=("context-engine-model" "membrane-context-engine")
     fi
     if [ "${#services[@]}" -gt 0 ]; then
+        remove_stale_runtime_containers_for_services "${services[@]}"
         runtime_compose up -d "${services[@]}" >/dev/null
     fi
 }
