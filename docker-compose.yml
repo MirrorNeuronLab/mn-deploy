@@ -8,7 +8,7 @@ services:
     expose:
       - "6379"
     ports:
-      - "${MN_REDIS_BIND_HOST:-127.0.0.1}:${MN_REDIS_PORT:-6379}:6379"
+      - "${MN_REDIS_BIND_HOST:-0.0.0.0}:${MN_REDIS_PORT:-56379}:6379"
     environment:
       MN_REDIS_PASSWORD: ${MN_REDIS_PASSWORD:-}
     command: >

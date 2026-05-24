@@ -43,6 +43,8 @@ MN_HOST_OPENSHELL_CONFIG_DIR="${OPENSHELL_CONTAINER_CONFIG_DIR:-${HOME}/.config/
 MN_HOST_OPENSHELL_STATE_DIR="${MN_HOST_OPENSHELL_STATE_DIR:-${INSTALL_DIR}/openshell-state}"
 OPENSHELL_GATEWAY_USER="${OPENSHELL_GATEWAY_USER:-$(id -u):$(id -g)}"
 OPENSHELL_GATEWAY_DOCKER_GROUP="${OPENSHELL_GATEWAY_DOCKER_GROUP:-0}"
+MN_DYNAMIC_REDIS_PORT_START="${MN_DYNAMIC_REDIS_PORT_START:-56379}"
+MN_DYNAMIC_REDIS_PORT_END="${MN_DYNAMIC_REDIS_PORT_END:-56478}"
 MN_PYTHON_BIN=""
 MN_MANAGED_PYTHON="${MN_MANAGED_PYTHON:-1}"
 MN_MANAGED_PYTHON_VERSION="${MN_MANAGED_PYTHON_VERSION:-3.11}"
@@ -551,6 +553,123 @@ function resolve_grpc_admin_token() {
     printf '%s\n' "$token"
 }
 
+function resolve_network_token() {
+    local env_token="${MN_NETWORK_JOIN_TOKEN:-}"
+    local token_file="${INSTALL_DIR}/network.token"
+    local token
+
+    if [ -n "$env_token" ]; then
+        printf '%s\n' "$env_token" > "$token_file"
+        chmod 600 "$token_file" 2>/dev/null || true
+        printf '%s\n' "$env_token"
+        return 0
+    fi
+
+    mkdir -p "$INSTALL_DIR"
+    if [ -s "$token_file" ]; then
+        token="$(tr -d '[:space:]' < "$token_file")"
+        if [ -n "$token" ]; then
+            chmod 600 "$token_file" 2>/dev/null || true
+            printf '%s\n' "$token"
+            return 0
+        fi
+    fi
+
+    token="$(generate_mn_cookie)"
+    printf '%s\n' "$token" > "$token_file"
+    chmod 600 "$token_file" 2>/dev/null || true
+    printf '%s\n' "$token"
+}
+
+function derive_network_secret() {
+    local token="$1"
+    local label="$2"
+    local material="mirror-neuron:${label}:${token}"
+
+    if command -v shasum >/dev/null 2>&1; then
+        printf '%s' "$material" | shasum -a 256 | awk '{print $1}'
+    elif command -v sha256sum >/dev/null 2>&1; then
+        printf '%s' "$material" | sha256sum | awk '{print $1}'
+    elif command -v openssl >/dev/null 2>&1; then
+        printf '%s' "$material" | openssl dgst -sha256 -r | awk '{print $1}'
+    else
+        print_error "Need shasum, sha256sum, or openssl to derive Redis credentials."
+        exit 1
+    fi
+}
+
+function read_env_value() {
+    local file="$1"
+    local key="$2"
+    [ -f "$file" ] || return 0
+    awk -F= -v key="$key" '$1 == key {print substr($0, index($0, "=") + 1); exit}' "$file"
+}
+
+function redis_probe_host() {
+    case "${1:-}" in
+        ""|0.0.0.0|::|localhost) printf '127.0.0.1' ;;
+        *) printf '%s' "$1" ;;
+    esac
+}
+
+function redis_container_owns_port() {
+    local port="$1"
+    docker port mirror-neuron-redis 6379/tcp 2>/dev/null | awk -F: -v port="$port" '$NF == port {found=1} END {exit found ? 0 : 1}'
+}
+
+function redis_port_available() {
+    local host="$1"
+    local port="$2"
+    local probe_host
+    probe_host="$(redis_probe_host "$host")"
+
+    if redis_container_owns_port "$port"; then
+        return 0
+    fi
+    if (echo >"/dev/tcp/${probe_host}/${port}") >/dev/null 2>&1; then
+        return 1
+    fi
+    return 0
+}
+
+function resolve_redis_port() {
+    local bind_host="$1"
+    local persisted_port="$2"
+    local candidate
+
+    if [ -n "${MN_REDIS_PORT:-}" ]; then
+        candidate="$MN_REDIS_PORT"
+        if ! [[ "$candidate" =~ ^[0-9]+$ ]] || [ "$candidate" -lt 1 ] || [ "$candidate" -gt 65535 ]; then
+            print_error "MN_REDIS_PORT must be a TCP port between 1 and 65535."
+            exit 1
+        fi
+        if ! redis_port_available "$bind_host" "$candidate"; then
+            print_error "Redis port ${candidate} is already in use."
+            exit 1
+        fi
+        printf '%s\n' "$candidate"
+        return 0
+    fi
+
+    if [[ "$persisted_port" =~ ^[0-9]+$ ]] &&
+       [ "$persisted_port" -ge "$MN_DYNAMIC_REDIS_PORT_START" ] &&
+       [ "$persisted_port" -le "$MN_DYNAMIC_REDIS_PORT_END" ] &&
+       redis_port_available "$bind_host" "$persisted_port"; then
+        printf '%s\n' "$persisted_port"
+        return 0
+    fi
+
+    for candidate in $(seq "$MN_DYNAMIC_REDIS_PORT_START" "$MN_DYNAMIC_REDIS_PORT_END"); do
+        if redis_port_available "$bind_host" "$candidate"; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+
+    print_error "No Redis port is available in ${MN_DYNAMIC_REDIS_PORT_START}-${MN_DYNAMIC_REDIS_PORT_END}."
+    exit 1
+}
+
 function start_core_container() {
     local cmd=("docker" "run" "-d" "--name" "mirror-neuron-core")
     local openshell_config_dir="$HOME/.config/openshell"
@@ -703,11 +822,16 @@ function install_openshell_cli() {
 }
 
 function write_runtime_compose_files() {
-    local target build_target model_image profiles
+    local target build_target model_image profiles redis_bind_host persisted_redis_port redis_port network_token redis_password
     target="$(context_model_target)"
     build_target="$(context_model_build_target "$target")"
     model_image="$(context_model_image "$target")"
     profiles="$(compose_profiles)"
+    redis_bind_host="${MN_REDIS_BIND_HOST:-0.0.0.0}"
+    persisted_redis_port="$(read_env_value "$RUNTIME_COMPOSE_ENV" "MN_REDIS_PORT")"
+    redis_port="$(resolve_redis_port "$redis_bind_host" "$persisted_redis_port")"
+    network_token="$(resolve_network_token)"
+    redis_password="$(derive_network_secret "$network_token" "redis")"
 
     mkdir -p "$INSTALL_DIR" "$MN_HOST_MN_DIR" "$MN_HOST_OPENSHELL_CONFIG_DIR" "$MN_HOST_OPENSHELL_STATE_DIR"
     cp "$RUNTIME_COMPOSE_TEMPLATE" "$RUNTIME_COMPOSE_FILE"
@@ -739,7 +863,12 @@ MN_BLUEPRINT_WEB_UI_PORT_END=${MN_BLUEPRINT_WEB_UI_PORT_END:-58049}
 MN_NODE_NAME=${MN_NODE_NAME:-}
 MN_NODE_ROLE=${MN_NODE_ROLE:-runtime}
 MN_CLUSTER_NODES=${MN_CLUSTER_NODES:-}
-MN_REDIS_URL=${MN_REDIS_URL:-redis://redis:6379/0}
+MN_NETWORK_JOIN_TOKEN=${network_token}
+MN_REDIS_BIND_HOST=${redis_bind_host}
+MN_REDIS_PORT=${redis_port}
+MN_REDIS_PASSWORD=${redis_password}
+MN_REDIS_URL=${MN_REDIS_URL:-redis://:${redis_password}@redis:6379/0}
+MN_CONTEXT_REDIS_URL=${MN_CONTEXT_REDIS_URL:-redis://:${redis_password}@redis:6379/1}
 ERL_EPMD_ADDRESS=${ERL_EPMD_ADDRESS:-0.0.0.0}
 ERL_AFLAGS=${ERL_AFLAGS:--kernel inet_dist_listen_min ${MN_DIST_PORT:-4370} inet_dist_listen_max ${MN_DIST_PORT:-4370}}
 OPENSHELL_GATEWAY_BIND_HOST=${OPENSHELL_GATEWAY_BIND_HOST:-127.0.0.1}
