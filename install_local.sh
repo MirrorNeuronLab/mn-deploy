@@ -424,6 +424,14 @@ function require_file() {
     fi
 }
 
+function require_cmd() {
+    local cmd="$1"
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+        print_error "'$cmd' is required but not installed."
+        exit 1
+    fi
+}
+
 function replace_symlink() {
     local source="$1"
     local target="$2"
@@ -453,11 +461,30 @@ function core_container_running() {
 }
 
 function generate_mn_cookie() {
+    local secret
+
     if command -v openssl >/dev/null 2>&1; then
-        openssl rand -hex 32
-    else
-        od -An -N32 -tx1 /dev/urandom | tr -d ' \n'
+        if secret="$(openssl rand -hex 32 2>/dev/null)" && [ -n "$secret" ]; then
+            printf '%s\n' "$secret"
+            return 0
+        fi
     fi
+
+    if command -v od >/dev/null 2>&1 && [ -r /dev/urandom ]; then
+        if secret="$(od -An -N32 -tx1 /dev/urandom 2>/dev/null | tr -d ' \n')" && [ -n "$secret" ]; then
+            printf '%s\n' "$secret"
+            return 0
+        fi
+    fi
+
+    if command -v python3 >/dev/null 2>&1; then
+        if secret="$(python3 -c 'import secrets; print(secrets.token_hex(32))' 2>/dev/null)" && [ -n "$secret" ]; then
+            printf '%s\n' "$secret"
+            return 0
+        fi
+    fi
+
+    return 1
 }
 
 function resolve_mn_cookie() {
@@ -480,7 +507,9 @@ function resolve_mn_cookie() {
         fi
     fi
 
-    cookie="$(generate_mn_cookie)"
+    if ! cookie="$(generate_mn_cookie)"; then
+        cookie=""
+    fi
     if [ -z "$cookie" ]; then
         print_error "Failed to generate MN_COOKIE."
         exit 1
@@ -511,7 +540,9 @@ function resolve_grpc_auth_token() {
         fi
     fi
 
-    token="$(generate_mn_cookie)"
+    if ! token="$(generate_mn_cookie)"; then
+        token=""
+    fi
     if [ -z "$token" ]; then
         print_error "Failed to generate MN_GRPC_AUTH_TOKEN."
         exit 1
@@ -542,7 +573,9 @@ function resolve_grpc_admin_token() {
         fi
     fi
 
-    token="$(generate_mn_cookie)"
+    if ! token="$(generate_mn_cookie)"; then
+        token=""
+    fi
     if [ -z "$token" ]; then
         print_error "Failed to generate MN_MIRROR_NEURON_GRPC_ADMIN_TOKEN."
         exit 1
@@ -575,7 +608,13 @@ function resolve_network_token() {
         fi
     fi
 
-    token="$(generate_mn_cookie)"
+    if ! token="$(generate_mn_cookie)"; then
+        token=""
+    fi
+    if [ -z "$token" ]; then
+        print_error "Failed to generate MN_NETWORK_JOIN_TOKEN."
+        exit 1
+    fi
     printf '%s\n' "$token" > "$token_file"
     chmod 600 "$token_file" 2>/dev/null || true
     printf '%s\n' "$token"
@@ -585,17 +624,38 @@ function derive_network_secret() {
     local token="$1"
     local label="$2"
     local material="mirror-neuron:${label}:${token}"
+    local digest
 
     if command -v shasum >/dev/null 2>&1; then
-        printf '%s' "$material" | shasum -a 256 | awk '{print $1}'
-    elif command -v sha256sum >/dev/null 2>&1; then
-        printf '%s' "$material" | sha256sum | awk '{print $1}'
-    elif command -v openssl >/dev/null 2>&1; then
-        printf '%s' "$material" | openssl dgst -sha256 -r | awk '{print $1}'
-    else
-        print_error "Need shasum, sha256sum, or openssl to derive Redis credentials."
-        exit 1
+        if digest="$(printf '%s' "$material" | shasum -a 256 2>/dev/null | awk '{print $1}')" && [ -n "$digest" ]; then
+            printf '%s\n' "$digest"
+            return 0
+        fi
     fi
+
+    if command -v sha256sum >/dev/null 2>&1; then
+        if digest="$(printf '%s' "$material" | sha256sum 2>/dev/null | awk '{print $1}')" && [ -n "$digest" ]; then
+            printf '%s\n' "$digest"
+            return 0
+        fi
+    fi
+
+    if command -v openssl >/dev/null 2>&1; then
+        if digest="$(printf '%s' "$material" | openssl dgst -sha256 -r 2>/dev/null | awk '{print $1}')" && [ -n "$digest" ]; then
+            printf '%s\n' "$digest"
+            return 0
+        fi
+    fi
+
+    if command -v python3 >/dev/null 2>&1; then
+        if digest="$(printf '%s' "$material" | python3 -c 'import hashlib, sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())' 2>/dev/null)" && [ -n "$digest" ]; then
+            printf '%s\n' "$digest"
+            return 0
+        fi
+    fi
+
+    print_error "Need shasum, sha256sum, a working openssl, or python3 to derive Redis credentials."
+    exit 1
 }
 
 function read_env_value() {
@@ -825,7 +885,7 @@ function install_openshell_cli() {
 }
 
 function write_runtime_compose_files() {
-    local target build_target model_image profiles redis_bind_host persisted_redis_port redis_port network_token redis_password
+    local target build_target model_image profiles redis_bind_host persisted_redis_port redis_port network_token redis_password mn_cookie grpc_auth_token grpc_admin_token
     target="$(context_model_target)"
     build_target="$(context_model_build_target "$target")"
     model_image="$(context_model_image "$target")"
@@ -835,6 +895,9 @@ function write_runtime_compose_files() {
     redis_port="$(resolve_redis_port "$redis_bind_host" "$persisted_redis_port")"
     network_token="$(resolve_network_token)"
     redis_password="$(derive_network_secret "$network_token" "redis")"
+    mn_cookie="$(resolve_mn_cookie)"
+    grpc_auth_token="$(resolve_grpc_auth_token)"
+    grpc_admin_token="$(resolve_grpc_admin_token)"
 
     mkdir -p "$INSTALL_DIR" "$MN_HOST_MN_DIR" "$MN_HOST_OPENSHELL_CONFIG_DIR" "$MN_HOST_OPENSHELL_STATE_DIR"
     cp "$RUNTIME_COMPOSE_TEMPLATE" "$RUNTIME_COMPOSE_FILE"
@@ -884,9 +947,9 @@ OPENSHELL_GATEWAY_PORT=${OPENSHELL_GATEWAY_PORT:-58080}
 OPENSHELL_GATEWAY_ENDPOINT=${OPENSHELL_GATEWAY_ENDPOINT:-http://127.0.0.1:${OPENSHELL_GATEWAY_PORT:-58080}}
 OPENSHELL_GATEWAY_USER=${OPENSHELL_GATEWAY_USER}
 OPENSHELL_GATEWAY_DOCKER_GROUP=${OPENSHELL_GATEWAY_DOCKER_GROUP}
-MN_COOKIE=$(resolve_mn_cookie)
-MN_GRPC_AUTH_TOKEN=$(resolve_grpc_auth_token)
-MN_MIRROR_NEURON_GRPC_ADMIN_TOKEN=$(resolve_grpc_admin_token)
+MN_COOKIE=${mn_cookie}
+MN_GRPC_AUTH_TOKEN=${grpc_auth_token}
+MN_MIRROR_NEURON_GRPC_ADMIN_TOKEN=${grpc_admin_token}
 EOF
     chmod 600 "$RUNTIME_COMPOSE_ENV" 2>/dev/null || true
 }
@@ -963,19 +1026,14 @@ fi
 echo "" >&3
 
 print_step "Checking dependencies"
-for cmd in docker; do
-    if ! command -v "$cmd" >/dev/null 2>&1; then
-        print_error "'$cmd' is required but not installed."
-        exit 1
-    fi
-done
+require_cmd docker
 resolve_python_runtime
 
 if [ "$INSTALL_WEB_UI" = "Y" ]; then
-    if ! command -v npm >/dev/null 2>&1; then
-        print_error "'npm' is required for local Web UI install."
-        exit 1
-    fi
+    require_cmd npm
+fi
+if [ "$INSTALL_OPENSHELL" = "Y" ] && ! command -v openshell >/dev/null 2>&1; then
+    require_cmd curl
 fi
 if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
     require_dir "$MEMBRANE_DIR" "Membrane context engine"

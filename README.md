@@ -24,9 +24,11 @@ This repository keeps shell scripts used to install, start, stop, and remove a l
 - macOS, Linux, or WSL2.
 - `curl`
 - `docker` with a running Docker daemon.
+- `git` for source-based installs and GitHub package installs.
 - Python 3.11 or newer when installing Python components. If none is found, `install_bin.sh`, `install.sh`, and `install_local.sh` install `uv`, let `uv` download a private Python 3.11 runtime under `~/.local/share/mn_python`, and create the MirrorNeuron venv from it.
 - `pip` or Python `ensurepip` for the selected Python interpreter.
 - `npm` when installing the Web UI.
+- A standard system randomness tool. The installers use a working `openssl`, `/dev/urandom` with `od`, or `python3` for local secrets.
 - Network access to GitHub Releases, PyPI, npm, and Docker registries.
 
 ## Installation
@@ -232,6 +234,7 @@ For a full installer test, run on a clean machine or disposable VM with Docker r
 | --- | --- |
 | Installer cannot find Docker | Start Docker and confirm `docker info` succeeds. |
 | Core asset is not found | Confirm the selected release tag contains an OTP tarball for your Docker platform. |
+| Secret generation fails | Install a standard randomness tool such as `openssl`, `od`/coreutils, or Python 3.11+. |
 | `mn` is not found after install | Ensure `~/.local/bin` is on `PATH` or restart the shell. |
 | Web UI install fails | Confirm `npm` is installed and the npm registry is reachable. |
 | API commands fail after install | Run `mn start`, then check `mn nodes`. |

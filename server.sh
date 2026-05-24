@@ -12,11 +12,30 @@ RUNTIME_COMPOSE_FILE="${DIR}/docker-compose.yml"
 RUNTIME_COMPOSE_ENV="${DIR}/docker-compose.env"
 
 generate_mn_cookie() {
+    local secret
+
     if command -v openssl >/dev/null 2>&1; then
-        openssl rand -hex 32
-    else
-        od -An -N32 -tx1 /dev/urandom | tr -d ' \n'
+        if secret="$(openssl rand -hex 32 2>/dev/null)" && [ -n "$secret" ]; then
+            printf '%s\n' "$secret"
+            return 0
+        fi
     fi
+
+    if command -v od >/dev/null 2>&1 && [ -r /dev/urandom ]; then
+        if secret="$(od -An -N32 -tx1 /dev/urandom 2>/dev/null | tr -d ' \n')" && [ -n "$secret" ]; then
+            printf '%s\n' "$secret"
+            return 0
+        fi
+    fi
+
+    if command -v python3 >/dev/null 2>&1; then
+        if secret="$(python3 -c 'import secrets; print(secrets.token_hex(32))' 2>/dev/null)" && [ -n "$secret" ]; then
+            printf '%s\n' "$secret"
+            return 0
+        fi
+    fi
+
+    return 1
 }
 
 resolve_mn_cookie() {
@@ -39,7 +58,9 @@ resolve_mn_cookie() {
         fi
     fi
 
-    cookie="$(generate_mn_cookie)"
+    if ! cookie="$(generate_mn_cookie)"; then
+        cookie=""
+    fi
     if [ -z "$cookie" ]; then
         echo "=> Error: failed to generate MN_COOKIE."
         exit 1
@@ -70,7 +91,9 @@ resolve_grpc_auth_token() {
         fi
     fi
 
-    token="$(generate_mn_cookie)"
+    if ! token="$(generate_mn_cookie)"; then
+        token=""
+    fi
     if [ -z "$token" ]; then
         echo "=> Error: failed to generate MN_GRPC_AUTH_TOKEN."
         exit 1
@@ -101,7 +124,9 @@ resolve_grpc_admin_token() {
         fi
     fi
 
-    token="$(generate_mn_cookie)"
+    if ! token="$(generate_mn_cookie)"; then
+        token=""
+    fi
     if [ -z "$token" ]; then
         echo "=> Error: failed to generate MN_MIRROR_NEURON_GRPC_ADMIN_TOKEN."
         exit 1

@@ -143,6 +143,14 @@ function ask() {
     esac
 }
 
+function require_cmd() {
+    local cmd="$1"
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+        print_error "'$cmd' is required but not installed."
+        exit 1
+    fi
+}
+
 function python_version() {
     "$1" -c 'import sys; print(".".join(str(part) for part in sys.version_info[:3]))' 2>/dev/null
 }
@@ -481,11 +489,30 @@ function install_openshell_cli() {
 }
 
 function generate_mn_secret() {
+    local secret
+
     if command -v openssl >/dev/null 2>&1; then
-        openssl rand -hex 32
-    else
-        od -An -N32 -tx1 /dev/urandom | tr -d ' \n'
+        if secret="$(openssl rand -hex 32 2>/dev/null)" && [ -n "$secret" ]; then
+            printf '%s\n' "$secret"
+            return 0
+        fi
     fi
+
+    if command -v od >/dev/null 2>&1 && [ -r /dev/urandom ]; then
+        if secret="$(od -An -N32 -tx1 /dev/urandom 2>/dev/null | tr -d ' \n')" && [ -n "$secret" ]; then
+            printf '%s\n' "$secret"
+            return 0
+        fi
+    fi
+
+    if command -v python3 >/dev/null 2>&1; then
+        if secret="$(python3 -c 'import secrets; print(secrets.token_hex(32))' 2>/dev/null)" && [ -n "$secret" ]; then
+            printf '%s\n' "$secret"
+            return 0
+        fi
+    fi
+
+    return 1
 }
 
 function resolve_secret_file() {
@@ -511,7 +538,9 @@ function resolve_secret_file() {
         fi
     fi
 
-    value="$(generate_mn_secret)"
+    if ! value="$(generate_mn_secret)"; then
+        value=""
+    fi
     if [ -z "$value" ]; then
         print_error "Failed to generate ${label}."
         exit 1
@@ -541,17 +570,38 @@ function derive_network_secret() {
     local token="$1"
     local label="$2"
     local material="mirror-neuron:${label}:${token}"
+    local digest
 
     if command -v shasum >/dev/null 2>&1; then
-        printf '%s' "$material" | shasum -a 256 | awk '{print $1}'
-    elif command -v sha256sum >/dev/null 2>&1; then
-        printf '%s' "$material" | sha256sum | awk '{print $1}'
-    elif command -v openssl >/dev/null 2>&1; then
-        printf '%s' "$material" | openssl dgst -sha256 -r | awk '{print $1}'
-    else
-        print_error "Need shasum, sha256sum, or openssl to derive Redis credentials."
-        exit 1
+        if digest="$(printf '%s' "$material" | shasum -a 256 2>/dev/null | awk '{print $1}')" && [ -n "$digest" ]; then
+            printf '%s\n' "$digest"
+            return 0
+        fi
     fi
+
+    if command -v sha256sum >/dev/null 2>&1; then
+        if digest="$(printf '%s' "$material" | sha256sum 2>/dev/null | awk '{print $1}')" && [ -n "$digest" ]; then
+            printf '%s\n' "$digest"
+            return 0
+        fi
+    fi
+
+    if command -v openssl >/dev/null 2>&1; then
+        if digest="$(printf '%s' "$material" | openssl dgst -sha256 -r 2>/dev/null | awk '{print $1}')" && [ -n "$digest" ]; then
+            printf '%s\n' "$digest"
+            return 0
+        fi
+    fi
+
+    if command -v python3 >/dev/null 2>&1; then
+        if digest="$(printf '%s' "$material" | python3 -c 'import hashlib, sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())' 2>/dev/null)" && [ -n "$digest" ]; then
+            printf '%s\n' "$digest"
+            return 0
+        fi
+    fi
+
+    print_error "Need shasum, sha256sum, a working openssl, or python3 to derive Redis credentials."
+    exit 1
 }
 
 function read_env_value() {
@@ -627,7 +677,7 @@ function resolve_redis_port() {
 }
 
 function write_runtime_compose_files() {
-    local target build_target model_image profiles redis_bind_host persisted_redis_port redis_port network_token redis_password
+    local target build_target model_image profiles redis_bind_host persisted_redis_port redis_port network_token redis_password mn_cookie grpc_auth_token grpc_admin_token
     if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
         context_engine_source_dir >/dev/null
     fi
@@ -640,6 +690,9 @@ function write_runtime_compose_files() {
     redis_port="$(resolve_redis_port "$redis_bind_host" "$persisted_redis_port")"
     network_token="$(resolve_network_token)"
     redis_password="$(derive_network_secret "$network_token" "redis")"
+    mn_cookie="$(resolve_mn_cookie)"
+    grpc_auth_token="$(resolve_grpc_auth_token)"
+    grpc_admin_token="$(resolve_grpc_admin_token)"
 
     mkdir -p "$INSTALL_DIR" "$MN_HOST_MN_DIR" "$MN_HOST_OPENSHELL_CONFIG_DIR" "$MN_HOST_OPENSHELL_STATE_DIR"
     cp "$RUNTIME_COMPOSE_TEMPLATE" "$RUNTIME_COMPOSE_FILE"
@@ -689,9 +742,9 @@ OPENSHELL_GATEWAY_PORT=${OPENSHELL_GATEWAY_PORT:-58080}
 OPENSHELL_GATEWAY_ENDPOINT=${OPENSHELL_GATEWAY_ENDPOINT:-http://127.0.0.1:${OPENSHELL_GATEWAY_PORT:-58080}}
 OPENSHELL_GATEWAY_USER=${OPENSHELL_GATEWAY_USER}
 OPENSHELL_GATEWAY_DOCKER_GROUP=${OPENSHELL_GATEWAY_DOCKER_GROUP}
-MN_COOKIE=$(resolve_mn_cookie)
-MN_GRPC_AUTH_TOKEN=$(resolve_grpc_auth_token)
-MN_MIRROR_NEURON_GRPC_ADMIN_TOKEN=$(resolve_grpc_admin_token)
+MN_COOKIE=${mn_cookie}
+MN_GRPC_AUTH_TOKEN=${grpc_auth_token}
+MN_MIRROR_NEURON_GRPC_ADMIN_TOKEN=${grpc_admin_token}
 EOF
     chmod 600 "$RUNTIME_COMPOSE_ENV" 2>/dev/null || true
 }
@@ -738,23 +791,15 @@ echo "" >&3
 
 print_step "Checking Dependencies"
 
-for cmd in git; do
-    if ! command -v $cmd &> /dev/null; then
-        print_error "'$cmd' is required but not installed."
-        exit 1
-    fi
-done
+require_cmd git
+require_cmd curl
+require_cmd docker
 resolve_python_runtime
 
-if [ "$INSTALL_WEB_UI" = "Y" ] && ! command -v npm &> /dev/null; then
-    print_error "'npm' is required for Web UI but not installed."
-    exit 1
+if [ "$INSTALL_WEB_UI" = "Y" ]; then
+    require_cmd npm
 fi
 
-if ! command -v docker &> /dev/null; then
-    print_error "'docker' is required but not installed."
-    exit 1
-fi
 if [ ! -f "$RUNTIME_COMPOSE_TEMPLATE" ]; then
     print_error "MirrorNeuron runtime Docker Compose template is missing: $RUNTIME_COMPOSE_TEMPLATE"
     exit 1
