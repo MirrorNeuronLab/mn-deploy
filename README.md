@@ -172,6 +172,11 @@ Updating stops running jobs. Run it only when no important jobs are active.
 | `MN_EPMD_PORT` | `4369` | Native host port mapped to Erlang EPMD. |
 | `MN_DIST_BIND_HOST` | `127.0.0.1` | Native host address used for the fixed BEAM distribution port in Compose. |
 | `MN_DIST_PORT` | `4370` | Fixed BEAM distribution port used for cluster communication. |
+| `MN_BLUEPRINT_WEB_UI_PUBLISH_HOST` | `127.0.0.1` | Native host address used for Compose blueprint web UI port bindings. |
+| `MN_BLUEPRINT_WEB_UI_BIND_HOST` | `0.0.0.0` | Container bind address used by blueprint web UI processes. |
+| `MN_BLUEPRINT_WEB_UI_PUBLIC_HOST` | `localhost` | Hostname written into blueprint web UI URLs shown to desktop users. |
+| `MN_BLUEPRINT_WEB_UI_PORT_START` | `58000` | First published port available for co-worker web UIs. |
+| `MN_BLUEPRINT_WEB_UI_PORT_END` | `58049` | Last published port available for co-worker web UIs. |
 | `MN_NODE_NAME` | unset | Erlang node name for cluster mode, for example `mn1@192.168.4.10`. |
 | `MN_CLUSTER_NODES` | unset | Comma-separated Erlang node names expected in the cluster. |
 | `MN_REDIS_URL` | `redis://redis:6379/0` | Redis URL used by Core. The default points to the internal Compose Redis; use an externally reachable Redis or Sentinel setup for multi-host clusters. |
