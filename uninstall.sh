@@ -154,6 +154,11 @@ if [ -d "$LEGACY_UI_DIR" ] || [ -L "$LEGACY_UI_DIR" ]; then
     rm -rf "$LEGACY_UI_DIR"
     print_success "Removed legacy Web UI installation at $LEGACY_UI_DIR"
 fi
+OLD_LEGACY_UI_DIR="${HOME}/.mirror_neuron_ui"
+if [ "$OLD_LEGACY_UI_DIR" != "$LEGACY_UI_DIR" ] && { [ -d "$OLD_LEGACY_UI_DIR" ] || [ -L "$OLD_LEGACY_UI_DIR" ]; }; then
+    rm -rf "$OLD_LEGACY_UI_DIR"
+    print_success "Removed legacy Web UI installation at $OLD_LEGACY_UI_DIR"
+fi
 
 print_step "Removing Docker Containers and Images"
 if command -v docker &> /dev/null; then
