@@ -200,7 +200,7 @@ start_services() {
             -e "MN_CORE_HOST=${MN_CORE_HOST:-localhost}"
             -e "MN_REDIS_HOST=${MN_REDIS_HOST:-localhost}"
             -e "ERL_EPMD_ADDRESS=${MN_EPMD_HOST:-localhost}"
-            -e "MN_DIST_PORT=${MN_DIST_PORT:-4370}"
+            -e "MN_DIST_PORT=${MN_DIST_PORT:-54370}"
         )
         if [ -n "${MN_NODE_NAME:-}" ]; then
             core_cmd+=("-e" "MN_NODE_NAME=${MN_NODE_NAME}")
@@ -225,7 +225,7 @@ start_services() {
 
     API_BIN="${VENV_DIR}/bin/mn-api"
     if [ -x "$API_BIN" ]; then
-        echo "=> Starting mn-api (REST on port 4001)..."
+        echo "=> Starting mn-api (REST on port ${MN_API_PORT:-54001})..."
         nohup "$API_BIN" > "$API_LOG" 2>&1 &
         API_PID=$!
         echo $API_PID > "$API_PID_FILE"

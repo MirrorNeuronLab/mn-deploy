@@ -679,7 +679,9 @@ function start_core_container() {
     local redis_host="${MN_REDIS_HOST:-localhost}"
     local epmd_host="${MN_EPMD_HOST:-localhost}"
     local dist_host="${MN_DIST_HOST:-localhost}"
-    local dist_port="${MN_DIST_PORT:-4370}"
+    local grpc_port="${MN_GRPC_PORT:-55051}"
+    local epmd_port="${MN_EPMD_PORT:-54369}"
+    local dist_port="${MN_DIST_PORT:-54370}"
     local core_publish_host="$core_host"
     local epmd_publish_host="$epmd_host"
     local dist_publish_host="$dist_host"
@@ -696,12 +698,13 @@ function start_core_container() {
     cmd+=("-e" "MN_COOKIE=${mn_cookie}")
     cmd+=("-e" "MN_GRPC_AUTH_TOKEN=${grpc_auth_token}")
     cmd+=("-e" "MN_MIRROR_NEURON_GRPC_ADMIN_TOKEN=${grpc_admin_token}")
+    cmd+=("-e" "MN_GRPC_PORT=${grpc_port}")
     if [ -n "${MN_NODE_NAME:-}" ]; then
         cmd+=("-e" "MN_NODE_NAME=${MN_NODE_NAME}")
     fi
 
     if [ "$(uname -s)" = "Darwin" ]; then
-        cmd+=("-p" "${core_publish_host}:50051:50051" "-p" "${epmd_publish_host}:4369:4369")
+        cmd+=("-p" "${core_publish_host}:${grpc_port}:${grpc_port}" "-p" "${epmd_publish_host}:${epmd_port}:4369")
         cmd+=("-p" "${dist_publish_host}:${dist_port}:${dist_port}")
         cmd+=("-e" "MN_REDIS_URL=redis://host.docker.internal:6379/0")
         cmd+=("-e" "MN_CORE_HOST=0.0.0.0")
@@ -850,11 +853,16 @@ ENGINE_IMAGE=mirror-enuron-memory-engine:latest
 MN_CONTEXT_MODEL_BUILD_TARGET=${build_target}
 MN_CONTEXT_MODEL_IMAGE=${model_image}
 MN_GRPC_BIND_HOST=${MN_GRPC_BIND_HOST:-127.0.0.1}
-MN_GRPC_PORT=${MN_GRPC_PORT:-50051}
+MN_GRPC_PORT=${MN_GRPC_PORT:-55051}
+MN_CORE_GRPC_TARGET=${MN_CORE_GRPC_TARGET:-localhost:${MN_GRPC_PORT:-55051}}
+MN_API_HOST=${MN_API_HOST:-localhost}
+MN_API_PORT=${MN_API_PORT:-54001}
 MN_EPMD_BIND_HOST=${MN_EPMD_BIND_HOST:-127.0.0.1}
-MN_EPMD_PORT=${MN_EPMD_PORT:-4369}
+MN_EPMD_PORT=${MN_EPMD_PORT:-54369}
 MN_DIST_BIND_HOST=${MN_DIST_BIND_HOST:-127.0.0.1}
-MN_DIST_PORT=${MN_DIST_PORT:-4370}
+MN_DIST_PORT=${MN_DIST_PORT:-54370}
+MN_WEB_UI_HOST=${MN_WEB_UI_HOST:-localhost}
+MN_WEB_UI_PORT=${MN_WEB_UI_PORT:-55173}
 MN_BLUEPRINT_WEB_UI_PUBLISH_HOST=${MN_BLUEPRINT_WEB_UI_PUBLISH_HOST:-127.0.0.1}
 MN_BLUEPRINT_WEB_UI_BIND_HOST=${MN_BLUEPRINT_WEB_UI_BIND_HOST:-0.0.0.0}
 MN_BLUEPRINT_WEB_UI_PUBLIC_HOST=${MN_BLUEPRINT_WEB_UI_PUBLIC_HOST:-localhost}
@@ -870,10 +878,10 @@ MN_REDIS_PASSWORD=${redis_password}
 MN_REDIS_URL=${MN_REDIS_URL:-redis://:${redis_password}@redis:6379/0}
 MN_CONTEXT_REDIS_URL=${MN_CONTEXT_REDIS_URL:-redis://:${redis_password}@redis:6379/1}
 ERL_EPMD_ADDRESS=${ERL_EPMD_ADDRESS:-0.0.0.0}
-ERL_AFLAGS=${ERL_AFLAGS:--kernel inet_dist_listen_min ${MN_DIST_PORT:-4370} inet_dist_listen_max ${MN_DIST_PORT:-4370}}
+ERL_AFLAGS=${ERL_AFLAGS:--kernel inet_dist_listen_min ${MN_DIST_PORT:-54370} inet_dist_listen_max ${MN_DIST_PORT:-54370}}
 OPENSHELL_GATEWAY_BIND_HOST=${OPENSHELL_GATEWAY_BIND_HOST:-127.0.0.1}
-OPENSHELL_GATEWAY_PORT=${OPENSHELL_GATEWAY_PORT:-8080}
-OPENSHELL_GATEWAY_ENDPOINT=${OPENSHELL_GATEWAY_ENDPOINT:-http://127.0.0.1:${OPENSHELL_GATEWAY_PORT:-8080}}
+OPENSHELL_GATEWAY_PORT=${OPENSHELL_GATEWAY_PORT:-58080}
+OPENSHELL_GATEWAY_ENDPOINT=${OPENSHELL_GATEWAY_ENDPOINT:-http://127.0.0.1:${OPENSHELL_GATEWAY_PORT:-58080}}
 OPENSHELL_GATEWAY_USER=${OPENSHELL_GATEWAY_USER}
 OPENSHELL_GATEWAY_DOCKER_GROUP=${OPENSHELL_GATEWAY_DOCKER_GROUP}
 MN_COOKIE=$(resolve_mn_cookie)

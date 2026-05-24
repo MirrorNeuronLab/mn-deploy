@@ -135,7 +135,7 @@ MN_DIST_BIND_HOST=0.0.0.0 \
 mn start
 ```
 
-The default host-facing cluster ports are gRPC `50051`, EPMD `4369`, fixed BEAM distribution `4370`, and OpenShell `8080`.
+The default host-facing cluster ports use high five-digit values to avoid common local services: gRPC `55051`, REST API `54001`, EPMD `54369`, fixed BEAM distribution `54370`, Web UI `55173`, OpenShell `58080`, and Redis dynamically selects `56379-56478`.
 
 ## Update Behavior
 
@@ -180,14 +180,14 @@ Updating stops running jobs. Run it only when no important jobs are active.
 | `MN_MEMBRANE_DIR` | `~/.mn/Membrane` | Local Membrane checkout or source path used by installers. |
 | `MN_CONTEXT_ADDR` | `localhost:50052` | Context engine address used by blueprints and OtterDesk conversation memory. |
 | `MN_GRPC_BIND_HOST` | `127.0.0.1` | Native host address used for the Core gRPC Compose port binding. |
-| `MN_GRPC_PORT` | `50051` | Native host port mapped to Core gRPC in Docker. |
+| `MN_GRPC_PORT` | `55051` | Native host port mapped to Core gRPC in Docker. |
 | `MN_REDIS_BIND_HOST` | `0.0.0.0` | Native host address used for the Redis Compose port binding so cluster peers can connect. |
 | `MN_REDIS_PORT` | dynamic `56379-56478` | Native host port mapped to Redis in Docker. Installers persist the selected port in `~/.mn/docker-compose.env`; explicit values must be available. |
 | `MN_REDIS_PASSWORD` | token-derived | Password required by the published Redis service. |
 | `MN_EPMD_BIND_HOST` | `127.0.0.1` | Native host address used for Erlang EPMD in Compose. |
-| `MN_EPMD_PORT` | `4369` | Native host port mapped to Erlang EPMD. |
+| `MN_EPMD_PORT` | `54369` | Native host port mapped to Erlang EPMD. |
 | `MN_DIST_BIND_HOST` | `127.0.0.1` | Native host address used for the fixed BEAM distribution port in Compose. |
-| `MN_DIST_PORT` | `4370` | Fixed BEAM distribution port used for cluster communication. |
+| `MN_DIST_PORT` | `54370` | Fixed BEAM distribution port used for cluster communication. |
 | `MN_BLUEPRINT_WEB_UI_PUBLISH_HOST` | `127.0.0.1` | Native host address used for Compose blueprint web UI port bindings. |
 | `MN_BLUEPRINT_WEB_UI_BIND_HOST` | `0.0.0.0` | Container bind address used by blueprint web UI processes. |
 | `MN_BLUEPRINT_WEB_UI_PUBLIC_HOST` | `localhost` | Hostname written into blueprint web UI URLs shown to desktop users. |
@@ -199,16 +199,17 @@ Updating stops running jobs. Run it only when no important jobs are active.
 | `MN_HOST_MN_DIR` | `~/.mn` | Native runtime-data directory mounted into Core. |
 | `MN_HOST_OPENSHELL_STATE_DIR` | `~/.mn/openshell-state` | Host directory mounted at the same absolute path inside the OpenShell gateway so Docker-backed sandbox supervisor bind mounts resolve correctly. |
 | `OPENSHELL_GATEWAY_BIND_HOST` | `127.0.0.1` | Native host address used for the OpenShell gateway Compose port binding. |
-| `OPENSHELL_GATEWAY_PORT` | `8080` | Native host port mapped to the OpenShell gateway for custom image builds and sandbox utilities. |
-| `OPENSHELL_GATEWAY_ENDPOINT` | `http://127.0.0.1:8080` | Endpoint used by native OpenShell CLI commands. |
+| `OPENSHELL_GATEWAY_PORT` | `58080` | Native host port mapped to the OpenShell gateway for custom image builds and sandbox utilities. |
+| `OPENSHELL_GATEWAY_ENDPOINT` | `http://127.0.0.1:58080` | Endpoint used by native OpenShell CLI commands. |
 | `OPENSHELL_GATEWAY_USER` | current host uid/gid | Numeric user used for the OpenShell gateway container so it can access the Docker socket and its SQLite state directory. |
 | `OPENSHELL_GATEWAY_DOCKER_GROUP` | `0` | Supplemental container group used for Docker socket access on Docker Desktop. |
 | `OPENSHELL_GATEWAY_IMAGE` | `ghcr.io/nvidia/openshell/gateway:0.0.47` | OpenShell gateway image used by the Compose runtime; keep this aligned with the installed OpenShell CLI. |
 | `GITHUB_TOKEN` / `GH_TOKEN` | unset | Optional token passed to GitHub release download requests. |
 | `PIP_NO_INPUT` | `1` | Prevents interactive pip prompts during install. |
 | `MN_API_HOST` | `localhost` | API host used by generated Web UI proxy config. |
-| `MN_API_PORT` | `4001` | API port used by generated Web UI proxy config. |
+| `MN_API_PORT` | `54001` | API port used by generated Web UI proxy config. |
 | `MN_WEB_UI_HOST` | `localhost` | Web UI dev server bind host. |
+| `MN_WEB_UI_PORT` | `55173` | Native Web UI dev server port. |
 
 ## Testing
 
