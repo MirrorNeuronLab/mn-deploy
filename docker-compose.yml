@@ -7,6 +7,16 @@ services:
     restart: unless-stopped
     expose:
       - "6379"
+    ports:
+      - "${MN_REDIS_BIND_HOST:-127.0.0.1}:${MN_REDIS_PORT:-6379}:6379"
+    environment:
+      MN_REDIS_PASSWORD: ${MN_REDIS_PASSWORD:-}
+    command: >
+      sh -c 'if [ -n "$$MN_REDIS_PASSWORD" ]; then
+      exec redis-server --appendonly yes --requirepass "$$MN_REDIS_PASSWORD" --masterauth "$$MN_REDIS_PASSWORD";
+      else
+      exec redis-server --appendonly yes;
+      fi'
     volumes:
       - redis-data:/data
 
@@ -66,7 +76,7 @@ services:
       - "50052"
     environment:
       MN_CONTEXT_ADDR: 0.0.0.0:50052
-      MN_CONTEXT_REDIS_URL: redis://redis:6379/1
+      MN_CONTEXT_REDIS_URL: ${MN_CONTEXT_REDIS_URL:-redis://redis:6379/1}
       MN_CONTEXT_DEBUG: ${MN_CONTEXT_DEBUG:-0}
       MN_CONTEXT_DEBUG_DETAIL: ${MN_CONTEXT_DEBUG_DETAIL:-basic}
       MN_CONTEXT_DEBUG_DIR: /tmp/mn-context-engine/context-views
@@ -100,6 +110,10 @@ services:
       MN_CORE_HOST: 0.0.0.0
       MN_REDIS_HOST: redis
       MN_REDIS_URL: ${MN_REDIS_URL:-redis://redis:6379/0}
+      MN_NETWORK_JOIN_TOKEN: ${MN_NETWORK_JOIN_TOKEN:-}
+      MN_NETWORK_ADVERTISE_HOST: ${MN_NETWORK_ADVERTISE_HOST:-}
+      MN_NETWORK_REDIS_HOST: ${MN_NETWORK_REDIS_HOST:-}
+      MN_NETWORK_REDIS_PORT: ${MN_NETWORK_REDIS_PORT:-}
       MN_CONTEXT_ADDR: membrane-context-engine:50052
       MN_EXECUTOR_MAX_CONCURRENCY: ${MN_EXECUTOR_MAX_CONCURRENCY:-50}
       MN_NODE_NAME: ${MN_NODE_NAME:-}

@@ -95,13 +95,26 @@ After installation:
 
 ```bash
 mn start
+mn join <main-host> --token <token>
+mn expose-node
+mn add-node <host> --token <token>
 mn nodes
 mn stop
 ```
 
-The CLI manages the Compose runtime, native API process, and Web UI when installed. The Core gRPC port and OpenShell gateway port are exposed on loopback for the native CLI. Redis stays inside the Compose network and is not published to the host. The API port remains native because `mn-api` is installed outside Docker.
+The CLI manages the Compose runtime, native API process, and Web UI when installed.
+`mn start` exposes Core gRPC, Redis, EPMD, and the fixed BEAM distribution port
+for cluster use, then prints the token another box needs for `mn join`.
+The API port remains native because `mn-api` is installed outside Docker.
 
-For a two-machine Compose cluster, keep the native `mn` CLI and Python SDK installed on each host, then use an externally reachable Redis or Redis Sentinel endpoint for shared cluster state. The local Compose Redis is internal-only and is intended for a single host.
+Use `mn expose-node` on a second box when the main box should add it with
+`mn add-node <host> --token <token>`. This mode starts only Core gRPC, cluster
+ports, and secured Redis when no external `MN_REDIS_URL` is configured. It does
+not start the REST API, Web UI, OpenShell, or context-engine services.
+
+For a two-machine Compose cluster, keep the native `mn` CLI and Python SDK installed
+on each host. Use `mn nodes` and `mn resource list` after join/add to verify that
+CPU, GPU, memory, and disk totals include every connected node.
 
 ```bash
 # machine 1
@@ -168,6 +181,8 @@ Updating stops running jobs. Run it only when no important jobs are active.
 | `MN_CONTEXT_ADDR` | `localhost:50052` | Context engine address used by blueprints and OtterDesk conversation memory. |
 | `MN_GRPC_BIND_HOST` | `127.0.0.1` | Native host address used for the Core gRPC Compose port binding. |
 | `MN_GRPC_PORT` | `50051` | Native host port mapped to Core gRPC in Docker. |
+| `MN_REDIS_BIND_HOST` | `127.0.0.1` | Native host address used for the Redis Compose port binding. |
+| `MN_REDIS_PORT` | `6379` | Native host port mapped to Redis in Docker. |
 | `MN_EPMD_BIND_HOST` | `127.0.0.1` | Native host address used for Erlang EPMD in Compose. |
 | `MN_EPMD_PORT` | `4369` | Native host port mapped to Erlang EPMD. |
 | `MN_DIST_BIND_HOST` | `127.0.0.1` | Native host address used for the fixed BEAM distribution port in Compose. |
@@ -179,7 +194,7 @@ Updating stops running jobs. Run it only when no important jobs are active.
 | `MN_BLUEPRINT_WEB_UI_PORT_END` | `58049` | Last published port available for co-worker web UIs. |
 | `MN_NODE_NAME` | unset | Erlang node name for cluster mode, for example `mn1@192.168.4.10`. |
 | `MN_CLUSTER_NODES` | unset | Comma-separated Erlang node names expected in the cluster. |
-| `MN_REDIS_URL` | `redis://redis:6379/0` | Redis URL used by Core. The default points to the internal Compose Redis; use an externally reachable Redis or Sentinel setup for multi-host clusters. |
+| `MN_REDIS_URL` | `redis://redis:6379/0` | Redis URL used by Core. `mn start` may set a token-derived Redis password when the installed Compose runtime supports it. |
 | `MN_HOST_MN_DIR` | `~/.mn` | Native runtime-data directory mounted into Core. |
 | `MN_HOST_OPENSHELL_STATE_DIR` | `~/.mn/openshell-state` | Host directory mounted at the same absolute path inside the OpenShell gateway so Docker-backed sandbox supervisor bind mounts resolve correctly. |
 | `OPENSHELL_GATEWAY_BIND_HOST` | `127.0.0.1` | Native host address used for the OpenShell gateway Compose port binding. |
