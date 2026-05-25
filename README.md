@@ -204,8 +204,9 @@ Updating stops running jobs. Run it only when no important jobs are active.
 | `MN_BLUEPRINT_WEB_UI_PUBLISH_HOST` | `127.0.0.1` | Native host address used for Compose blueprint web UI port bindings. |
 | `MN_BLUEPRINT_WEB_UI_BIND_HOST` | `0.0.0.0` | Container bind address used by blueprint web UI processes. |
 | `MN_BLUEPRINT_WEB_UI_PUBLIC_HOST` | `localhost` | Hostname written into blueprint web UI URLs shown to desktop users. |
-| `MN_BLUEPRINT_WEB_UI_PORT_START` | `58000` | First published port available for co-worker web UIs. |
-| `MN_BLUEPRINT_WEB_UI_PORT_END` | `58049` | Last published port available for co-worker web UIs. |
+| `MN_BLUEPRINT_WEB_UI_PORT_START` | `61000` | First published port available for co-worker web UIs. |
+| `MN_BLUEPRINT_WEB_UI_PORT_END` | `61049` | Last published port available for co-worker web UIs. |
+| `MN_BLUEPRINT_WEB_UI_PORT_ALLOCATION_MODE` | `prepublished` | Port allocation mode for Compose-published blueprint dashboard ports. Use `host_available` for non-Compose local runs. |
 | `MN_DEFAULT_BLUEPRINT_REPO` | `https://github.com/MirrorNeuronLab/mn-blueprints.git` | Shared runtime default for blueprint catalog selection. Persisted in `docker-compose.env`. |
 | `MN_BLUEPRINT_REPO` | `MN_DEFAULT_BLUEPRINT_REPO` | Active blueprint catalog source for `mn-api`. OtterDesk overrides this to its co-worker catalog when it starts the runtime. |
 | `MN_DEV_LOCAL_BLUEPRINT_REPO` | unset | Optional local development checkout that takes precedence in `MN_ENV=dev` or `MN_ENV=test`. |

@@ -349,6 +349,12 @@ start_services() {
     export MN_BLUEPRINT_REPO="${MN_BLUEPRINT_REPO:-$MN_DEFAULT_BLUEPRINT_REPO}"
     apply_runtime_env_default "MN_DEV_LOCAL_BLUEPRINT_REPO"
     apply_runtime_env_default "MN_RUNS_ROOT"
+    apply_runtime_env_default "MN_BLUEPRINT_WEB_UI_PORT_START"
+    export MN_BLUEPRINT_WEB_UI_PORT_START="${MN_BLUEPRINT_WEB_UI_PORT_START:-61000}"
+    apply_runtime_env_default "MN_BLUEPRINT_WEB_UI_PORT_END"
+    export MN_BLUEPRINT_WEB_UI_PORT_END="${MN_BLUEPRINT_WEB_UI_PORT_END:-61049}"
+    apply_runtime_env_default "MN_BLUEPRINT_WEB_UI_PORT_ALLOCATION_MODE"
+    export MN_BLUEPRINT_WEB_UI_PORT_ALLOCATION_MODE="${MN_BLUEPRINT_WEB_UI_PORT_ALLOCATION_MODE:-prepublished}"
 
     api_started=0
     API_BIN="${VENV_DIR}/bin/mn-api"
