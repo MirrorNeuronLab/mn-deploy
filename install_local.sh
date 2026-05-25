@@ -689,9 +689,26 @@ function redis_port_available() {
     if redis_container_owns_port "$port"; then
         return 0
     fi
-    if (echo >"/dev/tcp/${probe_host}/${port}") >/dev/null 2>&1; then
+
+    if command -v lsof >/dev/null 2>&1 &&
+       lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
         return 1
     fi
+
+    if [ -n "${MN_PYTHON_BIN:-}" ] &&
+       "$MN_PYTHON_BIN" -c 'import socket, sys
+host = sys.argv[1]
+port = int(sys.argv[2])
+sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+sock.settimeout(0.25)
+try:
+    raise SystemExit(0 if sock.connect_ex((host, port)) == 0 else 1)
+finally:
+    sock.close()
+' "$probe_host" "$port" >/dev/null 2>&1; then
+        return 1
+    fi
+
     return 0
 }
 
@@ -1052,7 +1069,7 @@ function start_runtime_compose_sidecars() {
     fi
     if [ "${#services[@]}" -gt 0 ]; then
         remove_stale_runtime_containers_for_services "${services[@]}"
-        runtime_compose up -d "${services[@]}" >/dev/null
+        runtime_compose up -d "${services[@]}"
     fi
 }
 
@@ -1151,15 +1168,16 @@ replace_symlink "$CLI_DIR" "$INSTALL_DIR/cli-source"
 replace_symlink "$API_DIR" "$INSTALL_DIR/api-source"
 replace_symlink "$PY_SDK_DIR" "$INSTALL_DIR/python-sdk-source"
 write_local_install_metadata
+print_step "Writing Docker Compose runtime configuration"
 write_runtime_compose_files
 print_success "Local component links created under ${INSTALL_DIR}."
 
 print_step "Building MirrorNeuron Core Docker image from local source"
 (
     cd "$CORE_DIR"
-    docker build -t mirror-neuron-core:latest . >/dev/null
-) &
-spinner $! "Built local core image mirror-neuron-core:latest"
+    docker build -t mirror-neuron-core:latest .
+)
+print_success "Built local core image mirror-neuron-core:latest."
 
 print_step "Installing Python components from local source"
 (
@@ -1213,8 +1231,8 @@ if [ "$INSTALL_REDIS" = "Y" ] || [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] || [ "$INST
     if [ "$INSTALL_OPENSHELL" = "Y" ]; then
         install_openshell_cli
     fi
-    ( start_runtime_compose_sidecars ) &
-    spinner $! "Docker runtime services are available"
+    start_runtime_compose_sidecars
+    print_success "Docker runtime services are available."
 fi
 
 if [ "$CORE_WAS_RUNNING" = "Y" ] && [ "$START_NOW" != "Y" ]; then
