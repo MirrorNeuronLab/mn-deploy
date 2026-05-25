@@ -416,6 +416,7 @@ function context_engine_source_dir() {
 function setup_context_engine() {
     context_engine_source_dir >/dev/null
     remove_stale_runtime_containers_for_services context-engine-model membrane-context-engine
+    runtime_compose build context-engine-model membrane-context-engine
     runtime_compose up -d context-engine-model membrane-context-engine >/dev/null
 }
 
@@ -452,11 +453,11 @@ function context_model_build_target() {
 
 function context_model_image() {
     case "$1" in
-        mac) echo "mirror-enuron-context-model:mac-arm64" ;;
-        nvidia) echo "mirror-enuron-context-model:nvidia" ;;
-        amd) echo "mirror-enuron-context-model:amd" ;;
-        intel) echo "mirror-enuron-context-model:intel" ;;
-        *) echo "mirror-enuron-context-model:cpu" ;;
+        mac) echo "mirror-neuron-context-model:mac-arm64" ;;
+        nvidia) echo "mirror-neuron-context-model:nvidia" ;;
+        amd) echo "mirror-neuron-context-model:amd" ;;
+        intel) echo "mirror-neuron-context-model:intel" ;;
+        *) echo "mirror-neuron-context-model:cpu" ;;
     esac
 }
 
@@ -816,7 +817,7 @@ MN_HOST_MN_DIR=${MN_HOST_MN_DIR}
 MN_HOST_OPENSHELL_CONFIG_DIR=${MN_HOST_OPENSHELL_CONFIG_DIR}
 MN_HOST_OPENSHELL_STATE_DIR=${MN_HOST_OPENSHELL_STATE_DIR}
 MEMBRANE_DIR=${MEMBRANE_DIR}
-ENGINE_IMAGE=mirror-enuron-memory-engine:latest
+ENGINE_IMAGE=mirror-neuron-memory-engine:latest
 MN_CONTEXT_MODEL_BUILD_TARGET=${build_target}
 MN_CONTEXT_MODEL_IMAGE=${model_image}
 MN_GRPC_BIND_HOST=${MN_GRPC_BIND_HOST:-127.0.0.1}
@@ -909,6 +910,9 @@ function start_runtime_compose_sidecars() {
     fi
     if [ "${#services[@]}" -gt 0 ]; then
         remove_stale_runtime_containers_for_services "${services[@]}"
+        if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
+            runtime_compose build context-engine-model membrane-context-engine
+        fi
         runtime_compose up -d "${services[@]}" >/dev/null
     fi
 }
