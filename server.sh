@@ -172,6 +172,30 @@ runtime_compose() {
     docker compose --env-file "$RUNTIME_COMPOSE_ENV" -f "$RUNTIME_COMPOSE_FILE" "$@"
 }
 
+read_runtime_env_value() {
+    local key="$1"
+    local line
+    if [ ! -f "$RUNTIME_COMPOSE_ENV" ]; then
+        return 0
+    fi
+    line="$(grep -E "^${key}=" "$RUNTIME_COMPOSE_ENV" | tail -n 1 || true)"
+    if [ -n "$line" ]; then
+        printf '%s\n' "${line#*=}"
+    fi
+}
+
+apply_runtime_env_default() {
+    local key="$1"
+    local value
+    if [ -n "${!key:-}" ]; then
+        return 0
+    fi
+    value="$(read_runtime_env_value "$key")"
+    if [ -n "$value" ]; then
+        export "${key}=${value}"
+    fi
+}
+
 kill_tree() {
     local parent=$1
     if kill -0 "$parent" 2>/dev/null; then
@@ -247,6 +271,10 @@ start_services() {
 
     echo "=> Waiting for Elixir to boot..."
     sleep 3
+
+    apply_runtime_env_default "MN_BLUEPRINT_REPO"
+    apply_runtime_env_default "MN_DEV_LOCAL_BLUEPRINT_REPO"
+    apply_runtime_env_default "MN_RUNS_ROOT"
 
     API_BIN="${VENV_DIR}/bin/mn-api"
     if [ -x "$API_BIN" ]; then

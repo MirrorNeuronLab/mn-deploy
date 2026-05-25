@@ -23,22 +23,27 @@ services:
   openshell:
     image: ${OPENSHELL_GATEWAY_IMAGE:-ghcr.io/nvidia/openshell/gateway:0.0.47}
     container_name: openshell-cluster-openshell
+    command: ["--bind-address", "0.0.0.0", "--port", "${OPENSHELL_GATEWAY_PORT:-58080}"]
     user: "${OPENSHELL_GATEWAY_USER:-1000:1000}"
     group_add:
       - "${OPENSHELL_GATEWAY_DOCKER_GROUP:-0}"
+      - "0"
     profiles:
       - openshell
     restart: unless-stopped
     expose:
-      - "8080"
+      - "${OPENSHELL_GATEWAY_PORT:-58080}"
     ports:
-      - "${OPENSHELL_GATEWAY_BIND_HOST:-127.0.0.1}:${OPENSHELL_GATEWAY_PORT:-58080}:8080"
+      - "${OPENSHELL_GATEWAY_BIND_HOST:-127.0.0.1}:${OPENSHELL_GATEWAY_PORT:-58080}:${OPENSHELL_GATEWAY_PORT:-58080}"
     environment:
       HOME: ${MN_HOST_OPENSHELL_STATE_DIR:-./openshell-state}
       XDG_DATA_HOME: ${MN_HOST_OPENSHELL_STATE_DIR:-./openshell-state}/.local/share
+      OPENSHELL_GATEWAY_CONFIG: ${MN_HOST_OPENSHELL_STATE_DIR:-./openshell-state}/gateway.toml
       OPENSHELL_DRIVERS: docker
       OPENSHELL_DB_URL: "sqlite:${MN_HOST_OPENSHELL_STATE_DIR:-./openshell-state}/openshell.db"
       OPENSHELL_DISABLE_TLS: "true"
+      OPENSHELL_BIND_ADDRESS: 0.0.0.0
+      OPENSHELL_SERVER_PORT: ${OPENSHELL_GATEWAY_PORT:-58080}
     volumes:
       - ${MN_HOST_OPENSHELL_STATE_DIR:-./openshell-state}:${MN_HOST_OPENSHELL_STATE_DIR:-./openshell-state}
       - /var/run/docker.sock:/var/run/docker.sock

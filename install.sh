@@ -470,15 +470,57 @@ function compose_profiles() {
 
 function write_openshell_compose_config() {
     local gateway_dir="${MN_HOST_OPENSHELL_CONFIG_DIR}/gateways/openshell"
+    local jwt_dir="${MN_HOST_OPENSHELL_STATE_DIR}/jwt"
     mkdir -p "$gateway_dir"
+    mkdir -p "$jwt_dir"
+    if [ ! -s "${jwt_dir}/signing.pem" ]; then
+        if ! command -v openssl >/dev/null 2>&1; then
+            echo "=> Error: openssl is required to create OpenShell sandbox JWT keys."
+            exit 1
+        fi
+        openssl genpkey -algorithm ED25519 -out "${jwt_dir}/signing.pem" >/dev/null 2>&1
+        openssl pkey -in "${jwt_dir}/signing.pem" -pubout -out "${jwt_dir}/public.pem" >/dev/null 2>&1
+        openssl rand -hex 8 > "${jwt_dir}/kid"
+        chmod 600 "${jwt_dir}/signing.pem" 2>/dev/null || true
+        chmod 644 "${jwt_dir}/public.pem" "${jwt_dir}/kid" 2>/dev/null || true
+    fi
     printf 'openshell\n' > "${MN_HOST_OPENSHELL_CONFIG_DIR}/active_gateway"
-    cat > "${gateway_dir}/metadata.json" <<'EOF'
+    cat > "${gateway_dir}/metadata.json" <<EOF
 {
   "name": "openshell",
-  "gateway_endpoint": "http://openshell:8080",
+  "gateway_endpoint": "http://openshell:${OPENSHELL_GATEWAY_PORT:-58080}",
   "is_remote": false,
-  "gateway_port": 8080
+  "gateway_port": ${OPENSHELL_GATEWAY_PORT:-58080}
 }
+EOF
+    cat > "${MN_HOST_OPENSHELL_STATE_DIR}/gateway.toml" <<EOF
+[openshell]
+version = 1
+
+[openshell.gateway]
+bind_address = "0.0.0.0:${OPENSHELL_GATEWAY_PORT:-58080}"
+log_level = "info"
+compute_drivers = ["docker"]
+sandbox_namespace = "mirror-neuron"
+default_image = "ghcr.io/nvidia/openshell/sandbox:latest"
+supervisor_image = "ghcr.io/nvidia/openshell/supervisor:latest"
+
+[openshell.gateway.gateway_jwt]
+signing_key_path = "${jwt_dir}/signing.pem"
+public_key_path = "${jwt_dir}/public.pem"
+kid_path = "${jwt_dir}/kid"
+gateway_id = "openshell"
+ttl_secs = 3600
+
+[openshell.gateway.auth]
+allow_unauthenticated_users = true
+
+[openshell.drivers.docker]
+default_image = "ghcr.io/nvidia/openshell/sandbox:latest"
+image_pull_policy = "IfNotPresent"
+sandbox_namespace = "mirror-neuron"
+grpc_endpoint = "http://host.openshell.internal:${OPENSHELL_GATEWAY_PORT:-58080}"
+network_name = "openshell-docker"
 EOF
 }
 
@@ -730,6 +772,9 @@ MN_BLUEPRINT_WEB_UI_BIND_HOST=${MN_BLUEPRINT_WEB_UI_BIND_HOST:-0.0.0.0}
 MN_BLUEPRINT_WEB_UI_PUBLIC_HOST=${MN_BLUEPRINT_WEB_UI_PUBLIC_HOST:-localhost}
 MN_BLUEPRINT_WEB_UI_PORT_START=${MN_BLUEPRINT_WEB_UI_PORT_START:-58000}
 MN_BLUEPRINT_WEB_UI_PORT_END=${MN_BLUEPRINT_WEB_UI_PORT_END:-58049}
+MN_BLUEPRINT_REPO=${MN_BLUEPRINT_REPO:-}
+MN_DEV_LOCAL_BLUEPRINT_REPO=${MN_DEV_LOCAL_BLUEPRINT_REPO:-${DEV_LOCAL_BLUEPRINT_REPO:-}}
+MN_RUNS_ROOT=${MN_RUNS_ROOT:-}
 MN_NODE_NAME=${MN_NODE_NAME:-}
 MN_NODE_ROLE=${MN_NODE_ROLE:-runtime}
 MN_CLUSTER_NODES=${MN_CLUSTER_NODES:-}
