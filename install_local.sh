@@ -444,6 +444,54 @@ function replace_symlink() {
     ln -s "$source" "$target"
 }
 
+function openssl_supports_ed25519() {
+    local bin="$1"
+    local tmp_file
+    tmp_file="$(mktemp "${TMPDIR:-/tmp}/mn-ed25519-test.XXXXXX")"
+    if "$bin" genpkey -algorithm ED25519 -out "$tmp_file" >/dev/null 2>&1; then
+        rm -f "$tmp_file"
+        return 0
+    fi
+    rm -f "$tmp_file"
+    return 1
+}
+
+function resolve_ed25519_openssl() {
+    local candidates=()
+    local candidate resolved
+
+    if [ -n "${OPENSSL_BIN:-}" ]; then
+        if resolved="$(command -v "$OPENSSL_BIN" 2>/dev/null)" && [ -n "$resolved" ] && [ -x "$resolved" ] && openssl_supports_ed25519 "$resolved"; then
+            printf '%s\n' "$resolved"
+            return 0
+        fi
+        print_error "OPENSSL_BIN=${OPENSSL_BIN} does not support ED25519 key generation."
+        print_error "Set OPENSSL_BIN to an OpenSSL 3 binary, for example /opt/homebrew/bin/openssl."
+        exit 1
+    fi
+    if resolved="$(command -v openssl 2>/dev/null)" && [ -n "$resolved" ]; then
+        candidates+=("$resolved")
+    fi
+    candidates+=(
+        /opt/homebrew/bin/openssl
+        /usr/local/bin/openssl
+        /usr/local/opt/openssl@3/bin/openssl
+        /opt/local/bin/openssl
+    )
+
+    for candidate in "${candidates[@]}"; do
+        [ -x "$candidate" ] || continue
+        if openssl_supports_ed25519 "$candidate"; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+
+    print_error "An ED25519-capable OpenSSL is required to create OpenShell sandbox JWT keys."
+    print_error "Install OpenSSL 3, put it on PATH, or set OPENSSL_BIN=/path/to/openssl."
+    exit 1
+}
+
 function write_local_install_metadata() {
     local metadata_file="${INSTALL_DIR}/install_metadata.json"
     local updated_at
@@ -885,16 +933,31 @@ function compose_profiles() {
 function write_openshell_compose_config() {
     local gateway_dir="${MN_HOST_OPENSHELL_CONFIG_DIR}/gateways/openshell"
     local jwt_dir="${MN_HOST_OPENSHELL_STATE_DIR}/jwt"
+    local openssl_bin tmp_dir
     mkdir -p "$gateway_dir"
     mkdir -p "$jwt_dir"
-    if [ ! -s "${jwt_dir}/signing.pem" ]; then
-        if ! command -v openssl >/dev/null 2>&1; then
-            echo "=> Error: openssl is required to create OpenShell sandbox JWT keys."
+    if [ ! -s "${jwt_dir}/signing.pem" ] || [ ! -s "${jwt_dir}/public.pem" ] || [ ! -s "${jwt_dir}/kid" ]; then
+        openssl_bin="$(resolve_ed25519_openssl)"
+        tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/mn-openshell-jwt.XXXXXX")"
+        if ! "$openssl_bin" genpkey -algorithm ED25519 -out "${tmp_dir}/signing.pem" >/dev/null; then
+            print_error "Failed to create OpenShell JWT signing key with ${openssl_bin}."
+            rm -rf "$tmp_dir"
             exit 1
         fi
-        openssl genpkey -algorithm ED25519 -out "${jwt_dir}/signing.pem" >/dev/null 2>&1
-        openssl pkey -in "${jwt_dir}/signing.pem" -pubout -out "${jwt_dir}/public.pem" >/dev/null 2>&1
-        openssl rand -hex 8 > "${jwt_dir}/kid"
+        if ! "$openssl_bin" pkey -in "${tmp_dir}/signing.pem" -pubout -out "${tmp_dir}/public.pem" >/dev/null; then
+            print_error "Failed to create OpenShell JWT public key with ${openssl_bin}."
+            rm -rf "$tmp_dir"
+            exit 1
+        fi
+        if ! "$openssl_bin" rand -hex 8 > "${tmp_dir}/kid"; then
+            print_error "Failed to create OpenShell JWT key id with ${openssl_bin}."
+            rm -rf "$tmp_dir"
+            exit 1
+        fi
+        mv "${tmp_dir}/signing.pem" "${jwt_dir}/signing.pem"
+        mv "${tmp_dir}/public.pem" "${jwt_dir}/public.pem"
+        mv "${tmp_dir}/kid" "${jwt_dir}/kid"
+        rm -rf "$tmp_dir"
         chmod 600 "${jwt_dir}/signing.pem" 2>/dev/null || true
         chmod 644 "${jwt_dir}/public.pem" "${jwt_dir}/kid" 2>/dev/null || true
     fi
