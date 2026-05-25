@@ -20,7 +20,13 @@ MAGENTA="\033[35m"
 RESET="\033[0m"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-INSTALL_DIR="${MN_HOME:-${MIRROR_NEURON_HOME:-${HOME}/.mn}}"
+if [ -n "${MN_HOME:-}" ]; then
+    export MIRROR_NEURON_HOME="$MN_HOME"
+else
+    export MIRROR_NEURON_HOME="${HOME}/.mn"
+fi
+
+INSTALL_DIR="${MIRROR_NEURON_HOME}"
 BIN_DIR="${HOME}/.local/bin"
 VENV_DIR="${HOME}/.local/share/mn_venv"
 UI_DIR="${INSTALL_DIR}/webui"
@@ -39,8 +45,17 @@ MN_HOST_MN_DIR="${MN_HOST_MN_DIR:-${INSTALL_DIR}}"
 MN_HOST_OPENSHELL_CONFIG_DIR="${OPENSHELL_CONTAINER_CONFIG_DIR:-${HOME}/.config/openshell-mirror-neuron}"
 MN_HOST_OPENSHELL_STATE_DIR="${MN_HOST_OPENSHELL_STATE_DIR:-${INSTALL_DIR}/openshell-state}"
 OPENSHELL_GATEWAY_USER="${OPENSHELL_GATEWAY_USER:-$(id -u):$(id -g)}"
-if [ -z "${OPENSHELL_GATEWAY_DOCKER_GROUP:-}" ] && [ -S /var/run/docker.sock ]; then
-    OPENSHELL_GATEWAY_DOCKER_GROUP="$(stat -c '%g' /var/run/docker.sock 2>/dev/null || stat -f '%g' /var/run/docker.sock 2>/dev/null || true)"
+if [ -z "${DOCKER_HOST_SOCKET:-}" ]; then
+    if [ -S "${HOME}/.docker/run/docker.sock" ]; then
+        DOCKER_HOST_SOCKET="${HOME}/.docker/run/docker.sock"
+    else
+        DOCKER_HOST_SOCKET="/var/run/docker.sock"
+    fi
+fi
+if [ -z "${OPENSHELL_GATEWAY_DOCKER_GROUP:-}" ] && [ "$(uname -s)" = "Darwin" ]; then
+    OPENSHELL_GATEWAY_DOCKER_GROUP="0"
+elif [ -z "${OPENSHELL_GATEWAY_DOCKER_GROUP:-}" ] && [ -S "${DOCKER_HOST_SOCKET}" ]; then
+    OPENSHELL_GATEWAY_DOCKER_GROUP="$(stat -c '%g' "${DOCKER_HOST_SOCKET}" 2>/dev/null || stat -f '%g' "${DOCKER_HOST_SOCKET}" 2>/dev/null || true)"
 fi
 OPENSHELL_GATEWAY_DOCKER_GROUP="${OPENSHELL_GATEWAY_DOCKER_GROUP:-0}"
 MN_DYNAMIC_REDIS_PORT_START="${MN_DYNAMIC_REDIS_PORT_START:-56379}"
@@ -111,6 +126,7 @@ Release/source options:
   --core-asset-url URL          Same as MN_CORE_ASSET_URL.
   --python PATH                 Same as MN_PYTHON. Must be Python 3.11+.
   --no-managed-python           Do not use uv to install a private Python runtime.
+  MN_HOME=/path                 Override the runtime state directory. Defaults to ${HOME}/.mn.
   --skills-repo OWNER/REPO      Same as MN_SKILLS_REPO.
   --skills-git-url URL          Same as MN_SKILLS_GIT_URL.
   --membrane-repo OWNER/REPO    Same as MN_MEMBRANE_REPO.
@@ -1313,7 +1329,8 @@ MN_BLUEPRINT_WEB_UI_BIND_HOST=${MN_BLUEPRINT_WEB_UI_BIND_HOST:-0.0.0.0}
 MN_BLUEPRINT_WEB_UI_PUBLIC_HOST=${MN_BLUEPRINT_WEB_UI_PUBLIC_HOST:-localhost}
 MN_BLUEPRINT_WEB_UI_PORT_START=${MN_BLUEPRINT_WEB_UI_PORT_START:-58000}
 MN_BLUEPRINT_WEB_UI_PORT_END=${MN_BLUEPRINT_WEB_UI_PORT_END:-58049}
-MN_BLUEPRINT_REPO=${MN_BLUEPRINT_REPO:-}
+MN_DEFAULT_BLUEPRINT_REPO=${MN_DEFAULT_BLUEPRINT_REPO:-https://github.com/MirrorNeuronLab/mn-blueprints.git}
+MN_BLUEPRINT_REPO=${MN_BLUEPRINT_REPO:-${MN_DEFAULT_BLUEPRINT_REPO:-https://github.com/MirrorNeuronLab/mn-blueprints.git}}
 MN_DEV_LOCAL_BLUEPRINT_REPO=${MN_DEV_LOCAL_BLUEPRINT_REPO:-${DEV_LOCAL_BLUEPRINT_REPO:-}}
 MN_RUNS_ROOT=${MN_RUNS_ROOT:-}
 MN_NODE_NAME=${MN_NODE_NAME:-}
@@ -1332,6 +1349,7 @@ OPENSHELL_GATEWAY_PORT=${OPENSHELL_GATEWAY_PORT:-58080}
 OPENSHELL_GATEWAY_ENDPOINT=${OPENSHELL_GATEWAY_ENDPOINT:-http://127.0.0.1:${OPENSHELL_GATEWAY_PORT:-58080}}
 OPENSHELL_GATEWAY_USER=${OPENSHELL_GATEWAY_USER}
 OPENSHELL_GATEWAY_DOCKER_GROUP=${OPENSHELL_GATEWAY_DOCKER_GROUP}
+DOCKER_HOST_SOCKET=${DOCKER_HOST_SOCKET}
 MN_COOKIE=${mn_cookie}
 MN_GRPC_AUTH_TOKEN=${grpc_auth_token}
 MN_MIRROR_NEURON_GRPC_ADMIN_TOKEN=${grpc_admin_token}
@@ -1440,12 +1458,54 @@ EOF
     cp -R "$UI_DIR/node_modules/mirrorneuron-web-ui/dist/." "$UI_DIR/"
 }
 
-function add_path_if_needed() {
-    if [[ ":$PATH:" == *":$BIN_DIR:"* ]]; then
+function shell_escape_value() {
+    printf '%q' "$1"
+}
+
+function profile_has_bin_path() {
+    local profile="$1"
+    [ -f "$profile" ] || return 1
+    local line
+    while IFS= read -r line; do
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        if [[ "$line" == *"PATH"* && "$line" == *"$BIN_DIR"* ]]; then
+            return 0
+        fi
+    done < "$profile"
+    return 1
+}
+
+function profile_has_runtime_home() {
+    local profile="$1"
+    [ -f "$profile" ] || return 1
+    local line
+    while IFS= read -r line; do
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        if [[ "$line" =~ ^[[:space:]]*(export[[:space:]]+)?MIRROR_NEURON_HOME= ]]; then
+            return 0
+        fi
+    done < "$profile"
+    return 1
+}
+
+function add_shell_profile_exports() {
+    local needs_path="N"
+    local needs_runtime_home="N"
+    local default_home="${HOME}/.mn"
+
+    [[ ":$PATH:" != *":$BIN_DIR:"* ]] && needs_path="Y"
+    [ "$INSTALL_DIR" != "$default_home" ] && needs_runtime_home="Y"
+
+    if [ "$needs_path" = "N" ] && [ "$needs_runtime_home" = "N" ]; then
         return
     fi
 
-    echo -e "\n${YELLOW}${BOLD}Note:${RESET} ${YELLOW}$BIN_DIR is not in your PATH.${RESET}" >&3
+    if [ "$needs_path" = "Y" ]; then
+        echo -e "\n${YELLOW}${BOLD}Note:${RESET} ${YELLOW}$BIN_DIR is not in your PATH.${RESET}" >&3
+    fi
+    if [ "$needs_runtime_home" = "Y" ]; then
+        echo -e "${YELLOW}Persisting MIRROR_NEURON_HOME=${INSTALL_DIR} for future terminal sessions.${RESET}" >&3
+    fi
 
     local detected_profiles=()
     [ -f "$HOME/.zshrc" ] && detected_profiles+=("$HOME/.zshrc")
@@ -1457,16 +1517,29 @@ function add_path_if_needed() {
         detected_profiles+=("$HOME/.profile")
     fi
 
-    local profile
+    local profile path_line home_line wrote_header wrote_profile
+    path_line="export PATH=\"$BIN_DIR:\$PATH\""
+    home_line="export MIRROR_NEURON_HOME=$(shell_escape_value "$INSTALL_DIR")"
+
     for profile in "${detected_profiles[@]}"; do
-        if ! grep -q "export PATH=\"$BIN_DIR:\$PATH\"" "$profile" 2>/dev/null; then
-            echo -e "\n# Added by MirrorNeuron Installer" >> "$profile"
-            echo "export PATH=\"$BIN_DIR:\$PATH\"" >> "$profile"
-            echo -e "Automatically added to ${CYAN}$profile${RESET}" >&3
+        wrote_header="N"
+        wrote_profile="N"
+        if [ "$needs_path" = "Y" ] && ! profile_has_bin_path "$profile"; then
+            [ "$wrote_header" = "N" ] && echo -e "\n# Added by MirrorNeuron Installer" >> "$profile" && wrote_header="Y"
+            echo "$path_line" >> "$profile"
+            wrote_profile="Y"
+        fi
+        if [ "$needs_runtime_home" = "Y" ] && ! profile_has_runtime_home "$profile"; then
+            [ "$wrote_header" = "N" ] && echo -e "\n# Added by MirrorNeuron Installer" >> "$profile" && wrote_header="Y"
+            echo "$home_line" >> "$profile"
+            wrote_profile="Y"
+        fi
+        if [ "$wrote_profile" = "Y" ]; then
+            echo -e "Automatically added MirrorNeuron shell exports to ${CYAN}$profile${RESET}" >&3
         fi
     done
 
-    echo -e "${YELLOW}Please restart your terminal or run \`source ~/.zshrc\` to use the 'mn' command.${RESET}" >&3
+    echo -e "${YELLOW}Please restart your terminal or run \`source ~/.zshrc\` to use the updated MirrorNeuron environment.${RESET}" >&3
 }
 
 print_header
@@ -1571,7 +1644,7 @@ if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
     echo -e "Membrane context engine is available on ${YELLOW}${MN_CONTEXT_ADDR:-localhost:50052}${RESET}." >&3
 fi
 if [ "$INSTALL_CLI" = "Y" ] || [ "$INSTALL_API" = "Y" ]; then
-    add_path_if_needed
+    add_shell_profile_exports
 fi
 
 echo -e "\n${BOLD}Quick Start:${RESET}" >&3

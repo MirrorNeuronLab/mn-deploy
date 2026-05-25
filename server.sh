@@ -10,6 +10,8 @@ API_LOG="${LOG_DIR}/api.log"
 VENV_DIR="${HOME}/.local/share/mn_venv"
 RUNTIME_COMPOSE_FILE="${DIR}/docker-compose.yml"
 RUNTIME_COMPOSE_ENV="${DIR}/docker-compose.env"
+RUNTIME_ENDPOINTS_FILE="${DIR}/runtime-endpoints.json"
+MN_DEFAULT_BLUEPRINT_REPO="${MN_DEFAULT_BLUEPRINT_REPO:-https://github.com/MirrorNeuronLab/mn-blueprints.git}"
 
 generate_mn_cookie() {
     local secret
@@ -196,6 +198,69 @@ apply_runtime_env_default() {
     fi
 }
 
+local_endpoint_host() {
+    case "${1:-}" in
+        "" ) printf '%s\n' "localhost" ;;
+        "0.0.0.0"|"::" ) printf '%s\n' "127.0.0.1" ;;
+        * ) printf '%s\n' "$1" ;;
+    esac
+}
+
+json_escape() {
+    local value="${1:-}"
+    value="${value//\\/\\\\}"
+    value="${value//\"/\\\"}"
+    value="${value//$'\n'/ }"
+    printf '%s' "$value"
+}
+
+runtime_env_or_default() {
+    local key="$1"
+    local fallback="$2"
+    local value="${!key:-}"
+    if [ -z "$value" ]; then
+        value="$(read_runtime_env_value "$key")"
+    fi
+    printf '%s\n' "${value:-$fallback}"
+}
+
+write_runtime_endpoints_file() {
+    local api_host api_port api_base_url grpc_host grpc_port grpc_target updated_at
+    api_host="$(local_endpoint_host "$(runtime_env_or_default "MN_API_HOST" "localhost")")"
+    api_port="$(runtime_env_or_default "MN_API_PORT" "54001")"
+    api_base_url="${MN_API_BASE_URL:-http://${api_host}:${api_port}/api/v1}"
+    grpc_host="$(local_endpoint_host "$(runtime_env_or_default "MN_GRPC_BIND_HOST" "localhost")")"
+    grpc_port="$(runtime_env_or_default "MN_GRPC_PORT" "55051")"
+    grpc_target="${MN_GRPC_TARGET:-${MN_CORE_GRPC_TARGET:-}}"
+    if [ -z "$grpc_target" ]; then
+        grpc_target="$(read_runtime_env_value "MN_GRPC_TARGET")"
+    fi
+    if [ -z "$grpc_target" ]; then
+        grpc_target="$(read_runtime_env_value "MN_CORE_GRPC_TARGET")"
+    fi
+    grpc_target="${grpc_target:-${grpc_host}:${grpc_port}}"
+    updated_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+    mkdir -p "$DIR"
+    cat > "$RUNTIME_ENDPOINTS_FILE" <<EOF
+{
+  "api": {
+    "base_url": "$(json_escape "$api_base_url")",
+    "host": "$(json_escape "$api_host")",
+    "port": "$(json_escape "$api_port")"
+  },
+  "grpc": {
+    "host": "$(json_escape "$grpc_host")",
+    "port": "$(json_escape "$grpc_port")",
+    "target": "$(json_escape "$grpc_target")"
+  },
+  "updated_at": "$(json_escape "$updated_at")",
+  "version": 1
+}
+EOF
+    chmod 600 "$RUNTIME_ENDPOINTS_FILE" 2>/dev/null || true
+}
+
 kill_tree() {
     local parent=$1
     if kill -0 "$parent" 2>/dev/null; then
@@ -272,19 +337,35 @@ start_services() {
     echo "=> Waiting for Elixir to boot..."
     sleep 3
 
+    apply_runtime_env_default "MN_API_HOST"
+    apply_runtime_env_default "MN_API_PORT"
+    apply_runtime_env_default "MN_GRPC_BIND_HOST"
+    apply_runtime_env_default "MN_GRPC_PORT"
+    apply_runtime_env_default "MN_GRPC_TARGET"
+    apply_runtime_env_default "MN_CORE_GRPC_TARGET"
+    apply_runtime_env_default "MN_DEFAULT_BLUEPRINT_REPO"
+    export MN_DEFAULT_BLUEPRINT_REPO="${MN_DEFAULT_BLUEPRINT_REPO:-https://github.com/MirrorNeuronLab/mn-blueprints.git}"
     apply_runtime_env_default "MN_BLUEPRINT_REPO"
+    export MN_BLUEPRINT_REPO="${MN_BLUEPRINT_REPO:-$MN_DEFAULT_BLUEPRINT_REPO}"
     apply_runtime_env_default "MN_DEV_LOCAL_BLUEPRINT_REPO"
     apply_runtime_env_default "MN_RUNS_ROOT"
 
+    api_started=0
     API_BIN="${VENV_DIR}/bin/mn-api"
     if [ -x "$API_BIN" ]; then
         echo "=> Starting mn-api (REST on port ${MN_API_PORT:-54001})..."
         nohup "$API_BIN" > "$API_LOG" 2>&1 &
         API_PID=$!
         echo $API_PID > "$API_PID_FILE"
+        api_started=1
         echo "   [Started] REST API (PID: $API_PID)"
     else
         echo "=> Warning: mn-api not found, skipping. Did you run setup.sh?"
+    fi
+
+    if [ "$api_started" -eq 1 ]; then
+        write_runtime_endpoints_file
+        echo "   Runtime endpoints: $RUNTIME_ENDPOINTS_FILE"
     fi
 
     echo ""

@@ -50,6 +50,15 @@ MN_MANAGED_PYTHON=0 ./install_bin.sh --yes
 ./install_bin.sh --yes --no-managed-python
 ```
 
+Installers use `~/.mn` as the runtime state directory and reset ambient
+`MIRROR_NEURON_HOME` to that value. To deliberately install state elsewhere,
+pass `MN_HOME=/path/to/state`. When `MN_HOME` points outside `~/.mn`, the
+installer also adds `export MIRROR_NEURON_HOME=<path>` to detected shell
+profiles (`~/.zshrc`, `~/.bashrc`, `~/.bash_profile`, or `~/.profile`) so
+future terminal sessions keep using the same runtime state. Service-specific
+settings such as blueprint repositories, ports, Redis credentials, and run
+roots are persisted in `docker-compose.env`, not shell profiles.
+
 Install from a specific core release tag:
 
 ```bash
@@ -181,6 +190,8 @@ Updating stops running jobs. Run it only when no important jobs are active.
 | `MN_MEMBRANE_GIT_URL` | unset | Direct Git URL for Membrane. When set, overrides `MN_MEMBRANE_REPO`. |
 | `MN_MEMBRANE_DIR` | `~/.mn/Membrane` | Local Membrane checkout or source path used by installers. |
 | `MN_CONTEXT_ADDR` | `localhost:50052` | Context engine address used by blueprints and OtterDesk conversation memory. |
+| `MN_HOME` | `~/.mn` | Install-time override for the runtime state directory. Installers persist a matching `MIRROR_NEURON_HOME` shell export when this is not `~/.mn`. |
+| `MIRROR_NEURON_HOME` | `~/.mn` | Runtime state directory used by `mn start`, `mn-api`, and generated Compose files. |
 | `MN_GRPC_BIND_HOST` | `127.0.0.1` | Native host address used for the Core gRPC Compose port binding. |
 | `MN_GRPC_PORT` | `55051` | Native host port mapped to Core gRPC in Docker. |
 | `MN_REDIS_BIND_HOST` | `0.0.0.0` | Native host address used for the Redis Compose port binding so cluster peers can connect. |
@@ -195,6 +206,10 @@ Updating stops running jobs. Run it only when no important jobs are active.
 | `MN_BLUEPRINT_WEB_UI_PUBLIC_HOST` | `localhost` | Hostname written into blueprint web UI URLs shown to desktop users. |
 | `MN_BLUEPRINT_WEB_UI_PORT_START` | `58000` | First published port available for co-worker web UIs. |
 | `MN_BLUEPRINT_WEB_UI_PORT_END` | `58049` | Last published port available for co-worker web UIs. |
+| `MN_DEFAULT_BLUEPRINT_REPO` | `https://github.com/MirrorNeuronLab/mn-blueprints.git` | Shared runtime default for blueprint catalog selection. Persisted in `docker-compose.env`. |
+| `MN_BLUEPRINT_REPO` | `MN_DEFAULT_BLUEPRINT_REPO` | Active blueprint catalog source for `mn-api`. OtterDesk overrides this to its co-worker catalog when it starts the runtime. |
+| `MN_DEV_LOCAL_BLUEPRINT_REPO` | unset | Optional local development checkout that takes precedence in `MN_ENV=dev` or `MN_ENV=test`. |
+| `MN_RUNS_ROOT` | unset | Optional shared run-store root. OtterDesk sets this to its co-worker run store. |
 | `MN_NODE_NAME` | unset | Erlang node name for cluster mode, for example `mn1@192.168.4.10`. |
 | `MN_CLUSTER_NODES` | unset | Comma-separated Erlang node names expected in the cluster. |
 | `MN_REDIS_URL` | `redis://:<password>@redis:6379/0` | Redis URL used by Core inside Compose. Cluster handshakes advertise the host-reachable Redis URL with the dynamic port. |

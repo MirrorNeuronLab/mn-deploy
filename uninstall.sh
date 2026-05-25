@@ -38,6 +38,7 @@ Usage: ./uninstall.sh [options]
 
 Options:
   --yes, -y   Run non-interactively and answer yes to prompts.
+  MN_HOME=/path Override the runtime state directory. Defaults to ${HOME}/.mn.
   -h, --help  Show this help.
 EOF
 }
@@ -102,7 +103,13 @@ if [ "$CONFIRM" != "Y" ]; then
     exit 0
 fi
 
-INSTALL_DIR="${MN_HOME:-${MIRROR_NEURON_HOME:-${HOME}/.mn}}"
+if [ -n "${MN_HOME:-}" ]; then
+    export MIRROR_NEURON_HOME="$MN_HOME"
+else
+    export MIRROR_NEURON_HOME="${HOME}/.mn"
+fi
+
+INSTALL_DIR="${MIRROR_NEURON_HOME}"
 UI_DIR="${INSTALL_DIR}/webui"
 LEGACY_UI_DIR="${INSTALL_DIR}_ui"
 BIN_DIR="${HOME}/.local/bin"
