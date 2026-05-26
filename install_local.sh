@@ -443,14 +443,69 @@ function require_file() {
     fi
 }
 
+function mix_project_file_valid() {
+    local path="$1"
+    [ -s "$path" ] && grep -q "use Mix.Project" "$path"
+}
+
+function restore_mix_project_file_from_git() {
+    local path="$1"
+    local path_dir abs_path repo_dir relpath tmp_file commit
+
+    if ! command -v git >/dev/null 2>&1; then
+        return 1
+    fi
+
+    path_dir="$(dirname "$path")"
+    if [ ! -d "$path_dir" ]; then
+        return 1
+    fi
+
+    abs_path="$(cd "$path_dir" && pwd -P)/$(basename "$path")"
+    repo_dir="$(cd "$path_dir" && git rev-parse --show-toplevel 2>/dev/null || true)"
+    if [ -z "$repo_dir" ]; then
+        return 1
+    fi
+
+    relpath="${abs_path#${repo_dir}/}"
+    if [ "$relpath" = "$abs_path" ]; then
+        return 1
+    fi
+
+    tmp_file="$(mktemp "${TMPDIR:-/tmp}/mn-mix-exs.XXXXXX")"
+    while IFS= read -r commit; do
+        if git -C "$repo_dir" show "${commit}:${relpath}" >"$tmp_file" 2>/dev/null && mix_project_file_valid "$tmp_file"; then
+            cp "$tmp_file" "$path"
+            rm -f "$tmp_file"
+            print_warning "Repaired MirrorNeuron mix.exs from git history (${commit:0:12})."
+            return 0
+        fi
+    done < <(git -C "$repo_dir" log --format='%H' -- "$relpath" 2>/dev/null)
+
+    rm -f "$tmp_file"
+    return 1
+}
+
 function require_mix_project_file() {
     local path="$1"
-    require_file "$path" "MirrorNeuron mix.exs"
-    if [ ! -s "$path" ] || ! grep -q "use Mix.Project" "$path"; then
-        print_error "Invalid MirrorNeuron mix.exs: ${path}"
-        print_error "Expected a non-empty Mix project file containing 'use Mix.Project'."
+    if mix_project_file_valid "$path"; then
+        return
+    fi
+
+    if [ ! -e "$path" ] || [ ! -s "$path" ]; then
+        if restore_mix_project_file_from_git "$path" && mix_project_file_valid "$path"; then
+            return
+        fi
+    fi
+
+    if [ ! -f "$path" ]; then
+        print_error "Missing MirrorNeuron mix.exs: ${path}"
         exit 1
     fi
+
+    print_error "Invalid MirrorNeuron mix.exs: ${path}"
+    print_error "Expected a non-empty Mix project file containing 'use Mix.Project'."
+    exit 1
 }
 
 function canonical_path() {
