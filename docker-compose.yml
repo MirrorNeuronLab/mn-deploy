@@ -102,13 +102,23 @@ services:
     restart: unless-stopped
     expose:
       - "50051"
-      - "4369"
+      - "${MN_EPMD_PORT:-54369}"
       - "${MN_DIST_PORT:-54370}"
     ports:
       - "${MN_GRPC_BIND_HOST:-127.0.0.1}:${MN_GRPC_PORT:-55051}:50051"
-      - "${MN_EPMD_BIND_HOST:-127.0.0.1}:${MN_EPMD_PORT:-54369}:4369"
+      - "${MN_EPMD_BIND_HOST:-127.0.0.1}:${MN_EPMD_PORT:-54369}:${MN_EPMD_PORT:-54369}"
       - "${MN_DIST_BIND_HOST:-127.0.0.1}:${MN_DIST_PORT:-54370}:${MN_DIST_PORT:-54370}"
       - "${MN_BLUEPRINT_WEB_UI_PUBLISH_HOST:-127.0.0.1}:${MN_BLUEPRINT_WEB_UI_PORT_START:-61000}-${MN_BLUEPRINT_WEB_UI_PORT_END:-61049}:${MN_BLUEPRINT_WEB_UI_PORT_START:-61000}-${MN_BLUEPRINT_WEB_UI_PORT_END:-61049}"
+    command: >
+      sh -c 'if [ -n "$$MN_NODE_NAME" ]; then
+      if [ -z "$$MN_COOKIE" ] || [ "$$MN_COOKIE" = "mirrorneuron" ]; then
+      echo "MN_COOKIE must be set to a non-default secret when MN_NODE_NAME enables distributed Erlang" >&2; exit 1;
+      fi;
+      dist_port="$${MN_DIST_PORT:-4370}";
+      unset ERL_EPMD_ADDRESS;
+      epmd -daemon;
+      exec elixir --name "$$MN_NODE_NAME" --cookie "$$MN_COOKIE" --erl "-kernel inet_dist_listen_min $${dist_port} inet_dist_listen_max $${dist_port}" -S mix run --no-halt;
+      else exec mix run --no-halt; fi'
     environment:
       HOME: /root
       MN_CORE_HOST: 0.0.0.0
@@ -129,6 +139,7 @@ services:
       MN_BLUEPRINT_WEB_UI_PORT_START: ${MN_BLUEPRINT_WEB_UI_PORT_START:-61000}
       MN_BLUEPRINT_WEB_UI_PORT_END: ${MN_BLUEPRINT_WEB_UI_PORT_END:-61049}
       MN_BLUEPRINT_WEB_UI_PORT_ALLOCATION_MODE: ${MN_BLUEPRINT_WEB_UI_PORT_ALLOCATION_MODE:-prepublished}
+      ERL_EPMD_PORT: ${MN_EPMD_PORT:-54369}
       ERL_EPMD_ADDRESS: ${ERL_EPMD_ADDRESS:-0.0.0.0}
       ERL_AFLAGS: ${ERL_AFLAGS:-}
       MN_COOKIE: ${MN_COOKIE}
