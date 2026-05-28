@@ -431,49 +431,9 @@ function context_engine_source_dir() {
 function setup_context_engine() {
     context_engine_source_dir >/dev/null
     remove_stale_runtime_containers_for_services context-engine-model membrane-context-engine
-    runtime_compose build context-engine-model membrane-context-engine
-    runtime_compose up -d context-engine-model membrane-context-engine >/dev/null
-}
-
-function context_model_target() {
-    local requested="${MN_DOCKER_TARGET:-auto}"
-    case "$requested" in
-        cpu|mac|nvidia|amd|intel) echo "$requested"; return 0 ;;
-        auto) ;;
-        *) echo "cpu"; return 0 ;;
-    esac
-
-    if command -v nvidia-smi >/dev/null 2>&1; then
-        echo "nvidia"
-    elif [ -e /dev/kfd ] || command -v rocminfo >/dev/null 2>&1 || command -v rocm-smi >/dev/null 2>&1; then
-        echo "amd"
-    elif [ -e /dev/dri ] && { command -v sycl-ls >/dev/null 2>&1 || lspci 2>/dev/null | grep -Eiq 'intel.*(vga|3d|display)'; }; then
-        echo "intel"
-    elif [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
-        echo "mac"
-    else
-        echo "cpu"
-    fi
-}
-
-function context_model_build_target() {
-    case "$1" in
-        mac) echo "mac-arm64-context-model" ;;
-        nvidia) echo "nvidia-context-model" ;;
-        amd) echo "amd-context-model" ;;
-        intel) echo "intel-context-model" ;;
-        *) echo "context-model-cpu" ;;
-    esac
-}
-
-function context_model_image() {
-    case "$1" in
-        mac) echo "mirror-neuron-context-model:mac-arm64" ;;
-        nvidia) echo "mirror-neuron-context-model:nvidia" ;;
-        amd) echo "mirror-neuron-context-model:amd" ;;
-        intel) echo "mirror-neuron-context-model:intel" ;;
-        *) echo "mirror-neuron-context-model:cpu" ;;
-    esac
+    ensure_docker_model_runner
+    runtime_compose build membrane-context-engine
+    runtime_compose up -d membrane-context-engine >/dev/null
 }
 
 function compose_profiles() {
@@ -802,13 +762,11 @@ function resolve_redis_port() {
 }
 
 function write_runtime_compose_files() {
-    local target build_target model_image profiles redis_bind_host persisted_redis_port redis_port network_token redis_password mn_cookie grpc_auth_token grpc_admin_token
+    local model_runner_model profiles redis_bind_host persisted_redis_port redis_port network_token redis_password mn_cookie grpc_auth_token grpc_admin_token
     if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
         context_engine_source_dir >/dev/null
     fi
-    target="$(context_model_target)"
-    build_target="$(context_model_build_target "$target")"
-    model_image="$(context_model_image "$target")"
+    model_runner_model="${MN_CONTEXT_MODEL_RUNNER_MODEL:-hf.co/homerquan/mn-context-engine-model-v-Q4_K_M}"
     profiles="$(compose_profiles)"
     redis_bind_host="${MN_REDIS_BIND_HOST:-0.0.0.0}"
     persisted_redis_port="$(read_env_value "$RUNTIME_COMPOSE_ENV" "MN_REDIS_PORT")"
@@ -833,8 +791,7 @@ MN_HOST_OPENSHELL_CONFIG_DIR=${MN_HOST_OPENSHELL_CONFIG_DIR}
 MN_HOST_OPENSHELL_STATE_DIR=${MN_HOST_OPENSHELL_STATE_DIR}
 MEMBRANE_DIR=${MEMBRANE_DIR}
 ENGINE_IMAGE=mirror-neuron-memory-engine:latest
-MN_CONTEXT_MODEL_BUILD_TARGET=${build_target}
-MN_CONTEXT_MODEL_IMAGE=${model_image}
+MN_CONTEXT_MODEL_RUNNER_MODEL=${model_runner_model}
 MN_GRPC_BIND_HOST=${MN_GRPC_BIND_HOST:-127.0.0.1}
 MN_GRPC_PORT=${MN_GRPC_PORT:-55051}
 MN_CORE_GRPC_TARGET=${MN_CORE_GRPC_TARGET:-localhost:${MN_GRPC_PORT:-55051}}
@@ -919,17 +876,47 @@ function remove_stale_runtime_containers_for_services() {
     done
 }
 
+function ensure_docker_model_runner() {
+    [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] || return 0
+
+    if ! docker model --help >/dev/null 2>&1; then
+        print_error "Docker Model Runner CLI is not available. Upgrade Docker Desktop/Engine to a version with 'docker model' support."
+        exit 1
+    fi
+
+    if docker model status >/dev/null 2>&1; then
+        return 0
+    fi
+
+    print_warning "Docker Model Runner is not running; attempting to enable it."
+    if docker desktop enable model-runner >/dev/null 2>&1 && docker model status >/dev/null 2>&1; then
+        return 0
+    fi
+
+    if docker model install-runner --help >/dev/null 2>&1; then
+        docker model install-runner >/dev/null 2>&1 || true
+        docker model start-runner >/dev/null 2>&1 || true
+        if docker model status >/dev/null 2>&1; then
+            return 0
+        fi
+    fi
+
+    print_error "Docker Model Runner is not ready. Enable it in Docker Desktop Settings > AI, or run 'docker model install-runner' and 'docker model start-runner' on Docker Engine."
+    exit 1
+}
+
 function start_runtime_compose_sidecars() {
     local services=()
     [ "$INSTALL_REDIS" = "Y" ] && services+=("redis")
     [ "$INSTALL_OPENSHELL" = "Y" ] && services+=("openshell")
     if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
-        services+=("context-engine-model" "membrane-context-engine")
+        services+=("membrane-context-engine")
     fi
     if [ "${#services[@]}" -gt 0 ]; then
-        remove_stale_runtime_containers_for_services "${services[@]}"
+        remove_stale_runtime_containers_for_services context-engine-model "${services[@]}"
+        ensure_docker_model_runner
         if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
-            runtime_compose build context-engine-model membrane-context-engine
+            runtime_compose build membrane-context-engine
         fi
         runtime_compose up -d "${services[@]}" >/dev/null
     fi
