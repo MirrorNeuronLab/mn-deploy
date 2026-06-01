@@ -59,7 +59,7 @@ function find_source_workspace() {
     for candidate in "${candidates[@]}"; do
         [ -n "$candidate" ] || continue
         if [ -d "$candidate/mn-python-sdk" ] &&
-           { [ -d "$candidate/mn-skills/blueprint_support_skill" ] || [ -d "$candidate/mn-skills/blueprint-support-skill" ]; } &&
+           [ -d "$candidate/mn-skills/blueprint_support_skill" ] &&
            [ -d "$candidate/mn-cli" ] &&
            [ -d "$candidate/mn-api" ]; then
             (cd "$candidate" && pwd)
@@ -1042,8 +1042,6 @@ fi
     if [ -n "$SOURCE_WORKSPACE" ]; then
         if [ -f "$SOURCE_WORKSPACE/mn-skills/blueprint_support_skill/pyproject.toml" ]; then
             run_quiet "install-blueprint-support-skill-local" "$VENV_DIR/bin/pip" install "$SOURCE_WORKSPACE/mn-skills/blueprint_support_skill[webui]"
-        elif [ -f "$SOURCE_WORKSPACE/mn-skills/blueprint-support-skill/pyproject.toml" ]; then
-            run_quiet "install-blueprint-support-skill-local" "$VENV_DIR/bin/pip" install "$SOURCE_WORKSPACE/mn-skills/blueprint-support-skill[webui]"
         else
             print_error "Could not find the blueprint support Python package under $SOURCE_WORKSPACE/mn-skills."
             exit 1
