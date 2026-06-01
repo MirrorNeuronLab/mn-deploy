@@ -1637,16 +1637,16 @@ fi
 
 echo -e "\n${BOLD}Quick Start:${RESET}" >&3
 if [ "$INSTALL_CLI" = "Y" ]; then
-    echo -e "  1. Start the server (Core & API): ${GREEN}mn start${RESET}" >&3
+    echo -e "  1. Start the server (Core & API): ${GREEN}mn runtime start${RESET}" >&3
 fi
 if [ "$INSTALL_WEB_UI" = "Y" ]; then
-    echo -e "  2. Start the UI:   ${GREEN}mn start${RESET} starts it with the services${RESET}" >&3
+    echo -e "  2. Start the UI:   ${GREEN}mn runtime start${RESET} starts it with the services${RESET}" >&3
 fi
 if [ "$INSTALL_CLI" = "Y" ]; then
-    echo -e "  3. Use the CLI:    ${GREEN}mn nodes${RESET}\n" >&3
+    echo -e "  3. Use the CLI:    ${GREEN}mn node list${RESET}\n" >&3
 fi
 
 if [ "$START_NOW" = "Y" ]; then
     print_step "Starting MirrorNeuron Server..."
-    "$VENV_DIR/bin/mn" start
+    "$VENV_DIR/bin/mn" runtime start
 fi

@@ -1503,15 +1503,15 @@ if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
 fi
 
 echo -e "\n${BOLD}Quick Start:${RESET}" >&3
-echo -e "  1. Start server: ${GREEN}mn start${RESET}" >&3
+echo -e "  1. Start server: ${GREEN}mn runtime start${RESET}" >&3
 if [ "$INSTALL_WEB_UI" = "Y" ]; then
     echo -e "  2. Start UI:     ${GREEN}cd ${UI_LINK_DIR} && npm run dev${RESET}" >&3
 fi
-echo -e "  3. Use CLI:      ${GREEN}mn nodes${RESET}" >&3
+echo -e "  3. Use CLI:      ${GREEN}mn node list${RESET}" >&3
 echo -e "  4. Rebuild core after Elixir changes: ${GREEN}${SCRIPT_DIR}/install_local.sh --yes --no-web-ui --no-skills${RESET}\n" >&3
 
 if [ "$START_NOW" = "Y" ]; then
     print_step "Starting MirrorNeuron Server"
-    "$VENV_DIR/bin/mn" stop >/dev/null 2>&1 || true
-    "$VENV_DIR/bin/mn" start
+    "$VENV_DIR/bin/mn" runtime stop >/dev/null 2>&1 || true
+    "$VENV_DIR/bin/mn" runtime start
 fi

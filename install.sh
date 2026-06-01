@@ -1215,13 +1215,13 @@ function ensure_shell_profile_exports() {
 ensure_shell_profile_exports
 
 echo -e "\n${BOLD}Quick Start:${RESET}" >&3
-echo -e "  1. Start the server (Core & API): ${GREEN}mn start${RESET}" >&3
+echo -e "  1. Start the server (Core & API): ${GREEN}mn runtime start${RESET}" >&3
 if [ "$INSTALL_WEB_UI" = "Y" ]; then
     echo -e "  2. Start the UI:   ${GREEN}cd ${INSTALL_DIR}/webui && npm run dev${RESET}" >&3
 fi
-echo -e "  3. Use the CLI:    ${GREEN}mn nodes${RESET}\n" >&3
+echo -e "  3. Use the CLI:    ${GREEN}mn node list${RESET}\n" >&3
 
 if [ "$START_NOW" = "Y" ]; then
     print_step "Starting MirrorNeuron Server..."
-    "$VENV_DIR/bin/mn" start
+    "$VENV_DIR/bin/mn" runtime start
 fi
