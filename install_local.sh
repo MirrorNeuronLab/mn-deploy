@@ -1207,7 +1207,9 @@ function remove_stale_runtime_containers_for_services() {
 }
 
 function ensure_docker_model_runner() {
-    [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] || return 0
+    if [ "$INSTALL_CONTEXT_ENGINE" != "Y" ] && [ "${INSTALL_DOCKER_MODEL_RUNNER:-N}" != "Y" ] && [ "${MN_ENABLE_DOCKER_MODEL_RUNNER:-N}" != "Y" ]; then
+        return 0
+    fi
 
     if ! docker model --help >/dev/null 2>&1; then
         print_error "Docker Model Runner CLI is not available. Upgrade Docker Desktop/Engine to a version with 'docker model' support."
