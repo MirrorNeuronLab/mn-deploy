@@ -107,7 +107,7 @@ resolve_grpc_auth_token() {
 }
 
 resolve_grpc_admin_token() {
-    local env_token="${MN_MIRROR_NEURON_GRPC_ADMIN_TOKEN:-}"
+    local env_token="${MN_GRPC_ADMIN_TOKEN:-${MN_MIRROR_NEURON_GRPC_ADMIN_TOKEN:-}}"
     local token_file="${DIR}/grpc_admin.token"
     local token
 
@@ -130,7 +130,7 @@ resolve_grpc_admin_token() {
         token=""
     fi
     if [ -z "$token" ]; then
-        echo "=> Error: failed to generate MN_MIRROR_NEURON_GRPC_ADMIN_TOKEN."
+        echo "=> Error: failed to generate MN_GRPC_ADMIN_TOKEN."
         exit 1
     fi
 
@@ -298,7 +298,7 @@ start_services() {
     grpc_auth_token="$(resolve_grpc_auth_token)"
     grpc_admin_token="$(resolve_grpc_admin_token)"
     export MN_GRPC_AUTH_TOKEN="${MN_GRPC_AUTH_TOKEN:-$grpc_auth_token}"
-    export MN_MIRROR_NEURON_GRPC_ADMIN_TOKEN="${MN_MIRROR_NEURON_GRPC_ADMIN_TOKEN:-$grpc_admin_token}"
+    export MN_GRPC_ADMIN_TOKEN="${MN_GRPC_ADMIN_TOKEN:-$grpc_admin_token}"
     if runtime_compose_available; then
         echo "=> Starting MirrorNeuron Docker runtime (Compose)..."
         runtime_compose up -d >/dev/null
@@ -310,7 +310,7 @@ start_services() {
             docker run -d --name mirror-neuron-core --network host
             -e "MN_COOKIE=${mn_cookie}"
             -e "MN_GRPC_AUTH_TOKEN=${MN_GRPC_AUTH_TOKEN}"
-            -e "MN_MIRROR_NEURON_GRPC_ADMIN_TOKEN=${MN_MIRROR_NEURON_GRPC_ADMIN_TOKEN}"
+            -e "MN_GRPC_ADMIN_TOKEN=${MN_GRPC_ADMIN_TOKEN}"
             -e "MN_CORE_HOST=${MN_CORE_HOST:-localhost}"
             -e "MN_REDIS_HOST=${MN_REDIS_HOST:-localhost}"
             -e "ERL_EPMD_ADDRESS=${MN_EPMD_HOST:-localhost}"

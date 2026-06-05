@@ -727,7 +727,7 @@ function resolve_grpc_auth_token() {
 }
 
 function resolve_grpc_admin_token() {
-    local env_token="${MN_MIRROR_NEURON_GRPC_ADMIN_TOKEN:-}"
+    local env_token="${MN_GRPC_ADMIN_TOKEN:-${MN_MIRROR_NEURON_GRPC_ADMIN_TOKEN:-}}"
     local token_file="${INSTALL_DIR}/grpc_admin.token"
     local token
 
@@ -750,7 +750,7 @@ function resolve_grpc_admin_token() {
         token=""
     fi
     if [ -z "$token" ]; then
-        print_error "Failed to generate MN_MIRROR_NEURON_GRPC_ADMIN_TOKEN."
+        print_error "Failed to generate MN_GRPC_ADMIN_TOKEN."
         exit 1
     fi
 
@@ -947,7 +947,7 @@ function start_core_container() {
 
     cmd+=("-e" "MN_COOKIE=${mn_cookie}")
     cmd+=("-e" "MN_GRPC_AUTH_TOKEN=${grpc_auth_token}")
-    cmd+=("-e" "MN_MIRROR_NEURON_GRPC_ADMIN_TOKEN=${grpc_admin_token}")
+    cmd+=("-e" "MN_GRPC_ADMIN_TOKEN=${grpc_admin_token}")
     cmd+=("-e" "MN_GRPC_PORT=${grpc_port}")
     if [ -n "${MN_NODE_NAME:-}" ]; then
         cmd+=("-e" "MN_NODE_NAME=${MN_NODE_NAME}")
@@ -1185,7 +1185,7 @@ OPENSHELL_GATEWAY_DOCKER_GROUP=${OPENSHELL_GATEWAY_DOCKER_GROUP}
 DOCKER_HOST_SOCKET=${DOCKER_HOST_SOCKET}
 MN_COOKIE=${mn_cookie}
 MN_GRPC_AUTH_TOKEN=${grpc_auth_token}
-MN_MIRROR_NEURON_GRPC_ADMIN_TOKEN=${grpc_admin_token}
+MN_GRPC_ADMIN_TOKEN=${grpc_admin_token}
 EOF
     chmod 600 "$RUNTIME_COMPOSE_ENV" 2>/dev/null || true
 }

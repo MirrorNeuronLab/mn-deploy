@@ -1122,7 +1122,7 @@ function resolve_grpc_auth_token() {
 }
 
 function resolve_grpc_admin_token() {
-    resolve_secret_file "${MN_MIRROR_NEURON_GRPC_ADMIN_TOKEN:-}" "${INSTALL_DIR}/grpc_admin.token" "MN_MIRROR_NEURON_GRPC_ADMIN_TOKEN"
+    resolve_secret_file "${MN_GRPC_ADMIN_TOKEN:-${MN_MIRROR_NEURON_GRPC_ADMIN_TOKEN:-}}" "${INSTALL_DIR}/grpc_admin.token" "MN_GRPC_ADMIN_TOKEN"
 }
 
 function resolve_network_token() {
@@ -1333,7 +1333,7 @@ OPENSHELL_GATEWAY_DOCKER_GROUP=${OPENSHELL_GATEWAY_DOCKER_GROUP}
 DOCKER_HOST_SOCKET=${DOCKER_HOST_SOCKET}
 MN_COOKIE=${mn_cookie}
 MN_GRPC_AUTH_TOKEN=${grpc_auth_token}
-MN_MIRROR_NEURON_GRPC_ADMIN_TOKEN=${grpc_admin_token}
+MN_GRPC_ADMIN_TOKEN=${grpc_admin_token}
 EOF
     chmod 600 "$RUNTIME_COMPOSE_ENV" 2>/dev/null || true
 }
