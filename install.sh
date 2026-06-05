@@ -787,15 +787,12 @@ function resolve_docker_network_external() {
 }
 
 function write_runtime_compose_files() {
-    local model_runner_model profiles redis_bind_host persisted_redis_port redis_port network_name network_external network_token redis_password mn_cookie grpc_auth_token grpc_admin_token
+    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie grpc_auth_token grpc_admin_token
     if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
         context_engine_source_dir >/dev/null
     fi
     model_runner_model="${MN_CONTEXT_MODEL_RUNNER_MODEL:-hf.co/homerquan/mn-context-engine-model-v-Q4_K_M}"
     profiles="$(compose_profiles)"
-    redis_bind_host="${MN_REDIS_BIND_HOST:-0.0.0.0}"
-    persisted_redis_port="$(read_env_value "$RUNTIME_COMPOSE_ENV" "MN_REDIS_PORT")"
-    redis_port="$(resolve_redis_port "$redis_bind_host" "$persisted_redis_port")"
     network_name="${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
     network_external="$(resolve_docker_network_external "$network_name")"
     network_token="$(resolve_network_token)"
@@ -824,13 +821,9 @@ MN_GRPC_PORT=${MN_GRPC_PORT:-55051}
 MN_CORE_GRPC_TARGET=${MN_CORE_GRPC_TARGET:-localhost:${MN_GRPC_PORT:-55051}}
 MN_API_HOST=${MN_API_HOST:-localhost}
 MN_API_PORT=${MN_API_PORT:-54001}
-MN_EPMD_BIND_HOST=${MN_EPMD_BIND_HOST:-127.0.0.1}
-MN_EPMD_PORT=${MN_EPMD_PORT:-54369}
-MN_DIST_BIND_HOST=${MN_DIST_BIND_HOST:-127.0.0.1}
 MN_DIST_PORT=${MN_DIST_PORT:-54370}
 MN_WEB_UI_HOST=${MN_WEB_UI_HOST:-localhost}
 MN_WEB_UI_PORT=${MN_WEB_UI_PORT:-55173}
-MN_BLUEPRINT_WEB_UI_PUBLISH_HOST=${MN_BLUEPRINT_WEB_UI_PUBLISH_HOST:-127.0.0.1}
 MN_BLUEPRINT_WEB_UI_BIND_HOST=${MN_BLUEPRINT_WEB_UI_BIND_HOST:-0.0.0.0}
 MN_BLUEPRINT_WEB_UI_PUBLIC_HOST=${MN_BLUEPRINT_WEB_UI_PUBLIC_HOST:-localhost}
 MN_BLUEPRINT_WEB_UI_PORT_START=${MN_BLUEPRINT_WEB_UI_PORT_START:-61000}
@@ -850,14 +843,11 @@ MN_NODE_NAME=${MN_NODE_NAME:-}
 MN_NODE_ROLE=${MN_NODE_ROLE:-runtime}
 MN_CLUSTER_NODES=${MN_CLUSTER_NODES:-}
 MN_NETWORK_JOIN_TOKEN=${network_token}
-MN_REDIS_BIND_HOST=${redis_bind_host}
-MN_REDIS_PORT=${redis_port}
 MN_REDIS_PASSWORD=${redis_password}
 MN_REDIS_URL=${MN_REDIS_URL:-redis://:${redis_password}@redis:6379/0}
 MN_CONTEXT_REDIS_URL=${MN_CONTEXT_REDIS_URL:-redis://:${redis_password}@redis:6379/1}
 ERL_EPMD_ADDRESS=${ERL_EPMD_ADDRESS:-0.0.0.0}
 ERL_AFLAGS=${ERL_AFLAGS:--kernel inet_dist_listen_min ${MN_DIST_PORT:-54370} inet_dist_listen_max ${MN_DIST_PORT:-54370}}
-OPENSHELL_GATEWAY_BIND_HOST=${OPENSHELL_GATEWAY_BIND_HOST:-127.0.0.1}
 OPENSHELL_GATEWAY_PORT=${OPENSHELL_GATEWAY_PORT:-58080}
 OPENSHELL_GATEWAY_ENDPOINT=${OPENSHELL_GATEWAY_ENDPOINT:-http://127.0.0.1:${OPENSHELL_GATEWAY_PORT:-58080}}
 OPENSHELL_GATEWAY_USER=${OPENSHELL_GATEWAY_USER}
