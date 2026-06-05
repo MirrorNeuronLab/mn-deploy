@@ -761,8 +761,33 @@ function resolve_redis_port() {
     exit 1
 }
 
+function resolve_docker_network_external() {
+    local network_name="$1"
+    local configured="${MN_DOCKER_NETWORK_EXTERNAL:-}"
+    local labels compose_project compose_network
+
+    if [ -n "$configured" ]; then
+        printf '%s\n' "$configured"
+        return 0
+    fi
+
+    if ! labels="$(docker network inspect -f '{{ index .Labels "com.docker.compose.project" }}|{{ index .Labels "com.docker.compose.network" }}' "$network_name" 2>/dev/null)"; then
+        printf 'false\n'
+        return 0
+    fi
+
+    compose_project="${labels%%|*}"
+    compose_network="${labels#*|}"
+    if [ "$compose_project" = "mirror-neuron" ] && [ "$compose_network" = "runtime" ]; then
+        printf 'false\n'
+    else
+        print_warning "Docker network ${network_name} already exists outside this Compose project; reusing it as an external network."
+        printf 'true\n'
+    fi
+}
+
 function write_runtime_compose_files() {
-    local model_runner_model profiles redis_bind_host persisted_redis_port redis_port network_token redis_password mn_cookie grpc_auth_token grpc_admin_token
+    local model_runner_model profiles redis_bind_host persisted_redis_port redis_port network_name network_external network_token redis_password mn_cookie grpc_auth_token grpc_admin_token
     if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
         context_engine_source_dir >/dev/null
     fi
@@ -771,6 +796,8 @@ function write_runtime_compose_files() {
     redis_bind_host="${MN_REDIS_BIND_HOST:-0.0.0.0}"
     persisted_redis_port="$(read_env_value "$RUNTIME_COMPOSE_ENV" "MN_REDIS_PORT")"
     redis_port="$(resolve_redis_port "$redis_bind_host" "$persisted_redis_port")"
+    network_name="${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
+    network_external="$(resolve_docker_network_external "$network_name")"
     network_token="$(resolve_network_token)"
     redis_password="$(derive_network_secret "$network_token" "redis")"
     mn_cookie="$(resolve_mn_cookie)"
@@ -814,8 +841,8 @@ MN_BLUEPRINT_REPO=${MN_BLUEPRINT_REPO:-${MN_DEFAULT_BLUEPRINT_REPO:-https://gith
 MN_DEV_LOCAL_BLUEPRINT_REPO=${MN_DEV_LOCAL_BLUEPRINT_REPO:-${DEV_LOCAL_BLUEPRINT_REPO:-}}
 MN_RUNS_ROOT=${MN_RUNS_ROOT:-}
 MN_DOCKER_NETWORK_MODE=${MN_DOCKER_NETWORK_MODE:-bridge}
-MN_DOCKER_NETWORK_NAME=${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}
-MN_DOCKER_NETWORK_EXTERNAL=${MN_DOCKER_NETWORK_EXTERNAL:-false}
+MN_DOCKER_NETWORK_NAME=${network_name}
+MN_DOCKER_NETWORK_EXTERNAL=${network_external}
 MN_DOCKER_NETWORK_DRIVER=${MN_DOCKER_NETWORK_DRIVER:-bridge}
 MN_DOCKER_NETWORK_ATTACHABLE=${MN_DOCKER_NETWORK_ATTACHABLE:-false}
 MN_NODE_ALIAS=${MN_NODE_ALIAS:-}
