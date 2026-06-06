@@ -124,6 +124,7 @@ services:
       MN_NODE_GPU_COUNT: ${MN_NODE_GPU_COUNT:-}
       MN_NODE_MODELS: ${MN_NODE_MODELS:-}
       MN_NODE_RUNTIME_MODELS: ${MN_NODE_RUNTIME_MODELS:-}
+      MN_DOCKER_WORKER_ENABLED: ${MN_DOCKER_WORKER_ENABLED:-1}
       MN_CLUSTER_NODES: ${MN_CLUSTER_NODES:-}
       MN_DIST_PORT: ${MN_DIST_PORT:-54370}
       MN_BLUEPRINT_WEB_UI_BIND_HOST: ${MN_BLUEPRINT_WEB_UI_BIND_HOST:-0.0.0.0}
@@ -153,6 +154,7 @@ services:
       - ${MN_HOST_HOME_DIR:-${MN_HOST_MN_DIR:-./mn}}:/opt/mirror_neuron/.mn
       - ${MN_HOST_OPENSHELL_CONFIG_DIR:-./openshell-config}:/root/.config/openshell:ro
       - ${MN_HOST_OPENSHELL_CONFIG_DIR:-./openshell-config}:/opt/mirror_neuron/.config/openshell:ro
+      - ${DOCKER_HOST_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
     networks:
       runtime:
         aliases:
