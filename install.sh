@@ -4783,8 +4783,16 @@ if [ "$START_NOW" = "Y" ]; then
 fi
 }
 
-case "$MN_INSTALL_MODE" in
-    github) run_install_github "${MN_INSTALL_ARGS[@]}" ;;
-    local) run_install_local "${MN_INSTALL_ARGS[@]}" ;;
-    binary) run_install_binary "${MN_INSTALL_ARGS[@]}" ;;
-esac
+if [ "${#MN_INSTALL_ARGS[@]}" -eq 0 ]; then
+    case "$MN_INSTALL_MODE" in
+        github) run_install_github ;;
+        local) run_install_local ;;
+        binary) run_install_binary ;;
+    esac
+else
+    case "$MN_INSTALL_MODE" in
+        github) run_install_github "${MN_INSTALL_ARGS[@]}" ;;
+        local) run_install_local "${MN_INSTALL_ARGS[@]}" ;;
+        binary) run_install_binary "${MN_INSTALL_ARGS[@]}" ;;
+    esac
+fi
