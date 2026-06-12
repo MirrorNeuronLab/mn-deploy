@@ -1,20 +1,20 @@
 # MirrorNeuron Deploy
 
-`mn-deploy` contains the installer and local service scripts for MirrorNeuron.
-The package-based installer is `install_bin.sh`.
+`mn-deploy` contains the unified installer and local service scripts for MirrorNeuron.
+By default, `install.sh` installs from GitHub repositories.
 
 ## Quick Start
 
 Inspect installer options:
 
 ```bash
-./install_bin.sh --help
+./install.sh --help
 ```
 
 Install the local runtime:
 
 ```bash
-./install_bin.sh
+./install.sh
 ```
 
 Check or control installed services:
@@ -38,3 +38,5 @@ Check or control installed services:
 - Generated Compose settings are stored in `~/.mn/docker-compose.env`.
 - The installer can set up the core, SDK, CLI, API, Web UI, Redis, OpenShell,
   and Membrane context engine depending on selected options.
+- Use `./install.sh --mode local` from a monorepo checkout for editable local
+  installs, or `./install.sh --mode binary` for release/package installs.
