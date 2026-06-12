@@ -446,6 +446,10 @@ function python_minor_version() {
     "$1" -c 'import sys; print(".".join(str(part) for part in sys.version_info[:2]))' 2>/dev/null
 }
 
+function python_is_selected_minor() {
+    [ "$(python_minor_version "$1" || true)" = "$MN_MANAGED_PYTHON_VERSION" ]
+}
+
 function curl_github() {
     local token="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
     if [ -n "$token" ]; then
@@ -553,7 +557,7 @@ function install_managed_python() {
     local managed_bin
 
     print_step "Resolving private Python ${MN_MANAGED_PYTHON_VERSION} runtime with uv"
-    print_warning "No Python 3.11+ interpreter was found; uv will manage a private runtime under ${MN_MANAGED_PYTHON_ROOT}."
+    print_warning "No Python ${MN_MANAGED_PYTHON_VERSION}.x interpreter was found; uv will manage a private runtime under ${MN_MANAGED_PYTHON_ROOT}."
     resolve_uv
 
     managed_bin="$(find_uv_managed_python)"
@@ -583,7 +587,7 @@ function print_python_requirement_error() {
     local script_name="${MN_INSTALL_SCRIPT_NAME:-$(basename "$0")}"
     local version=""
 
-    print_error "MirrorNeuron Python components require Python 3.11 or newer."
+    print_error "MirrorNeuron Python components require Python ${MN_MANAGED_PYTHON_VERSION}.x by default."
     if [ -n "$selected" ]; then
         version="$(python_version "$selected" || true)"
         if [ -n "$version" ]; then
@@ -592,8 +596,8 @@ function print_python_requirement_error() {
             print_error "Selected Python '$selected' could not be run."
         fi
     fi
-    print_error "Install Python 3.11 yourself, or allow the uv-managed private runtime fallback."
-    print_error "You can also rerun with: MN_PYTHON=/opt/homebrew/bin/python3.11 ./$script_name"
+    print_error "Install Python ${MN_MANAGED_PYTHON_VERSION}.x yourself, or allow the uv-managed private runtime fallback."
+    print_error "You can also rerun with: MN_PYTHON=/opt/homebrew/bin/python${MN_MANAGED_PYTHON_VERSION} ./$script_name"
 }
 
 function resolve_python_runtime() {
@@ -607,7 +611,7 @@ function resolve_python_runtime() {
     if [ -n "${MN_PYTHON:-}" ]; then
         candidates+=("$MN_PYTHON")
     else
-        candidates+=(python3.11 python3.12 python3)
+        candidates+=("python${MN_MANAGED_PYTHON_VERSION}" python3 python)
     fi
 
     for candidate in "${candidates[@]}"; do
@@ -619,7 +623,7 @@ function resolve_python_runtime() {
             fi
             continue
         fi
-        if python_is_supported "$resolved"; then
+        if python_is_supported "$resolved" && python_is_selected_minor "$resolved"; then
             MN_PYTHON_BIN="$resolved"
             print_success "Using Python $(python_version "$MN_PYTHON_BIN") at $MN_PYTHON_BIN."
             return
@@ -637,7 +641,7 @@ function resolve_python_runtime() {
     fi
 
     print_warning "Managed Python fallback is disabled."
-    resolved="$(command -v python3 2>/dev/null || true)"
+    resolved="$(command -v "python${MN_MANAGED_PYTHON_VERSION}" 2>/dev/null || true)"
     print_python_requirement_error "$resolved"
     exit 1
 }
@@ -1053,6 +1057,7 @@ function install_openshell_cli() {
 
 function generate_mn_secret() {
     local secret
+    local python_fallback="${MN_PYTHON_BIN:-}"
 
     if command -v openssl >/dev/null 2>&1; then
         if secret="$(openssl rand -hex 32 2>/dev/null)" && [ -n "$secret" ]; then
@@ -1068,8 +1073,11 @@ function generate_mn_secret() {
         fi
     fi
 
-    if command -v python3 >/dev/null 2>&1; then
-        if secret="$(python3 -c 'import secrets; print(secrets.token_hex(32))' 2>/dev/null)" && [ -n "$secret" ]; then
+    if [ -z "$python_fallback" ]; then
+        python_fallback="$(command -v "python${MN_MANAGED_PYTHON_VERSION}" 2>/dev/null || true)"
+    fi
+    if [ -n "$python_fallback" ]; then
+        if secret="$("$python_fallback" -c 'import secrets; print(secrets.token_hex(32))' 2>/dev/null)" && [ -n "$secret" ]; then
             printf '%s\n' "$secret"
             return 0
         fi
@@ -1134,6 +1142,7 @@ function derive_network_secret() {
     local label="$2"
     local material="mirror-neuron:${label}:${token}"
     local digest
+    local python_fallback="${MN_PYTHON_BIN:-}"
 
     if command -v shasum >/dev/null 2>&1; then
         if digest="$(printf '%s' "$material" | shasum -a 256 2>/dev/null | awk '{print $1}')" && [ -n "$digest" ]; then
@@ -1156,14 +1165,17 @@ function derive_network_secret() {
         fi
     fi
 
-    if command -v python3 >/dev/null 2>&1; then
-        if digest="$(printf '%s' "$material" | python3 -c 'import hashlib, sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())' 2>/dev/null)" && [ -n "$digest" ]; then
+    if [ -z "$python_fallback" ]; then
+        python_fallback="$(command -v "python${MN_MANAGED_PYTHON_VERSION}" 2>/dev/null || true)"
+    fi
+    if [ -n "$python_fallback" ]; then
+        if digest="$(printf '%s' "$material" | "$python_fallback" -c 'import hashlib, sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())' 2>/dev/null)" && [ -n "$digest" ]; then
             printf '%s\n' "$digest"
             return 0
         fi
     fi
 
-    print_error "Need shasum, sha256sum, a working openssl, or python3 to derive Redis credentials."
+    print_error "Need shasum, sha256sum, a working openssl, or python${MN_MANAGED_PYTHON_VERSION} to derive Redis credentials."
     exit 1
 }
 

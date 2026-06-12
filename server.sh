@@ -12,9 +12,11 @@ RUNTIME_COMPOSE_FILE="${DIR}/docker-compose.yml"
 RUNTIME_COMPOSE_ENV="${DIR}/docker-compose.env"
 RUNTIME_ENDPOINTS_FILE="${DIR}/runtime-endpoints.json"
 MN_DEFAULT_BLUEPRINT_REPO="${MN_DEFAULT_BLUEPRINT_REPO:-https://github.com/MirrorNeuronLab/mn-blueprints.git}"
+MN_MANAGED_PYTHON_VERSION="${MN_MANAGED_PYTHON_VERSION:-3.11}"
 
 generate_mn_cookie() {
     local secret
+    local python_fallback
 
     if command -v openssl >/dev/null 2>&1; then
         if secret="$(openssl rand -hex 32 2>/dev/null)" && [ -n "$secret" ]; then
@@ -30,8 +32,9 @@ generate_mn_cookie() {
         fi
     fi
 
-    if command -v python3 >/dev/null 2>&1; then
-        if secret="$(python3 -c 'import secrets; print(secrets.token_hex(32))' 2>/dev/null)" && [ -n "$secret" ]; then
+    python_fallback="$(command -v "python${MN_MANAGED_PYTHON_VERSION}" 2>/dev/null || true)"
+    if [ -n "$python_fallback" ]; then
+        if secret="$("$python_fallback" -c 'import secrets; print(secrets.token_hex(32))' 2>/dev/null)" && [ -n "$secret" ]; then
             printf '%s\n' "$secret"
             return 0
         fi

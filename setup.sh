@@ -6,6 +6,7 @@ cd "$DIR"
 
 VENV_DIR="${HOME}/.local/share/mn_venv"
 BIN_DIR="${HOME}/.local/bin"
+PYTHON_BIN="${MN_PYTHON:-python3.11}"
 FORCE_REINSTALL=false
 
 for arg in "$@"; do
@@ -26,7 +27,7 @@ fi
 
 if [ ! -d "$VENV_DIR" ]; then
     echo "=> Creating Python virtual environment in $VENV_DIR..."
-    python3 -m venv "$VENV_DIR"
+    "$PYTHON_BIN" -m venv "$VENV_DIR"
 fi
 
 echo "=> Installing Python packages (SDK, CLI, API)..."
