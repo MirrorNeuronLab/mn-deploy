@@ -244,7 +244,7 @@ PY
 
 if [ "$APPLY" = "Y" ]; then
     echo "Uploading distributions to ${REPOSITORY_URL}."
-    "$PYTHON_BIN" -m twine upload --repository-url "$REPOSITORY_URL" --skip-existing "$DIST_DIR"/*
+    "$PYTHON_BIN" -m twine upload --repository-url "$REPOSITORY_URL" "$DIST_DIR"/*
 else
     echo "DRY RUN: would upload distributions to ${REPOSITORY_URL}."
 fi

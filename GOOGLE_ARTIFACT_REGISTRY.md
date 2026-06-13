@@ -1,0 +1,220 @@
+# Google Artifact Registry Python Publishing
+
+This runbook publishes every package listed in
+`package-index/python-packages.toml` to Google Artifact Registry (GAR). The
+index is the source of truth for publishable Python packages, including
+`mn-skills/*`, Membrane packages, and Synapse packages.
+
+## Current Registry
+
+- Project: `mirrorneuron-public-packages`
+- Repository: `agent-skills`
+- Location: `us-central1`
+- Repository format: Python
+- Public simple index:
+  `https://us-central1-python.pkg.dev/mirrorneuron-public-packages/agent-skills/simple/`
+
+The repository is intended to be public read-only. The project has a
+project-level domain-restriction exception, and the repository IAM policy grants
+`roles/artifactregistry.reader` to `allUsers`.
+
+## Auth
+
+Publishing requires both normal `gcloud` auth and Application Default
+Credentials because Twine uses Google's Artifact Registry keyring backend.
+
+```bash
+/Users/homer/google-cloud-sdk/bin/gcloud auth login
+/Users/homer/google-cloud-sdk/bin/gcloud auth application-default login
+/Users/homer/google-cloud-sdk/bin/gcloud auth application-default set-quota-project mirrorneuron-public-packages
+```
+
+Use the full `gcloud` path above if the SDK is not on `PATH`.
+
+## One-Time Setup
+
+Run this from `mn-deploy`:
+
+```bash
+cd /Users/homer/Projects/mirror-neuron-set/mn-deploy
+
+PATH="/Users/homer/google-cloud-sdk/bin:$PATH" \
+./setup_google_artifact_registry.sh \
+  --project mirrorneuron-public-packages \
+  --location us-central1 \
+  --repository agent-skills
+```
+
+The setup script verifies the repo, checks auth, creates
+`.venv-gar-publish/`, and installs:
+
+- `build`
+- `twine`
+- `keyring`
+- `keyrings.google-artifactregistry-auth`
+
+## Dry Run
+
+Always run the dry run first. It builds all indexed packages, runs
+`twine check`, generates `local-python-index/`, lists remote GAR packages, and
+prints stale package names that would be deleted. It does not upload or delete.
+
+```bash
+PATH="/Users/homer/google-cloud-sdk/bin:$PATH" \
+./publish_python_packages_to_google_artifact_registry.sh \
+  --project mirrorneuron-public-packages \
+  --location us-central1 \
+  --repository agent-skills
+```
+
+Expected shape:
+
+- `Indexed packages: 33`
+- `Stale remote packages: 0` unless intentionally pruning
+- `dist/python-packages/` contains built wheels/sdists
+- `local-python-index/simple/` contains a local PEP 503-style index
+
+Warnings from `twine check` about missing long descriptions are currently
+non-fatal for some skill packages. Fix them package by package when polishing
+package metadata.
+
+## Publish
+
+Only run `--apply` after the dry run passes and the package list is expected.
+This uploads all built distributions with Twine and deletes GAR package names
+that are not present in the local package index.
+
+```bash
+PATH="/Users/homer/google-cloud-sdk/bin:$PATH" \
+./publish_python_packages_to_google_artifact_registry.sh \
+  --apply \
+  --project mirrorneuron-public-packages \
+  --location us-central1 \
+  --repository agent-skills
+```
+
+Pruning is package-level: the script removes remote package names missing from
+`package-index/python-packages.toml`, but it does not delete old versions of a
+package that remains indexed.
+
+GAR's Python repository endpoint does not support Twine's `--skip-existing`.
+The publish script intentionally omits that flag. If a publish partially
+completed, either bump versions before rerunning or remove the incomplete remote
+versions manually.
+
+## Install From Public GAR
+
+Example direct install:
+
+```bash
+python -m pip install \
+  --index-url https://us-central1-python.pkg.dev/mirrorneuron-public-packages/agent-skills/simple/ \
+  --extra-index-url https://pypi.org/simple \
+  mirrorneuron-cli
+```
+
+Binary installer example:
+
+```bash
+./install.sh --mode binary --yes \
+  --python-index-url https://us-central1-python.pkg.dev/mirrorneuron-public-packages/agent-skills/simple/
+```
+
+Install all indexed skills:
+
+```bash
+./install.sh --mode binary --yes \
+  --python-index-url https://us-central1-python.pkg.dev/mirrorneuron-public-packages/agent-skills/simple/ \
+  --all-skills
+```
+
+## Package Index Fields
+
+Each entry in `package-index/python-packages.toml` has:
+
+- `name`: package name uploaded to GAR
+- `path`: package directory relative to the `mirror-neuron-set` workspace root
+- `publish_group`: coarse release grouping, such as `runtime`, `skill`,
+  `membrane`, or `synapse`
+- `installer_groups`: groups consumed by `install.sh --mode binary`
+- `default_extras`: optional extras installed by default for a group
+- `binary_default`: whether the package is part of the default binary runtime
+- `build_formats`: optional list of build artifacts, defaulting to
+  `["sdist", "wheel"]`
+
+`mirrorneuron-membrane-python-sdk` is intentionally `build_formats = ["wheel"]`
+because its custom `mn_build_backend` implements `build_wheel` but not
+`build_sdist`.
+
+## Public Read-Only IAM
+
+The public repo requires:
+
+```bash
+/Users/homer/google-cloud-sdk/bin/gcloud org-policies set-policy /private/tmp/public-registry-drs-exception.yaml \
+  --project=mirrorneuron-public-packages
+
+/Users/homer/google-cloud-sdk/bin/gcloud artifacts repositories add-iam-policy-binding agent-skills \
+  --project=mirrorneuron-public-packages \
+  --location=us-central1 \
+  --member=allUsers \
+  --role=roles/artifactregistry.reader \
+  --condition=None
+```
+
+The `--condition=None` flag avoids conditional-policy prompts and was required
+when the public reader binding was created.
+
+Verify:
+
+```bash
+/Users/homer/google-cloud-sdk/bin/gcloud artifacts repositories get-iam-policy agent-skills \
+  --project=mirrorneuron-public-packages \
+  --location=us-central1 \
+  --format='table(bindings.role,bindings.members)'
+```
+
+Expected public binding:
+
+```text
+ROLE                               MEMBERS
+['roles/artifactregistry.reader']  [['allUsers']]
+```
+
+## Troubleshooting
+
+If `setup_google_artifact_registry.sh` says ADC is missing, rerun:
+
+```bash
+/Users/homer/google-cloud-sdk/bin/gcloud auth application-default login
+/Users/homer/google-cloud-sdk/bin/gcloud auth application-default set-quota-project mirrorneuron-public-packages
+```
+
+If adding `allUsers` fails with `constraints/iam.allowedPolicyMemberDomains`,
+the project-level org-policy exception is missing or has not propagated.
+
+If publishing fails with:
+
+```text
+ERROR UnsupportedConfiguration: ... does not have support for the following features: --skip-existing
+```
+
+make sure `publish_python_packages_to_google_artifact_registry.sh` does not pass
+`--skip-existing` to `twine upload`.
+
+If publishing fails with:
+
+```text
+AttributeError: module 'mn_build_backend' has no attribute 'build_sdist'
+```
+
+make sure the Membrane SDK entry in `package-index/python-packages.toml` still
+has:
+
+```toml
+build_formats = ["wheel"]
+```
+
+If anonymous `/simple/` returns `404` before publishing, that can simply mean
+the repository is empty. After publishing, package pages should be visible to
+public pip clients.

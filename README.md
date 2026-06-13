@@ -33,6 +33,7 @@ Check or control installed services:
 
 ## Details
 
+- [Google Artifact Registry Python Publishing](./GOOGLE_ARTIFACT_REGISTRY.md)
 - [MirrorNeuron Component Guide](../mn-docs/component-guide.md#deployment-scripts)
 - [Installation](../mn-docs/installation.md)
 - [Docker and OpenShell for Blueprints](../mn-docs/docker_and_openshell_for_blueprints.md)
@@ -48,20 +49,32 @@ Check or control installed services:
   installs, or `./install.sh --mode binary` for release/package installs.
 - Python packages published to Google Artifact Registry are controlled by
   `package-index/python-packages.toml`.
+- The current public package repository is
+  `https://us-central1-python.pkg.dev/mirrorneuron-public-packages/agent-skills/simple/`.
 - GAR setup:
 
   ```bash
-  ./setup_google_artifact_registry.sh --project YOUR_GCP_PROJECT
+  ./setup_google_artifact_registry.sh \
+    --project mirrorneuron-public-packages \
+    --location us-central1 \
+    --repository agent-skills
   ```
 
 - GAR publish/sync dry run:
 
   ```bash
-  ./publish_python_packages_to_google_artifact_registry.sh --project YOUR_GCP_PROJECT
+  ./publish_python_packages_to_google_artifact_registry.sh \
+    --project mirrorneuron-public-packages \
+    --location us-central1 \
+    --repository agent-skills
   ```
 
 - GAR publish/sync apply:
 
   ```bash
-  ./publish_python_packages_to_google_artifact_registry.sh --project YOUR_GCP_PROJECT --apply
+  ./publish_python_packages_to_google_artifact_registry.sh \
+    --apply \
+    --project mirrorneuron-public-packages \
+    --location us-central1 \
+    --repository agent-skills
   ```
