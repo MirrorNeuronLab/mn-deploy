@@ -1,0 +1,4 @@
+# Generated Python package publishing artifacts
+.venv-gar-publish/
+dist/python-packages/
+local-python-index/

@@ -17,6 +17,12 @@ Install the local runtime:
 ./install.sh
 ```
 
+Install released Python packages from Google Artifact Registry:
+
+```bash
+./install.sh --mode binary --gar-project YOUR_GCP_PROJECT
+```
+
 Check or control installed services:
 
 ```bash
@@ -40,3 +46,22 @@ Check or control installed services:
   and Membrane context engine depending on selected options.
 - Use `./install.sh --mode local` from a monorepo checkout for editable local
   installs, or `./install.sh --mode binary` for release/package installs.
+- Python packages published to Google Artifact Registry are controlled by
+  `package-index/python-packages.toml`.
+- GAR setup:
+
+  ```bash
+  ./setup_google_artifact_registry.sh --project YOUR_GCP_PROJECT
+  ```
+
+- GAR publish/sync dry run:
+
+  ```bash
+  ./publish_python_packages_to_google_artifact_registry.sh --project YOUR_GCP_PROJECT
+  ```
+
+- GAR publish/sync apply:
+
+  ```bash
+  ./publish_python_packages_to_google_artifact_registry.sh --project YOUR_GCP_PROJECT --apply
+  ```

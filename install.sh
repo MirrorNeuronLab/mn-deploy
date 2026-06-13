@@ -34,6 +34,11 @@ Common options:
   --python-components LIST      Install only these Python components where supported.
   --core-release-tag TAG        Binary mode release tag.
   --core-asset-url URL          Binary mode release asset URL.
+  --gar-project PROJECT         Binary mode Google Artifact Registry project.
+  --gar-location LOCATION       Binary mode GAR location. Default: us-central1.
+  --gar-repository NAME         Binary mode GAR Python repository.
+  --python-index-url URL        Binary mode pip index URL override.
+  --python-extra-index-url URL  Binary mode dependency fallback index URL.
   -h, --help                    Show this help.
 
 Examples:
@@ -711,6 +716,10 @@ function compose_profiles() {
     local profiles=()
     [ "$INSTALL_OPENSHELL" = "Y" ] && profiles+=("openshell")
     [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] && profiles+=("context")
+    if [ "${#profiles[@]}" -eq 0 ]; then
+        printf ''
+        return 0
+    fi
     local IFS=,
     printf '%s' "${profiles[*]}"
 }
@@ -2559,6 +2568,10 @@ function compose_profiles() {
     local profiles=()
     [ "$INSTALL_OPENSHELL" = "Y" ] && profiles+=("openshell")
     [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] && profiles+=("context")
+    if [ "${#profiles[@]}" -eq 0 ]; then
+        printf ''
+        return 0
+    fi
     local IFS=,
     printf '%s' "${profiles[*]}"
 }
@@ -3134,6 +3147,12 @@ SKILLS_REPO="${MN_SKILLS_REPO:-MirrorNeuronLab/mn-skills}"
 MEMBRANE_REPO="${MN_MEMBRANE_REPO:-MirrorNeuronLab/Membrane}"
 MEMBRANE_GIT_URL="${MN_MEMBRANE_GIT_URL:-}"
 MEMBRANE_DIR="${MN_MEMBRANE_DIR:-${INSTALL_DIR}/Membrane}"
+PACKAGE_INDEX_FILE="${MN_PACKAGE_INDEX_FILE:-${SCRIPT_DIR}/package-index/python-packages.toml}"
+MN_GAR_PROJECT="${MN_GAR_PROJECT:-}"
+MN_GAR_LOCATION="${MN_GAR_LOCATION:-us-central1}"
+MN_GAR_REPOSITORY="${MN_GAR_REPOSITORY:-mirrorneuron-python}"
+MN_PIP_INDEX_URL="${MN_PIP_INDEX_URL:-${MN_PYTHON_INDEX_URL:-}}"
+MN_PIP_EXTRA_INDEX_URL="${MN_PIP_EXTRA_INDEX_URL:-${MN_PYTHON_EXTRA_INDEX_URL:-https://pypi.org/simple}}"
 MN_HOST_HOME_DIR="${MN_HOST_HOME_DIR:-${MN_HOST_MN_DIR:-${INSTALL_DIR}}}"
 MN_HOST_OPENSHELL_CONFIG_DIR="${OPENSHELL_CONTAINER_CONFIG_DIR:-${HOME}/.config/openshell-mirror-neuron}"
 MN_HOST_OPENSHELL_STATE_DIR="${MN_HOST_OPENSHELL_STATE_DIR:-${INSTALL_DIR}/openshell-state}"
@@ -3167,6 +3186,7 @@ INSTALL_CONTEXT_ENGINE="Y"
 INSTALL_OPENSHELL="Y"
 INSTALL_PYTHON_SDK="Y"
 INSTALL_BLUEPRINT_SUPPORT_SKILL="Y"
+INSTALL_ALL_SKILLS="N"
 INSTALL_CLI="Y"
 INSTALL_API="Y"
 START_NOW="Y"
@@ -3207,16 +3227,23 @@ Options:
   --start / --no-start          Start or skip starting MirrorNeuron after install.
 
 Python component options:
-  --python-components LIST      Install only these components: sdk,skill,cli,api.
+  --python-components LIST      Install only these components: sdk,skill,all-skills,cli,api.
                                 Use all or none as shortcuts.
   --python-sdk / --no-python-sdk
-  --skill / --no-skill          Blueprint support skill from GitHub.
+  --skill / --no-skill          Blueprint support skill from the configured pip index.
+  --all-skills / --no-all-skills
+                                Install every indexed skill package from the configured pip index.
   --cli / --no-cli
   --api / --no-api
 
 Release/source options:
   --core-release-tag TAG        Same as MN_CORE_RELEASE_TAG.
   --core-asset-url URL          Same as MN_CORE_ASSET_URL.
+  --gar-project PROJECT         Same as MN_GAR_PROJECT. Required unless --python-index-url is set.
+  --gar-location LOCATION       Same as MN_GAR_LOCATION. Default: us-central1.
+  --gar-repository NAME         Same as MN_GAR_REPOSITORY. Default: mirrorneuron-python.
+  --python-index-url URL        Same as MN_PIP_INDEX_URL.
+  --python-extra-index-url URL  Same as MN_PIP_EXTRA_INDEX_URL. Default: https://pypi.org/simple.
   --python PATH                 Same as MN_PYTHON. Must be Python 3.11+.
   --no-managed-python           Do not use uv to install a private Python runtime.
   MN_HOME=/path                 Override the runtime state directory. Defaults to ${HOME}/.mn.
@@ -3229,6 +3256,8 @@ Release/source options:
 Examples:
   ./$script_name --yes --no-web-ui
   ./$script_name --yes --no-web-ui --python-components sdk,api
+  ./$script_name --yes --gar-project my-gcp-project
+  ./$script_name --yes --python-index-url https://us-central1-python.pkg.dev/my-gcp-project/mirrorneuron-python/simple/
   MN_PYTHON=/opt/homebrew/bin/python3.11 ./$script_name --yes
   ./$script_name --yes --core-release-tag v1.1.0 --no-web-ui
 EOF
@@ -3241,6 +3270,7 @@ function set_python_components() {
 
     INSTALL_PYTHON_SDK="N"
     INSTALL_BLUEPRINT_SUPPORT_SKILL="N"
+    INSTALL_ALL_SKILLS="N"
     INSTALL_CLI="N"
     INSTALL_API="N"
 
@@ -3253,6 +3283,9 @@ function set_python_components() {
                 INSTALL_BLUEPRINT_SUPPORT_SKILL="Y"
                 INSTALL_CLI="Y"
                 INSTALL_API="Y"
+                ;;
+            all-skills|skills-all)
+                INSTALL_ALL_SKILLS="Y"
                 ;;
             none)
                 ;;
@@ -3297,6 +3330,8 @@ while [ "$#" -gt 0 ]; do
         --no-python-sdk) INSTALL_PYTHON_SDK="N" ;;
         --skill|--skills) INSTALL_BLUEPRINT_SUPPORT_SKILL="Y" ;;
         --no-skill|--no-skills) INSTALL_BLUEPRINT_SUPPORT_SKILL="N" ;;
+        --all-skills) INSTALL_ALL_SKILLS="Y" ;;
+        --no-all-skills) INSTALL_ALL_SKILLS="N" ;;
         --cli) INSTALL_CLI="Y" ;;
         --no-cli) INSTALL_CLI="N" ;;
         --api) INSTALL_API="Y" ;;
@@ -3336,6 +3371,66 @@ while [ "$#" -gt 0 ]; do
             ;;
         --core-asset-url=*)
             CORE_ASSET_URL="${1#*=}"
+            ;;
+        --gar-project)
+            shift
+            if [ "$#" -eq 0 ]; then
+                print_error "--gar-project requires a value."
+                usage
+                exit 1
+            fi
+            MN_GAR_PROJECT="$1"
+            ;;
+        --gar-project=*)
+            MN_GAR_PROJECT="${1#*=}"
+            ;;
+        --gar-location)
+            shift
+            if [ "$#" -eq 0 ]; then
+                print_error "--gar-location requires a value."
+                usage
+                exit 1
+            fi
+            MN_GAR_LOCATION="$1"
+            ;;
+        --gar-location=*)
+            MN_GAR_LOCATION="${1#*=}"
+            ;;
+        --gar-repository)
+            shift
+            if [ "$#" -eq 0 ]; then
+                print_error "--gar-repository requires a value."
+                usage
+                exit 1
+            fi
+            MN_GAR_REPOSITORY="$1"
+            ;;
+        --gar-repository=*)
+            MN_GAR_REPOSITORY="${1#*=}"
+            ;;
+        --python-index-url)
+            shift
+            if [ "$#" -eq 0 ]; then
+                print_error "--python-index-url requires a value."
+                usage
+                exit 1
+            fi
+            MN_PIP_INDEX_URL="$1"
+            ;;
+        --python-index-url=*)
+            MN_PIP_INDEX_URL="${1#*=}"
+            ;;
+        --python-extra-index-url)
+            shift
+            if [ "$#" -eq 0 ]; then
+                print_error "--python-extra-index-url requires a value."
+                usage
+                exit 1
+            fi
+            MN_PIP_EXTRA_INDEX_URL="$1"
+            ;;
+        --python-extra-index-url=*)
+            MN_PIP_EXTRA_INDEX_URL="${1#*=}"
             ;;
         --python)
             shift
@@ -3742,6 +3837,7 @@ function resolve_python_runtime() {
 function should_install_python_packages() {
     [ "$INSTALL_PYTHON_SDK" = "Y" ] || \
     [ "$INSTALL_BLUEPRINT_SUPPORT_SKILL" = "Y" ] || \
+    [ "$INSTALL_ALL_SKILLS" = "Y" ] || \
     [ "$INSTALL_CLI" = "Y" ] || \
     [ "$INSTALL_API" = "Y" ] || \
     [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]
@@ -3880,81 +3976,112 @@ EOF
     rm -rf "$work_dir"
 }
 
+PIP_INDEX_ARGS=()
+
+function resolve_python_index_url() {
+    local url="$MN_PIP_INDEX_URL"
+    if [ -z "$url" ]; then
+        if [ -z "$MN_GAR_PROJECT" ]; then
+            print_error "Binary Python package installs require --gar-project/MN_GAR_PROJECT or --python-index-url/MN_PIP_INDEX_URL."
+            print_error "Expected GAR simple index: https://${MN_GAR_LOCATION}-python.pkg.dev/PROJECT/${MN_GAR_REPOSITORY}/simple/"
+            exit 1
+        fi
+        url="https://${MN_GAR_LOCATION}-python.pkg.dev/${MN_GAR_PROJECT}/${MN_GAR_REPOSITORY}/simple/"
+    fi
+    case "$url" in
+        */) printf '%s' "$url" ;;
+        *) printf '%s/' "$url" ;;
+    esac
+}
+
+function prepare_pip_index_args() {
+    local index_url
+    index_url="$(resolve_python_index_url)"
+    PIP_INDEX_ARGS=(--index-url "$index_url")
+    if [ -n "$MN_PIP_EXTRA_INDEX_URL" ]; then
+        PIP_INDEX_ARGS+=(--extra-index-url "$MN_PIP_EXTRA_INDEX_URL")
+    fi
+}
+
+function bootstrap_gar_keyring_auth() {
+    local index_url
+    index_url="$(resolve_python_index_url)"
+    if [[ "$index_url" == *".pkg.dev/"* ]]; then
+        run_quiet "install-gar-keyring-auth" "$VENV_DIR/bin/pip" install --upgrade \
+            --index-url https://pypi.org/simple \
+            keyring \
+            keyrings.google-artifactregistry-auth
+    fi
+}
+
+function indexed_requirements_for_group() {
+    local group="$1"
+    "$MN_PYTHON_BIN" - "$PACKAGE_INDEX_FILE" "$group" <<'PY'
+from __future__ import annotations
+
+import sys
+import tomllib
+from pathlib import Path
+
+index_file = Path(sys.argv[1])
+group = sys.argv[2]
+data = tomllib.loads(index_file.read_text())
+
+def requirement(package: dict) -> str:
+    name = package["name"]
+    extras = package.get("default_extras") or []
+    if extras:
+        return f"{name}[{','.join(extras)}]"
+    return name
+
+for package in data.get("packages", []):
+    groups = package.get("installer_groups") or []
+    if group == "__binary_default__":
+        selected = bool(package.get("binary_default"))
+    else:
+        selected = group in groups
+    if selected:
+        print(requirement(package))
+PY
+}
+
+function install_indexed_group() {
+    local group="$1"
+    local requirement label installed="N"
+    while IFS= read -r requirement; do
+        [ -n "$requirement" ] || continue
+        label="$(printf '%s' "$requirement" | tr -c 'A-Za-z0-9_.-' '_')"
+        run_quiet "install-${label}" "$VENV_DIR/bin/pip" install "${PIP_INDEX_ARGS[@]}" --upgrade "$requirement"
+        installed="Y"
+    done < <(indexed_requirements_for_group "$group")
+    if [ "$installed" != "Y" ]; then
+        print_error "No packages in ${PACKAGE_INDEX_FILE} matched installer group '${group}'."
+        exit 1
+    fi
+}
+
 function install_python_packages() {
     "$MN_PYTHON_BIN" -m venv "$VENV_DIR" >/dev/null 2>&1
     run_quiet "pip-upgrade" "$VENV_DIR/bin/pip" install --upgrade pip
+    prepare_pip_index_args
+    bootstrap_gar_keyring_auth
     if [ "$INSTALL_PYTHON_SDK" = "Y" ]; then
-        run_quiet "install-mirrorneuron-python-sdk" "$VENV_DIR/bin/pip" install --upgrade mirrorneuron-python-sdk
-    fi
-    if [ "$INSTALL_BLUEPRINT_SUPPORT_SKILL" = "Y" ]; then
-        install_blueprint_support_skill
+        install_indexed_group sdk
     fi
     if [ "$INSTALL_CLI" = "Y" ]; then
-        run_quiet "install-mirrorneuron-cli" "$VENV_DIR/bin/pip" install --upgrade mirrorneuron-cli
+        install_indexed_group cli
     fi
     if [ "$INSTALL_API" = "Y" ]; then
-        run_quiet "install-mirrorneuron-api" "$VENV_DIR/bin/pip" install --upgrade mirrorneuron-api
+        install_indexed_group api
     fi
     if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
-        run_quiet "install-membrane-python-sdk" "$VENV_DIR/bin/pip" install --upgrade mirrorneuron-membrane-python-sdk
+        install_indexed_group membrane-runtime
     fi
-}
-
-function normalize_git_url() {
-    local url="$1"
-    if [[ "$url" == git@github.com:* ]]; then
-        url="ssh://git@github.com/${url#git@github.com:}"
+    if [ "$INSTALL_ALL_SKILLS" = "Y" ]; then
+        install_indexed_group skill
+    elif [ "$INSTALL_BLUEPRINT_SUPPORT_SKILL" = "Y" ]; then
+        install_indexed_group blueprint-support
     fi
-    printf '%s' "$url"
-}
-
-function skill_requirement_for_url() {
-    local url
-    url="$(normalize_git_url "$1")"
-
-    if [[ "$url" != git+* ]]; then
-        url="git+$url"
-    fi
-
-    if [[ "$url" != *"#"* ]]; then
-        url="${url}#subdirectory=blueprint_support_skill"
-    elif [[ "$url" != *"subdirectory="* ]]; then
-        url="${url}&subdirectory=blueprint_support_skill"
-    fi
-
-    printf 'mirrorneuron-blueprint-support-skill[webui] @ %s' "$url"
-}
-
-function install_blueprint_support_skill() {
-    local urls=()
-    local url req last_log
-
-    if [ -n "${MN_SKILLS_GIT_URL:-}" ]; then
-        urls+=("$MN_SKILLS_GIT_URL")
-    else
-        urls+=(
-            "https://github.com/${SKILLS_REPO}.git"
-            "ssh://git@github.com/${SKILLS_REPO}.git"
-        )
-    fi
-
-    for url in "${urls[@]}"; do
-        req="$(skill_requirement_for_url "$url")"
-        if try_quiet "install-blueprint-support-skill-github" "$VENV_DIR/bin/pip" install --upgrade "$req"; then
-            return 0
-        fi
-        last_log="$LAST_LOG_FILE"
-    done
-
-    print_error "install-blueprint-support-skill-github failed. Tried GitHub URLs:"
-    for url in "${urls[@]}"; do
-        echo "  - $(normalize_git_url "$url")" >&3
-    done
-    if [ -n "${last_log:-}" ]; then
-        echo "Last log: $last_log" >&3
-        tail -n 30 "$last_log" >&3 2>/dev/null || true
-    fi
-    exit 1
 }
 
 function context_engine_git_url() {
@@ -4015,6 +4142,10 @@ function compose_profiles() {
     local profiles=()
     [ "$INSTALL_OPENSHELL" = "Y" ] && profiles+=("openshell")
     [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] && profiles+=("context")
+    if [ "${#profiles[@]}" -eq 0 ]; then
+        printf ''
+        return 0
+    fi
     local IFS=,
     printf '%s' "${profiles[*]}"
 }
@@ -4668,10 +4799,11 @@ INSTALL_WEB_UI=$(ask "Do you want to install the Web UI from npm?" "$INSTALL_WEB
 INSTALL_REDIS=$(ask "Do you want to install Redis via Docker?" "$INSTALL_REDIS")
 INSTALL_CONTEXT_ENGINE=$(ask "Do you want to install/start the Membrane context engine?" "$INSTALL_CONTEXT_ENGINE")
 INSTALL_OPENSHELL=$(ask "Do you want to install/start the OpenShell gateway for sandbox workers?" "$INSTALL_OPENSHELL")
-INSTALL_PYTHON_SDK=$(ask "Do you want to install the Python SDK from PyPI?" "$INSTALL_PYTHON_SDK")
-INSTALL_BLUEPRINT_SUPPORT_SKILL=$(ask "Do you want to install the blueprint support skill from GitHub?" "$INSTALL_BLUEPRINT_SUPPORT_SKILL")
-INSTALL_CLI=$(ask "Do you want to install the CLI from PyPI?" "$INSTALL_CLI")
-INSTALL_API=$(ask "Do you want to install the API from PyPI?" "$INSTALL_API")
+INSTALL_PYTHON_SDK=$(ask "Do you want to install the Python SDK from the configured pip index?" "$INSTALL_PYTHON_SDK")
+INSTALL_BLUEPRINT_SUPPORT_SKILL=$(ask "Do you want to install the blueprint support skill from the configured pip index?" "$INSTALL_BLUEPRINT_SUPPORT_SKILL")
+INSTALL_ALL_SKILLS=$(ask "Do you want to install every indexed skill package from the configured pip index?" "$INSTALL_ALL_SKILLS")
+INSTALL_CLI=$(ask "Do you want to install the CLI from the configured pip index?" "$INSTALL_CLI")
+INSTALL_API=$(ask "Do you want to install the API from the configured pip index?" "$INSTALL_API")
 START_NOW=$(ask "Do you want to start the MirrorNeuron server automatically after install?" "$START_NOW")
 echo "" >&3
 
@@ -4682,10 +4814,11 @@ require_cmd curl
 require_cmd docker
 require_file "$RUNTIME_COMPOSE_TEMPLATE" "MirrorNeuron runtime Docker Compose template"
 if should_install_python_packages; then
+    require_file "$PACKAGE_INDEX_FILE" "MirrorNeuron Python package index"
     resolve_python_runtime
     ensure_pip
 fi
-if [ "$INSTALL_BLUEPRINT_SUPPORT_SKILL" = "Y" ] || [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
+if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
     require_cmd git
 fi
 
