@@ -143,12 +143,18 @@ seen = set()
 for package in packages:
     name = package["name"]
     path = workspace_root / package["path"]
+    build_formats = package.get("build_formats") or ["sdist", "wheel"]
     if name in seen:
         raise SystemExit(f"Duplicate package in index: {name}")
     seen.add(name)
     if not (path / "pyproject.toml").exists():
         raise SystemExit(f"Indexed package is missing pyproject.toml: {name} at {path}")
-    print(f"{name}\t{path}")
+    unknown_formats = sorted(set(build_formats) - {"sdist", "wheel"})
+    if unknown_formats:
+        raise SystemExit(f"Unknown build_formats for {name}: {', '.join(unknown_formats)}")
+    if not build_formats:
+        raise SystemExit(f"build_formats must not be empty for {name}")
+    print(f"{name}\t{path}\t{','.join(build_formats)}")
 PY
 
 cut -f1 "$PACKAGE_ROWS" | sort -u > "$INDEXED_NAMES"
@@ -157,10 +163,17 @@ echo "Building indexed Python packages from $INDEX_FILE."
 rm -rf "$DIST_DIR" "$LOCAL_INDEX_DIR"
 mkdir -p "$DIST_DIR" "$LOCAL_INDEX_DIR"
 
-while IFS="$(printf '\t')" read -r package_name package_path; do
+while IFS="$(printf '\t')" read -r package_name package_path build_formats; do
     [ -n "$package_name" ] || continue
-    echo "Building ${package_name} from ${package_path}."
-    "$PYTHON_BIN" -m build "$package_path" --outdir "$DIST_DIR"
+    build_args=()
+    case ",${build_formats}," in
+        *,sdist,*) build_args+=(--sdist) ;;
+    esac
+    case ",${build_formats}," in
+        *,wheel,*) build_args+=(--wheel) ;;
+    esac
+    echo "Building ${package_name} from ${package_path} (${build_formats})."
+    "$PYTHON_BIN" -m build "$package_path" --outdir "$DIST_DIR" "${build_args[@]}"
 done < "$PACKAGE_ROWS"
 
 echo "Checking distributions."

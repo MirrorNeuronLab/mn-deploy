@@ -28,6 +28,7 @@ path = "Membrane/mn-context-engine-python-sdk"
 publish_group = "membrane"
 installer_groups = ["membrane-runtime"]
 binary_default = true
+build_formats = ["wheel"]
 
 [[packages]]
 name = "mn-context-auto-optimizer"
