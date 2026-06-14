@@ -103,13 +103,7 @@ if [ "$CONFIRM" != "Y" ]; then
     exit 0
 fi
 
-if [ -n "${MN_HOME:-}" ]; then
-    export MIRROR_NEURON_HOME="$MN_HOME"
-else
-    export MIRROR_NEURON_HOME="${HOME}/.mn"
-fi
-
-INSTALL_DIR="${MIRROR_NEURON_HOME}"
+INSTALL_DIR="${MN_HOME:-${HOME}/.mn}"
 UI_DIR="${INSTALL_DIR}/webui"
 LEGACY_UI_DIR="${INSTALL_DIR}_ui"
 BIN_DIR="${HOME}/.local/bin"

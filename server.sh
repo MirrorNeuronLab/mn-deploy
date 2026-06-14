@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-DIR="${MN_HOME:-${MIRROR_NEURON_HOME:-${HOME}/.mn}}"
+DIR="${MN_HOME:-${HOME}/.mn}"
 PID_DIR="${DIR}/.pids"
 LOG_DIR="${DIR}/.logs"
 BEAM_PID_FILE="${PID_DIR}/beam.pid"
@@ -11,7 +11,9 @@ VENV_DIR="${HOME}/.local/share/mn_venv"
 RUNTIME_COMPOSE_FILE="${DIR}/docker-compose.yml"
 RUNTIME_COMPOSE_ENV="${DIR}/docker-compose.env"
 RUNTIME_ENDPOINTS_FILE="${DIR}/runtime-endpoints.json"
-MN_DEFAULT_BLUEPRINT_REPO="${MN_DEFAULT_BLUEPRINT_REPO:-https://github.com/MirrorNeuronLab/mn-blueprints.git}"
+MN_BLUEPRINT_SOURCE="${MN_BLUEPRINT_SOURCE:-github}"
+MN_BLUEPRINT_REPO="${MN_BLUEPRINT_REPO:-https://github.com/MirrorNeuronLab/mn-blueprints.git}"
+MN_BLUEPRINT_LOCAL="${MN_BLUEPRINT_LOCAL:-}"
 MN_MANAGED_PYTHON_VERSION="${MN_MANAGED_PYTHON_VERSION:-3.11}"
 
 generate_mn_cookie() {
@@ -234,12 +236,9 @@ write_runtime_endpoints_file() {
     api_base_url="${MN_API_BASE_URL:-http://${api_host}:${api_port}/api/v1}"
     grpc_host="$(local_endpoint_host "$(runtime_env_or_default "MN_GRPC_BIND_HOST" "localhost")")"
     grpc_port="$(runtime_env_or_default "MN_GRPC_PORT" "55051")"
-    grpc_target="${MN_GRPC_TARGET:-${MN_CORE_GRPC_TARGET:-}}"
+    grpc_target="${MN_GRPC_TARGET:-}"
     if [ -z "$grpc_target" ]; then
         grpc_target="$(read_runtime_env_value "MN_GRPC_TARGET")"
-    fi
-    if [ -z "$grpc_target" ]; then
-        grpc_target="$(read_runtime_env_value "MN_CORE_GRPC_TARGET")"
     fi
     grpc_target="${grpc_target:-${grpc_host}:${grpc_port}}"
     updated_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
@@ -345,12 +344,12 @@ start_services() {
     apply_runtime_env_default "MN_GRPC_BIND_HOST"
     apply_runtime_env_default "MN_GRPC_PORT"
     apply_runtime_env_default "MN_GRPC_TARGET"
-    apply_runtime_env_default "MN_CORE_GRPC_TARGET"
-    apply_runtime_env_default "MN_DEFAULT_BLUEPRINT_REPO"
-    export MN_DEFAULT_BLUEPRINT_REPO="${MN_DEFAULT_BLUEPRINT_REPO:-https://github.com/MirrorNeuronLab/mn-blueprints.git}"
+    apply_runtime_env_default "MN_BLUEPRINT_SOURCE"
+    export MN_BLUEPRINT_SOURCE="${MN_BLUEPRINT_SOURCE:-github}"
     apply_runtime_env_default "MN_BLUEPRINT_REPO"
-    export MN_BLUEPRINT_REPO="${MN_BLUEPRINT_REPO:-$MN_DEFAULT_BLUEPRINT_REPO}"
-    apply_runtime_env_default "MN_DEV_LOCAL_BLUEPRINT_REPO"
+    export MN_BLUEPRINT_REPO="${MN_BLUEPRINT_REPO:-https://github.com/MirrorNeuronLab/mn-blueprints.git}"
+    apply_runtime_env_default "MN_BLUEPRINT_LOCAL"
+    export MN_BLUEPRINT_LOCAL="${MN_BLUEPRINT_LOCAL:-}"
     apply_runtime_env_default "MN_RUNS_ROOT"
     apply_runtime_env_default "MN_BLUEPRINT_WEB_UI_PORT_START"
     export MN_BLUEPRINT_WEB_UI_PORT_START="${MN_BLUEPRINT_WEB_UI_PORT_START:-61000}"

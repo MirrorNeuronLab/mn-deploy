@@ -450,13 +450,7 @@ function resolve_python_runtime() {
 
 print_header
 
-if [ -n "${MN_HOME:-}" ]; then
-    export MIRROR_NEURON_HOME="$MN_HOME"
-else
-    export MIRROR_NEURON_HOME="${HOME}/.mn"
-fi
-
-INSTALL_DIR="${MIRROR_NEURON_HOME}"
+INSTALL_DIR="${MN_HOME:-${HOME}/.mn}"
 BIN_DIR="${HOME}/.local/bin"
 VENV_DIR="${HOME}/.local/share/mn_venv"
 MN_PYTHON_BIN=""
@@ -1106,7 +1100,7 @@ ENGINE_IMAGE=mirror-neuron-memory-engine:latest
 MN_CONTEXT_MODEL_RUNNER_MODEL=${model_runner_model}
 MN_GRPC_BIND_HOST=${MN_GRPC_BIND_HOST:-127.0.0.1}
 MN_GRPC_PORT=${MN_GRPC_PORT:-55051}
-MN_CORE_GRPC_TARGET=${MN_CORE_GRPC_TARGET:-localhost:${MN_GRPC_PORT:-55051}}
+MN_GRPC_TARGET=${MN_GRPC_TARGET:-localhost:${MN_GRPC_PORT:-55051}}
 MN_API_HOST=${MN_API_HOST:-localhost}
 MN_API_PORT=${MN_API_PORT:-54001}
 MN_DIST_PORT=${MN_DIST_PORT:-54370}
@@ -1117,9 +1111,9 @@ MN_BLUEPRINT_WEB_UI_PUBLIC_HOST=${MN_BLUEPRINT_WEB_UI_PUBLIC_HOST:-localhost}
 MN_BLUEPRINT_WEB_UI_PORT_START=${MN_BLUEPRINT_WEB_UI_PORT_START:-61000}
 MN_BLUEPRINT_WEB_UI_PORT_END=${MN_BLUEPRINT_WEB_UI_PORT_END:-61049}
 MN_BLUEPRINT_WEB_UI_PORT_ALLOCATION_MODE=${MN_BLUEPRINT_WEB_UI_PORT_ALLOCATION_MODE:-prepublished}
-MN_DEFAULT_BLUEPRINT_REPO=${MN_DEFAULT_BLUEPRINT_REPO:-https://github.com/MirrorNeuronLab/mn-blueprints.git}
-MN_BLUEPRINT_REPO=${MN_BLUEPRINT_REPO:-${MN_DEFAULT_BLUEPRINT_REPO:-https://github.com/MirrorNeuronLab/mn-blueprints.git}}
-MN_DEV_LOCAL_BLUEPRINT_REPO=${MN_DEV_LOCAL_BLUEPRINT_REPO:-${DEV_LOCAL_BLUEPRINT_REPO:-}}
+MN_BLUEPRINT_SOURCE=${MN_BLUEPRINT_SOURCE:-github}
+MN_BLUEPRINT_REPO=${MN_BLUEPRINT_REPO:-https://github.com/MirrorNeuronLab/mn-blueprints.git}
+MN_BLUEPRINT_LOCAL=${MN_BLUEPRINT_LOCAL:-}
 MN_RUNS_ROOT=${MN_RUNS_ROOT:-}
 MN_DOCKER_NETWORK_MODE=${MN_DOCKER_NETWORK_MODE:-bridge}
 MN_DOCKER_NETWORK_NAME=${network_name}
@@ -1450,7 +1444,7 @@ function profile_has_runtime_home() {
     local line
     while IFS= read -r line; do
         [[ "$line" =~ ^[[:space:]]*# ]] && continue
-        if [[ "$line" =~ ^[[:space:]]*(export[[:space:]]+)?MIRROR_NEURON_HOME= ]]; then
+        if [[ "$line" =~ ^[[:space:]]*(export[[:space:]]+)?MN_HOME= ]]; then
             return 0
         fi
     done < "$profile"
@@ -1473,7 +1467,7 @@ function ensure_shell_profile_exports() {
         echo -e "\n${YELLOW}${BOLD}Note:${RESET} ${YELLOW}$BIN_DIR is not in your PATH.${RESET}" >&3
     fi
     if [ "$needs_runtime_home" = "Y" ]; then
-        echo -e "${YELLOW}Persisting MIRROR_NEURON_HOME=${INSTALL_DIR} for future terminal sessions.${RESET}" >&3
+        echo -e "${YELLOW}Persisting MN_HOME=${INSTALL_DIR} for future terminal sessions.${RESET}" >&3
     fi
 
     local detected_profiles=()
@@ -1488,7 +1482,7 @@ function ensure_shell_profile_exports() {
 
     local profile path_line home_line wrote_header wrote_profile
     path_line="export PATH=\"$BIN_DIR:\$PATH\""
-    home_line="export MIRROR_NEURON_HOME=$(shell_escape_value "$INSTALL_DIR")"
+    home_line="export MN_HOME=$(shell_escape_value "$INSTALL_DIR")"
 
     for profile in "${detected_profiles[@]}"; do
         wrote_header="N"
@@ -1547,13 +1541,7 @@ RESET="\033[0m"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-if [ -n "${MN_HOME:-}" ]; then
-    export MIRROR_NEURON_HOME="$MN_HOME"
-else
-    export MIRROR_NEURON_HOME="${HOME}/.mn"
-fi
-
-INSTALL_DIR="${MIRROR_NEURON_HOME}"
+INSTALL_DIR="${MN_HOME:-${HOME}/.mn}"
 BIN_DIR="${HOME}/.local/bin"
 VENV_DIR="${HOME}/.local/share/mn_venv"
 UI_LINK_DIR="${INSTALL_DIR}/webui"
@@ -2711,7 +2699,7 @@ ENGINE_IMAGE=mirror-neuron-memory-engine:latest
 MN_CONTEXT_MODEL_RUNNER_MODEL=${model_runner_model}
 MN_GRPC_BIND_HOST=${MN_GRPC_BIND_HOST:-127.0.0.1}
 MN_GRPC_PORT=${MN_GRPC_PORT:-55051}
-MN_CORE_GRPC_TARGET=${MN_CORE_GRPC_TARGET:-localhost:${MN_GRPC_PORT:-55051}}
+MN_GRPC_TARGET=${MN_GRPC_TARGET:-localhost:${MN_GRPC_PORT:-55051}}
 MN_API_HOST=${MN_API_HOST:-localhost}
 MN_API_PORT=${MN_API_PORT:-54001}
 MN_DIST_PORT=${MN_DIST_PORT:-54370}
@@ -2722,9 +2710,9 @@ MN_BLUEPRINT_WEB_UI_PUBLIC_HOST=${MN_BLUEPRINT_WEB_UI_PUBLIC_HOST:-localhost}
 MN_BLUEPRINT_WEB_UI_PORT_START=${MN_BLUEPRINT_WEB_UI_PORT_START:-61000}
 MN_BLUEPRINT_WEB_UI_PORT_END=${MN_BLUEPRINT_WEB_UI_PORT_END:-61049}
 MN_BLUEPRINT_WEB_UI_PORT_ALLOCATION_MODE=${MN_BLUEPRINT_WEB_UI_PORT_ALLOCATION_MODE:-prepublished}
-MN_DEFAULT_BLUEPRINT_REPO=${MN_DEFAULT_BLUEPRINT_REPO:-https://github.com/MirrorNeuronLab/mn-blueprints.git}
-MN_BLUEPRINT_REPO=${MN_BLUEPRINT_REPO:-${MN_DEFAULT_BLUEPRINT_REPO:-https://github.com/MirrorNeuronLab/mn-blueprints.git}}
-MN_DEV_LOCAL_BLUEPRINT_REPO=${MN_DEV_LOCAL_BLUEPRINT_REPO:-${DEV_LOCAL_BLUEPRINT_REPO:-}}
+MN_BLUEPRINT_SOURCE=${MN_BLUEPRINT_SOURCE:-github}
+MN_BLUEPRINT_REPO=${MN_BLUEPRINT_REPO:-https://github.com/MirrorNeuronLab/mn-blueprints.git}
+MN_BLUEPRINT_LOCAL=${MN_BLUEPRINT_LOCAL:-}
 MN_RUNS_ROOT=${MN_RUNS_ROOT:-}
 MN_DOCKER_NETWORK_MODE=${MN_DOCKER_NETWORK_MODE:-bridge}
 MN_DOCKER_NETWORK_NAME=${network_name}
@@ -2864,7 +2852,7 @@ function profile_has_runtime_home() {
     local line
     while IFS= read -r line; do
         [[ "$line" =~ ^[[:space:]]*# ]] && continue
-        if [[ "$line" =~ ^[[:space:]]*(export[[:space:]]+)?MIRROR_NEURON_HOME= ]]; then
+        if [[ "$line" =~ ^[[:space:]]*(export[[:space:]]+)?MN_HOME= ]]; then
             return 0
         fi
     done < "$profile"
@@ -2887,7 +2875,7 @@ function ensure_shell_profile_exports() {
         print_warning "${BIN_DIR} is not in your PATH."
     fi
     if [ "$needs_runtime_home" = "Y" ]; then
-        print_warning "Persisting MIRROR_NEURON_HOME=${INSTALL_DIR} for future terminal sessions."
+        print_warning "Persisting MN_HOME=${INSTALL_DIR} for future terminal sessions."
     fi
 
     local detected_profiles=()
@@ -2902,7 +2890,7 @@ function ensure_shell_profile_exports() {
 
     local profile path_line home_line wrote_header wrote_profile
     path_line="export PATH=\"$BIN_DIR:\$PATH\""
-    home_line="export MIRROR_NEURON_HOME=$(shell_escape_value "$INSTALL_DIR")"
+    home_line="export MN_HOME=$(shell_escape_value "$INSTALL_DIR")"
 
     for profile in "${detected_profiles[@]}"; do
         wrote_header="N"
@@ -3126,13 +3114,7 @@ MAGENTA="\033[35m"
 RESET="\033[0m"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [ -n "${MN_HOME:-}" ]; then
-    export MIRROR_NEURON_HOME="$MN_HOME"
-else
-    export MIRROR_NEURON_HOME="${HOME}/.mn"
-fi
-
-INSTALL_DIR="${MIRROR_NEURON_HOME}"
+INSTALL_DIR="${MN_HOME:-${HOME}/.mn}"
 BIN_DIR="${HOME}/.local/bin"
 VENV_DIR="${HOME}/.local/share/mn_venv"
 UI_DIR="${INSTALL_DIR}/webui"
@@ -4532,7 +4514,7 @@ ENGINE_IMAGE=mirror-neuron-memory-engine:latest
 MN_CONTEXT_MODEL_RUNNER_MODEL=${model_runner_model}
 MN_GRPC_BIND_HOST=${MN_GRPC_BIND_HOST:-127.0.0.1}
 MN_GRPC_PORT=${MN_GRPC_PORT:-55051}
-MN_CORE_GRPC_TARGET=${MN_CORE_GRPC_TARGET:-localhost:${MN_GRPC_PORT:-55051}}
+MN_GRPC_TARGET=${MN_GRPC_TARGET:-localhost:${MN_GRPC_PORT:-55051}}
 MN_API_HOST=${MN_API_HOST:-localhost}
 MN_API_PORT=${MN_API_PORT:-54001}
 MN_DIST_PORT=${MN_DIST_PORT:-54370}
@@ -4543,9 +4525,9 @@ MN_BLUEPRINT_WEB_UI_PUBLIC_HOST=${MN_BLUEPRINT_WEB_UI_PUBLIC_HOST:-localhost}
 MN_BLUEPRINT_WEB_UI_PORT_START=${MN_BLUEPRINT_WEB_UI_PORT_START:-61000}
 MN_BLUEPRINT_WEB_UI_PORT_END=${MN_BLUEPRINT_WEB_UI_PORT_END:-61049}
 MN_BLUEPRINT_WEB_UI_PORT_ALLOCATION_MODE=${MN_BLUEPRINT_WEB_UI_PORT_ALLOCATION_MODE:-prepublished}
-MN_DEFAULT_BLUEPRINT_REPO=${MN_DEFAULT_BLUEPRINT_REPO:-https://github.com/MirrorNeuronLab/mn-blueprints.git}
-MN_BLUEPRINT_REPO=${MN_BLUEPRINT_REPO:-${MN_DEFAULT_BLUEPRINT_REPO:-https://github.com/MirrorNeuronLab/mn-blueprints.git}}
-MN_DEV_LOCAL_BLUEPRINT_REPO=${MN_DEV_LOCAL_BLUEPRINT_REPO:-${DEV_LOCAL_BLUEPRINT_REPO:-}}
+MN_BLUEPRINT_SOURCE=${MN_BLUEPRINT_SOURCE:-github}
+MN_BLUEPRINT_REPO=${MN_BLUEPRINT_REPO:-https://github.com/MirrorNeuronLab/mn-blueprints.git}
+MN_BLUEPRINT_LOCAL=${MN_BLUEPRINT_LOCAL:-}
 MN_RUNS_ROOT=${MN_RUNS_ROOT:-}
 MN_DOCKER_NETWORK_MODE=${MN_DOCKER_NETWORK_MODE:-bridge}
 MN_DOCKER_NETWORK_NAME=${network_name}
@@ -4731,7 +4713,7 @@ function profile_has_runtime_home() {
     local line
     while IFS= read -r line; do
         [[ "$line" =~ ^[[:space:]]*# ]] && continue
-        if [[ "$line" =~ ^[[:space:]]*(export[[:space:]]+)?MIRROR_NEURON_HOME= ]]; then
+        if [[ "$line" =~ ^[[:space:]]*(export[[:space:]]+)?MN_HOME= ]]; then
             return 0
         fi
     done < "$profile"
@@ -4754,7 +4736,7 @@ function add_shell_profile_exports() {
         echo -e "\n${YELLOW}${BOLD}Note:${RESET} ${YELLOW}$BIN_DIR is not in your PATH.${RESET}" >&3
     fi
     if [ "$needs_runtime_home" = "Y" ]; then
-        echo -e "${YELLOW}Persisting MIRROR_NEURON_HOME=${INSTALL_DIR} for future terminal sessions.${RESET}" >&3
+        echo -e "${YELLOW}Persisting MN_HOME=${INSTALL_DIR} for future terminal sessions.${RESET}" >&3
     fi
 
     local detected_profiles=()
@@ -4769,7 +4751,7 @@ function add_shell_profile_exports() {
 
     local profile path_line home_line wrote_header wrote_profile
     path_line="export PATH=\"$BIN_DIR:\$PATH\""
-    home_line="export MIRROR_NEURON_HOME=$(shell_escape_value "$INSTALL_DIR")"
+    home_line="export MN_HOME=$(shell_escape_value "$INSTALL_DIR")"
 
     for profile in "${detected_profiles[@]}"; do
         wrote_header="N"
