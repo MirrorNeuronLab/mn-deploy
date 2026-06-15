@@ -81,8 +81,8 @@ package metadata.
 ## Publish
 
 Only run `--apply` after the dry run passes and the package list is expected.
-This uploads all built distributions with Twine and deletes GAR package names
-that are not present in the local package index.
+This uploads built distributions that are missing from GAR and deletes GAR
+package names that are not present in the local package index.
 
 ```bash
 PATH="/Users/homer/google-cloud-sdk/bin:$PATH" \
@@ -95,12 +95,14 @@ PATH="/Users/homer/google-cloud-sdk/bin:$PATH" \
 
 Pruning is package-level: the script removes remote package names missing from
 `package-index/python-packages.toml`, but it does not delete old versions of a
-package that remains indexed.
+package that remains indexed. Package names are compared by their canonical
+Python package name, so GAR and local spelling differences in `-`, `_`, or `.`
+do not affect pruning.
 
 GAR's Python repository endpoint does not support Twine's `--skip-existing`.
-The publish script intentionally omits that flag. If a publish partially
-completed, either bump versions before rerunning or remove the incomplete remote
-versions manually.
+The publish script intentionally omits that flag and compares GAR file listings
+before upload so reruns can complete a partially published version without
+resending files that already exist.
 
 ## Install From Public GAR
 

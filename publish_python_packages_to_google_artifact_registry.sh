@@ -120,9 +120,12 @@ REPOSITORY_URL="https://${LOCATION}-python.pkg.dev/${PROJECT}/${REPOSITORY}/"
 SIMPLE_URL="${REPOSITORY_URL}simple/"
 PACKAGE_ROWS="$(mktemp "${TMPDIR:-/tmp}/mn-package-index.XXXXXX")"
 INDEXED_NAMES="$(mktemp "${TMPDIR:-/tmp}/mn-package-names.XXXXXX")"
+LOCAL_ARTIFACTS="$(mktemp "${TMPDIR:-/tmp}/mn-local-artifacts.XXXXXX")"
+REMOTE_FILES="$(mktemp "${TMPDIR:-/tmp}/mn-remote-files.XXXXXX")"
+UPLOAD_ARTIFACTS="$(mktemp "${TMPDIR:-/tmp}/mn-upload-artifacts.XXXXXX")"
 REMOTE_NAMES="$(mktemp "${TMPDIR:-/tmp}/mn-remote-package-names.XXXXXX")"
 cleanup() {
-    rm -f "$PACKAGE_ROWS" "$INDEXED_NAMES" "$REMOTE_NAMES"
+    rm -f "$PACKAGE_ROWS" "$INDEXED_NAMES" "$LOCAL_ARTIFACTS" "$REMOTE_FILES" "$UPLOAD_ARTIFACTS" "$REMOTE_NAMES"
 }
 trap cleanup EXIT
 
@@ -131,7 +134,43 @@ from __future__ import annotations
 
 import sys
 import tomllib
+import re
 from pathlib import Path
+
+def canonical(value: str) -> str:
+    return re.sub(r"[-_.]+", "-", value).lower()
+
+def load_project_name(package_path: Path) -> str:
+    pyproject = package_path / "pyproject.toml"
+    if not pyproject.exists():
+        raise FileNotFoundError(pyproject)
+    try:
+        data = tomllib.loads(pyproject.read_text())
+    except tomllib.TOMLDecodeError as exc:
+        raise SystemExit(f"Invalid pyproject.toml at {pyproject}: {exc}") from exc
+    project_name = data.get("project", {}).get("name")
+    if not project_name:
+        raise SystemExit(f"pyproject.toml is missing project.name: {pyproject}")
+    return project_name
+
+def find_package_path(workspace_root: Path, configured_path: Path, canonical_name: str) -> Path | None:
+    search_root = configured_path.parent
+    while not search_root.exists() and search_root != workspace_root:
+        search_root = search_root.parent
+    if not search_root.exists() or workspace_root not in (search_root, *search_root.parents):
+        search_root = workspace_root
+
+    matches = []
+    for pyproject in search_root.rglob("pyproject.toml"):
+        if any(part.startswith(".") for part in pyproject.relative_to(search_root).parts):
+            continue
+        package_path = pyproject.parent
+        if canonical(load_project_name(package_path)) == canonical_name:
+            matches.append(package_path)
+    if len(matches) > 1:
+        rendered = ", ".join(str(match) for match in sorted(matches))
+        raise SystemExit(f"Indexed package path is ambiguous for {canonical_name}: {rendered}")
+    return matches[0] if matches else None
 
 index_file = Path(sys.argv[1])
 workspace_root = Path(sys.argv[2])
@@ -142,13 +181,21 @@ if not packages:
 seen = set()
 for package in packages:
     name = package["name"]
+    canonical_name = canonical(name)
     path = workspace_root / package["path"]
     build_formats = package.get("build_formats") or ["sdist", "wheel"]
-    if name in seen:
+    if canonical_name in seen:
         raise SystemExit(f"Duplicate package in index: {name}")
-    seen.add(name)
+    seen.add(canonical_name)
     if not (path / "pyproject.toml").exists():
-        raise SystemExit(f"Indexed package is missing pyproject.toml: {name} at {path}")
+        resolved_path = find_package_path(workspace_root, path, canonical_name)
+        if resolved_path is None:
+            raise SystemExit(f"Indexed package is missing pyproject.toml: {name} at {path}")
+        print(f"Resolved indexed package path for {name}: {path} -> {resolved_path}", file=sys.stderr)
+        path = resolved_path
+    project_name = load_project_name(path)
+    if canonical(project_name) != canonical_name:
+        raise SystemExit(f"Indexed package name/path mismatch: {name} at {path} declares {project_name}")
     unknown_formats = sorted(set(build_formats) - {"sdist", "wheel"})
     if unknown_formats:
         raise SystemExit(f"Unknown build_formats for {name}: {', '.join(unknown_formats)}")
@@ -157,7 +204,25 @@ for package in packages:
     print(f"{name}\t{path}\t{','.join(build_formats)}")
 PY
 
-cut -f1 "$PACKAGE_ROWS" | sort -u > "$INDEXED_NAMES"
+"$PYTHON_BIN" - "$PACKAGE_ROWS" > "$INDEXED_NAMES" <<'PY'
+from __future__ import annotations
+
+import re
+import sys
+from pathlib import Path
+
+package_rows = Path(sys.argv[1])
+
+def canonical(value: str) -> str:
+    return re.sub(r"[-_.]+", "-", value).lower()
+
+for line in package_rows.read_text().splitlines():
+    if not line:
+        continue
+    package_name = line.split("\t", 1)[0]
+    print(canonical(package_name))
+PY
+sort -u "$INDEXED_NAMES" -o "$INDEXED_NAMES"
 
 echo "Building indexed Python packages from $INDEX_FILE."
 rm -rf "$DIST_DIR" "$LOCAL_INDEX_DIR"
@@ -173,11 +238,44 @@ while IFS="$(printf '\t')" read -r package_name package_path build_formats; do
         *,wheel,*) build_args+=(--wheel) ;;
     esac
     echo "Building ${package_name} from ${package_path} (${build_formats})."
+    rm -rf "${package_path}/build"
     "$PYTHON_BIN" -m build "$package_path" --outdir "$DIST_DIR" "${build_args[@]}"
 done < "$PACKAGE_ROWS"
 
 echo "Checking distributions."
 "$PYTHON_BIN" -m twine check "$DIST_DIR"/*
+
+echo "Indexing local distribution files."
+"$PYTHON_BIN" - "$INDEX_FILE" "$DIST_DIR" > "$LOCAL_ARTIFACTS" <<'PY'
+from __future__ import annotations
+
+import sys
+import tomllib
+from pathlib import Path
+
+from packaging.utils import canonicalize_name, parse_sdist_filename, parse_wheel_filename
+
+index_file = Path(sys.argv[1])
+dist_dir = Path(sys.argv[2])
+data = tomllib.loads(index_file.read_text())
+indexed_packages = {
+    canonicalize_name(package["name"]): package["name"]
+    for package in data.get("packages", [])
+}
+
+for artifact in sorted(dist_dir.iterdir()):
+    if artifact.suffix == ".whl":
+        name, *_ = parse_wheel_filename(artifact.name)
+    elif artifact.name.endswith((".tar.gz", ".zip")):
+        name, _ = parse_sdist_filename(artifact.name)
+    else:
+        continue
+    canonical_name = canonicalize_name(name)
+    package_name = indexed_packages.get(canonical_name)
+    if package_name is None:
+        raise SystemExit(f"Built artifact is not in the package index: {artifact.name}")
+    print(f"{package_name}\t{artifact}\t{artifact.name}")
+PY
 
 echo "Generating local simple index at ${LOCAL_INDEX_DIR}."
 "$PYTHON_BIN" - "$INDEX_FILE" "$DIST_DIR" "$LOCAL_INDEX_DIR" > /dev/null <<'PY'
@@ -242,12 +340,65 @@ for package in packages:
 )
 PY
 
+echo "Listing distribution files currently in GAR."
+: > "$REMOTE_FILES"
+while IFS="$(printf '\t')" read -r package_name _package_path _build_formats; do
+    [ -n "$package_name" ] || continue
+    "$GCLOUD_BIN" artifacts files list \
+        --project="$PROJECT" \
+        --repository="$REPOSITORY" \
+        --location="$LOCATION" \
+        --package="$package_name" \
+        --format='value(name)' \
+        | awk -F/ -v package="$package_name" 'NF {print package "\t" $NF}' \
+        >> "$REMOTE_FILES"
+done < "$PACKAGE_ROWS"
+sort -u "$REMOTE_FILES" -o "$REMOTE_FILES"
+
+"$PYTHON_BIN" - "$LOCAL_ARTIFACTS" "$REMOTE_FILES" > "$UPLOAD_ARTIFACTS" <<'PY'
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+local_artifacts = Path(sys.argv[1])
+remote_files = Path(sys.argv[2])
+
+remote = set()
+for line in remote_files.read_text().splitlines():
+    if not line:
+        continue
+    package_name, filename = line.split("\t", 1)
+    remote.add((package_name, filename))
+
+for line in local_artifacts.read_text().splitlines():
+    if not line:
+        continue
+    package_name, artifact_path, filename = line.split("\t", 2)
+    if (package_name, filename) not in remote:
+        print(artifact_path)
+PY
+
+local_artifact_count="$(wc -l < "$LOCAL_ARTIFACTS" | tr -d ' ')"
+upload_artifact_count="$(wc -l < "$UPLOAD_ARTIFACTS" | tr -d ' ')"
+skipped_artifact_count=$((local_artifact_count - upload_artifact_count))
+
 if [ "$APPLY" = "Y" ]; then
-    echo "Uploading distributions to ${REPOSITORY_URL}."
-    "$PYTHON_BIN" -m twine upload --repository-url "$REPOSITORY_URL" "$DIST_DIR"/*
+    if [ "$upload_artifact_count" -gt 0 ]; then
+        echo "Uploading ${upload_artifact_count} missing distribution(s) to ${REPOSITORY_URL}."
+        upload_artifacts=()
+        while IFS= read -r artifact_path; do
+            [ -n "$artifact_path" ] || continue
+            upload_artifacts+=("$artifact_path")
+        done < "$UPLOAD_ARTIFACTS"
+        GOOGLE_CLOUD_PROJECT="$PROJECT" "$PYTHON_BIN" -m twine upload --repository-url "$REPOSITORY_URL" "${upload_artifacts[@]}"
+    else
+        echo "No missing distributions to upload to ${REPOSITORY_URL}."
+    fi
 else
-    echo "DRY RUN: would upload distributions to ${REPOSITORY_URL}."
+    echo "DRY RUN: would upload ${upload_artifact_count} missing distribution(s) to ${REPOSITORY_URL}."
 fi
+echo "Already published distributions: ${skipped_artifact_count}"
 
 echo "Listing packages currently in GAR."
 "$GCLOUD_BIN" artifacts packages list \
@@ -255,13 +406,19 @@ echo "Listing packages currently in GAR."
     --repository="$REPOSITORY" \
     --location="$LOCATION" \
     --format='value(name)' \
-    | awk -F/ 'NF {print $NF}' \
+    | "$PYTHON_BIN" -c 'import re, sys
+def canonical(value: str) -> str:
+    return re.sub(r"[-_.]+", "-", value).lower()
+for line in sys.stdin:
+    package_name = line.rsplit("/", 1)[-1].strip()
+    if package_name:
+        print(f"{canonical(package_name)}\t{package_name}")' \
     | sort -u > "$REMOTE_NAMES"
 
 stale_count=0
-while IFS= read -r remote_package; do
+while IFS="$(printf '\t')" read -r remote_canonical_name remote_package; do
     [ -n "$remote_package" ] || continue
-    if grep -Fxq "$remote_package" "$INDEXED_NAMES"; then
+    if grep -Fxq "$remote_canonical_name" "$INDEXED_NAMES"; then
         continue
     fi
     stale_count=$((stale_count + 1))

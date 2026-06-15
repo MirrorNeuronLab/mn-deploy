@@ -221,8 +221,8 @@ installer_groups = ["skill"]
 binary_default = false
 
 [[packages]]
-name = "mirrorneuron-web-fetch-skill"
-path = "mn-skills/web_fetch_skill"
+name = "mirrorneuron-web-browser-skill"
+path = "mn-skills/web_browser_skill"
 publish_group = "skill"
 installer_groups = ["skill"]
 binary_default = false
