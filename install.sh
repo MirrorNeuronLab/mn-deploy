@@ -2993,6 +2993,46 @@ print_step "Building MirrorNeuron Core Docker image from local source"
 )
 print_success "Built local core image mirror-neuron-core:latest."
 
+function require_local_cli_target_executables() {
+    local missing="N"
+    if [ ! -x "$VENV_DIR/bin/mn" ]; then
+        print_error "Expected executable mn CLI target was not created: $VENV_DIR/bin/mn"
+        missing="Y"
+    fi
+    if [ ! -x "$VENV_DIR/bin/mn-api" ]; then
+        print_error "Expected executable mn-api target was not created: $VENV_DIR/bin/mn-api"
+        missing="Y"
+    fi
+    if [ "$missing" = "Y" ]; then
+        print_error "Local Python install did not produce the required command targets; leaving command symlinks unchanged."
+        exit 1
+    fi
+}
+
+VENV_BACKUP_DIR=""
+VENV_INSTALL_OK="N"
+function restore_local_venv_backup_on_failure() {
+    if [ "$VENV_INSTALL_OK" = "Y" ]; then
+        if [ -n "$VENV_BACKUP_DIR" ]; then
+            rm -rf "$VENV_BACKUP_DIR"
+        fi
+        return
+    fi
+
+    rm -rf "$VENV_DIR"
+    if [ -n "$VENV_BACKUP_DIR" ] && { [ -e "$VENV_BACKUP_DIR" ] || [ -L "$VENV_BACKUP_DIR" ]; }; then
+        mv "$VENV_BACKUP_DIR" "$VENV_DIR"
+        print_error "Local Python install failed; restored the previous virtual environment at $VENV_DIR."
+    fi
+}
+
+if [ -e "$VENV_DIR" ] || [ -L "$VENV_DIR" ]; then
+    VENV_BACKUP_DIR="${VENV_DIR}.backup.$$"
+    rm -rf "$VENV_BACKUP_DIR"
+    mv "$VENV_DIR" "$VENV_BACKUP_DIR"
+fi
+trap restore_local_venv_backup_on_failure EXIT
+
 print_step "Installing Python components from local source"
 (
     "$MN_PYTHON_BIN" -m venv "$VENV_DIR" >/dev/null
@@ -3018,6 +3058,12 @@ print_step "Installing Python components from local source"
     fi
 ) &
 spinner $! "Installed local editable Python packages"
+require_local_cli_target_executables
+VENV_INSTALL_OK="Y"
+if [ -n "$VENV_BACKUP_DIR" ]; then
+    rm -rf "$VENV_BACKUP_DIR"
+fi
+trap - EXIT
 
 if [ "$INSTALL_WEB_UI" = "Y" ]; then
     print_step "Installing Web UI from local source"
@@ -3055,6 +3101,7 @@ if [ "$CORE_WAS_RUNNING" = "Y" ] && [ "$START_NOW" != "Y" ]; then
 fi
 
 print_step "Creating command symlinks"
+require_local_cli_target_executables
 rm -f "$BIN_DIR/mn" "$BIN_DIR/mn-api" "$INSTALL_DIR/mn"
 replace_symlink "$VENV_DIR/bin/mn" "$BIN_DIR/mn"
 replace_symlink "$VENV_DIR/bin/mn-api" "$BIN_DIR/mn-api"
