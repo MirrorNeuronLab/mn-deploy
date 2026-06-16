@@ -3023,8 +3023,8 @@ if [ "$INSTALL_WEB_UI" = "Y" ]; then
     print_step "Installing Web UI from local source"
     (
         cd "$WEB_UI_DIR"
-        npm install >/dev/null
-        npm run build >/dev/null
+        run_quiet "web-ui-npm-install-local" npm install
+        run_quiet "web-ui-npm-build-local" npm run build
     ) &
     spinner $! "Installed and built local Web UI"
     if [ -e "$LEGACY_UI_LINK_DIR" ] || [ -L "$LEGACY_UI_LINK_DIR" ]; then
