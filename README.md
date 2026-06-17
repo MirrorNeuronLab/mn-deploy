@@ -43,6 +43,9 @@ Check or control installed services:
 
 - Default runtime state is stored under `~/.mn`.
 - Generated Compose settings are stored in `~/.mn/docker-compose.env`.
+- Redis defaults to the Docker Official Image `redis:8`, which includes Redis
+  Query Engine support for vector search. Set `MN_REDIS_IMAGE` before install
+  or in `~/.mn/docker-compose.env` to pin a specific Redis 8+ tag or digest.
 - The installer can set up the core, SDK, CLI, API, Web UI, Redis, OpenShell,
   and Membrane context engine depending on selected options.
 - Use `./install.sh --mode local` from a monorepo checkout for editable local
