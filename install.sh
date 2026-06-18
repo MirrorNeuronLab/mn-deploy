@@ -29,7 +29,7 @@ Common options:
                                 Enable or skip Membrane context engine setup.
   --openshell / --no-openshell  Enable or skip OpenShell gateway setup.
   --start / --no-start          Start or skip starting MirrorNeuron after install.
-  --start-as-worker             Start MirrorNeuron as a worker node when auto-starting.
+  --start-as-worker             Start MirrorNeuron as a worker node after install.
   --python PATH                 Same as MN_PYTHON. Must be Python 3.11.x.
   --no-managed-python           Do not use uv to install a private Python runtime.
   --python-components LIST      Install only these Python components where supported.
@@ -518,7 +518,7 @@ Options:
                                 Enable or skip Membrane context engine setup.
   --openshell / --no-openshell  Enable or skip OpenShell gateway setup.
   --start / --no-start          Start or skip starting MirrorNeuron after install.
-  --start-as-worker             Start MirrorNeuron as a worker node when auto-starting.
+  --start-as-worker             Start MirrorNeuron as a worker node after install.
   --python-components LIST      Install only these components: sdk,skill,cli,api.
                                 Use all or none as shortcuts.
   --python-sdk / --no-python-sdk
@@ -598,7 +598,7 @@ while [ "$#" -gt 0 ]; do
         --no-openshell) INSTALL_OPENSHELL="N" ;;
         --start) START_NOW="Y" ;;
         --no-start) START_NOW="N" ;;
-        --start-as-worker) START_AS_WORKER="Y" ;;
+        --start-as-worker) START_AS_WORKER="Y"; START_NOW="Y" ;;
         --python-sdk) INSTALL_PYTHON_SDK="Y" ;;
         --no-python-sdk) INSTALL_PYTHON_SDK="N" ;;
         --skill|--skills) INSTALL_BLUEPRINT_SUPPORT_SKILL="Y" ;;
@@ -1542,7 +1542,11 @@ function ensure_shell_profile_exports() {
 ensure_shell_profile_exports
 
 echo -e "\n${BOLD}Quick Start:${RESET}" >&3
-echo -e "  1. Start the server (Core & API): ${GREEN}mn runtime start${RESET}" >&3
+if [ "$START_AS_WORKER" = "Y" ]; then
+    echo -e "  1. Start the server (Core & API): ${GREEN}mn runtime start --worker-node${RESET}" >&3
+else
+    echo -e "  1. Start the server (Core & API): ${GREEN}mn runtime start${RESET}" >&3
+fi
 if [ "$INSTALL_WEB_UI" = "Y" ]; then
     echo -e "  2. Start the UI:   ${GREEN}cd ${INSTALL_DIR}/webui && npm run dev${RESET}" >&3
 fi
@@ -1897,7 +1901,7 @@ Options:
   --no-skills           Skip editable install of packages under mn-skills.
   --start               Start MirrorNeuron after install.
   --no-start            Skip starting MirrorNeuron after install.
-  --start-as-worker     Start MirrorNeuron as a worker node when auto-starting.
+  --start-as-worker     Start MirrorNeuron as a worker node after install.
   --python PATH         Same as MN_PYTHON. Must be Python 3.11.x.
   --no-managed-python   Do not use uv to install a private Python runtime.
   MN_PYTHON=/path       Use a specific Python 3.11.x interpreter.
@@ -1922,7 +1926,7 @@ while [ "$#" -gt 0 ]; do
         --no-skills) INSTALL_SKILLS="N" ;;
         --start) START_NOW="Y" ;;
         --no-start) START_NOW="N" ;;
-        --start-as-worker) START_AS_WORKER="Y" ;;
+        --start-as-worker) START_AS_WORKER="Y"; START_NOW="Y" ;;
         --python)
             shift
             if [ "$#" -eq 0 ]; then
@@ -3195,7 +3199,11 @@ if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
 fi
 
 echo -e "\n${BOLD}Quick Start:${RESET}" >&3
-echo -e "  1. Start server: ${GREEN}mn runtime start${RESET}" >&3
+if [ "$START_AS_WORKER" = "Y" ]; then
+    echo -e "  1. Start server: ${GREEN}mn runtime start --worker-node${RESET}" >&3
+else
+    echo -e "  1. Start server: ${GREEN}mn runtime start${RESET}" >&3
+fi
 if [ "$INSTALL_WEB_UI" = "Y" ]; then
     echo -e "  2. Start UI:     ${GREEN}cd ${UI_LINK_DIR} && npm run dev${RESET}" >&3
 fi
@@ -3333,7 +3341,7 @@ Options:
                                 Enable or skip Membrane context engine setup.
   --openshell / --no-openshell  Enable or skip OpenShell gateway setup.
   --start / --no-start          Start or skip starting MirrorNeuron after install.
-  --start-as-worker             Start MirrorNeuron as a worker node when auto-starting.
+  --start-as-worker             Start MirrorNeuron as a worker node after install.
 
 Python component options:
   --python-components LIST      Install only these components: sdk,skill,all-skills,cli,api.
@@ -3435,7 +3443,7 @@ while [ "$#" -gt 0 ]; do
         --no-openshell) INSTALL_OPENSHELL="N" ;;
         --start) START_NOW="Y" ;;
         --no-start) START_NOW="N" ;;
-        --start-as-worker) START_AS_WORKER="Y" ;;
+        --start-as-worker) START_AS_WORKER="Y"; START_NOW="Y" ;;
         --python-sdk) INSTALL_PYTHON_SDK="Y" ;;
         --no-python-sdk) INSTALL_PYTHON_SDK="N" ;;
         --skill|--skills) INSTALL_BLUEPRINT_SUPPORT_SKILL="Y" ;;
@@ -5038,7 +5046,11 @@ fi
 
 echo -e "\n${BOLD}Quick Start:${RESET}" >&3
 if [ "$INSTALL_CLI" = "Y" ]; then
-    echo -e "  1. Start the server (Core & API): ${GREEN}mn runtime start${RESET}" >&3
+    if [ "$START_AS_WORKER" = "Y" ]; then
+        echo -e "  1. Start the server (Core & API): ${GREEN}mn runtime start --worker-node${RESET}" >&3
+    else
+        echo -e "  1. Start the server (Core & API): ${GREEN}mn runtime start${RESET}" >&3
+    fi
 fi
 if [ "$INSTALL_WEB_UI" = "Y" ]; then
     echo -e "  2. Start the UI:   ${GREEN}mn runtime start${RESET} starts it with the services${RESET}" >&3
