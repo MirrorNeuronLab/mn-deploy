@@ -29,6 +29,7 @@ Common options:
                                 Enable or skip Membrane context engine setup.
   --openshell / --no-openshell  Enable or skip OpenShell gateway setup.
   --start / --no-start          Start or skip starting MirrorNeuron after install.
+  --start-as-worker             Start MirrorNeuron as a worker node when auto-starting.
   --python PATH                 Same as MN_PYTHON. Must be Python 3.11.x.
   --no-managed-python           Do not use uv to install a private Python runtime.
   --python-components LIST      Install only these Python components where supported.
@@ -499,6 +500,7 @@ INSTALL_CLI="Y"
 INSTALL_API="Y"
 CORE_RELEASE_TAG="${MN_CORE_RELEASE_TAG:-}"
 CORE_ASSET_URL="${MN_CORE_ASSET_URL:-}"
+START_AS_WORKER="N"
 
 function github_usage() {
     local script_name="${MN_INSTALL_SCRIPT_NAME:-$(basename "$0")}";
@@ -516,6 +518,7 @@ Options:
                                 Enable or skip Membrane context engine setup.
   --openshell / --no-openshell  Enable or skip OpenShell gateway setup.
   --start / --no-start          Start or skip starting MirrorNeuron after install.
+  --start-as-worker             Start MirrorNeuron as a worker node when auto-starting.
   --python-components LIST      Install only these components: sdk,skill,cli,api.
                                 Use all or none as shortcuts.
   --python-sdk / --no-python-sdk
@@ -595,6 +598,7 @@ while [ "$#" -gt 0 ]; do
         --no-openshell) INSTALL_OPENSHELL="N" ;;
         --start) START_NOW="Y" ;;
         --no-start) START_NOW="N" ;;
+        --start-as-worker) START_AS_WORKER="Y" ;;
         --python-sdk) INSTALL_PYTHON_SDK="Y" ;;
         --no-python-sdk) INSTALL_PYTHON_SDK="N" ;;
         --skill|--skills) INSTALL_BLUEPRINT_SUPPORT_SKILL="Y" ;;
@@ -1546,7 +1550,11 @@ echo -e "  3. Use the CLI:    ${GREEN}mn node list${RESET}\n" >&3
 
 if [ "$START_NOW" = "Y" ]; then
     print_step "Starting MirrorNeuron Server..."
-    "$VENV_DIR/bin/mn" runtime start
+    if [ "$START_AS_WORKER" = "Y" ]; then
+        "$VENV_DIR/bin/mn" runtime start --worker-node
+    else
+        "$VENV_DIR/bin/mn" runtime start
+    fi
 fi
 }
 
@@ -1626,6 +1634,7 @@ INSTALL_CONTEXT_ENGINE="Y"
 INSTALL_OPENSHELL="Y"
 INSTALL_SKILLS="Y"
 START_NOW="N"
+START_AS_WORKER="N"
 NON_INTERACTIVE="N"
 
 function print_header() {
@@ -1888,6 +1897,7 @@ Options:
   --no-skills           Skip editable install of packages under mn-skills.
   --start               Start MirrorNeuron after install.
   --no-start            Skip starting MirrorNeuron after install.
+  --start-as-worker     Start MirrorNeuron as a worker node when auto-starting.
   --python PATH         Same as MN_PYTHON. Must be Python 3.11.x.
   --no-managed-python   Do not use uv to install a private Python runtime.
   MN_PYTHON=/path       Use a specific Python 3.11.x interpreter.
@@ -1912,6 +1922,7 @@ while [ "$#" -gt 0 ]; do
         --no-skills) INSTALL_SKILLS="N" ;;
         --start) START_NOW="Y" ;;
         --no-start) START_NOW="N" ;;
+        --start-as-worker) START_AS_WORKER="Y" ;;
         --python)
             shift
             if [ "$#" -eq 0 ]; then
@@ -3194,7 +3205,11 @@ echo -e "  4. Rebuild core after Elixir changes: ${GREEN}${SCRIPT_DIR}/install.s
 if [ "$START_NOW" = "Y" ]; then
     print_step "Starting MirrorNeuron Server"
     "$VENV_DIR/bin/mn" runtime stop >/dev/null 2>&1 || true
-    "$VENV_DIR/bin/mn" runtime start
+    if [ "$START_AS_WORKER" = "Y" ]; then
+        "$VENV_DIR/bin/mn" runtime start --worker-node
+    else
+        "$VENV_DIR/bin/mn" runtime start
+    fi
 fi
 }
 
@@ -3282,6 +3297,7 @@ INSTALL_ALL_SKILLS="N"
 INSTALL_CLI="Y"
 INSTALL_API="Y"
 START_NOW="Y"
+START_AS_WORKER="N"
 REINSTALL="Y"
 NON_INTERACTIVE="N"
 
@@ -3317,6 +3333,7 @@ Options:
                                 Enable or skip Membrane context engine setup.
   --openshell / --no-openshell  Enable or skip OpenShell gateway setup.
   --start / --no-start          Start or skip starting MirrorNeuron after install.
+  --start-as-worker             Start MirrorNeuron as a worker node when auto-starting.
 
 Python component options:
   --python-components LIST      Install only these components: sdk,skill,all-skills,cli,api.
@@ -3418,6 +3435,7 @@ while [ "$#" -gt 0 ]; do
         --no-openshell) INSTALL_OPENSHELL="N" ;;
         --start) START_NOW="Y" ;;
         --no-start) START_NOW="N" ;;
+        --start-as-worker) START_AS_WORKER="Y" ;;
         --python-sdk) INSTALL_PYTHON_SDK="Y" ;;
         --no-python-sdk) INSTALL_PYTHON_SDK="N" ;;
         --skill|--skills) INSTALL_BLUEPRINT_SUPPORT_SKILL="Y" ;;
@@ -5031,7 +5049,11 @@ fi
 
 if [ "$START_NOW" = "Y" ]; then
     print_step "Starting MirrorNeuron Server..."
-    "$VENV_DIR/bin/mn" runtime start
+    if [ "$START_AS_WORKER" = "Y" ]; then
+        "$VENV_DIR/bin/mn" runtime start --worker-node
+    else
+        "$VENV_DIR/bin/mn" runtime start
+    fi
 fi
 }
 
