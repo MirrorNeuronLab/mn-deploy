@@ -465,6 +465,9 @@ MEMBRANE_REPO="${MN_MEMBRANE_REPO:-MirrorNeuronLab/Membrane}"
 MEMBRANE_GIT_URL="${MN_MEMBRANE_GIT_URL:-}"
 MEMBRANE_DIR="${MN_MEMBRANE_DIR:-${INSTALL_DIR}/Membrane}"
 MN_HOST_HOME_DIR="${MN_HOST_HOME_DIR:-${MN_HOST_MN_DIR:-${INSTALL_DIR}}}"
+MN_HOST_ARTIFACTS_DIR="${MN_HOST_ARTIFACTS_DIR:-${MN_HOST_HOME_DIR}/runs}"
+MN_HOST_BLOB_STORE_DIR="${MN_HOST_BLOB_STORE_DIR:-${MN_HOST_HOME_DIR}/blobs}"
+MN_HOST_SHARED_STORAGE_ROOT="${MN_HOST_SHARED_STORAGE_ROOT:-${MN_HOST_SHARED_ARTIFACT_ROOT:-${MN_HOST_HOME_DIR}/shared}}"
 MN_HOST_OPENSHELL_CONFIG_DIR="${OPENSHELL_CONTAINER_CONFIG_DIR:-${HOME}/.config/openshell-mirror-neuron}"
 MN_HOST_OPENSHELL_STATE_DIR="${MN_HOST_OPENSHELL_STATE_DIR:-${INSTALL_DIR}/openshell-state}"
 OPENSHELL_GATEWAY_USER="${OPENSHELL_GATEWAY_USER:-$(id -u):$(id -g)}"
@@ -1068,6 +1071,23 @@ function resolve_docker_network_external() {
     fi
 }
 
+function ensure_runtime_host_directory() {
+    local path="$1"
+    local description="$2"
+    local override_name="$3"
+
+    if [ -e "$path" ] || [ -L "$path" ]; then
+        if [ ! -d "$path" ]; then
+            print_error "Expected ${description} to be a directory: ${path}"
+            print_error "Move or remove that path, or set ${override_name} to a directory."
+            exit 1
+        fi
+        return 0
+    fi
+
+    mkdir -p "$path"
+}
+
 function write_runtime_compose_files() {
     local model_runner_model profiles network_name network_external network_token redis_password mn_cookie grpc_auth_token grpc_admin_token
     if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
@@ -1083,7 +1103,13 @@ function write_runtime_compose_files() {
     grpc_auth_token="$(resolve_grpc_auth_token)"
     grpc_admin_token="$(resolve_grpc_admin_token)"
 
-    mkdir -p "$INSTALL_DIR" "$MN_HOST_HOME_DIR" "$MN_HOST_OPENSHELL_CONFIG_DIR" "$MN_HOST_OPENSHELL_STATE_DIR"
+    mkdir -p "$INSTALL_DIR"
+    ensure_runtime_host_directory "$MN_HOST_HOME_DIR" "MirrorNeuron home mount" "MN_HOST_HOME_DIR"
+    ensure_runtime_host_directory "$MN_HOST_ARTIFACTS_DIR" "run artifacts host mount" "MN_HOST_ARTIFACTS_DIR"
+    ensure_runtime_host_directory "$MN_HOST_BLOB_STORE_DIR" "blob store host mount" "MN_HOST_BLOB_STORE_DIR"
+    ensure_runtime_host_directory "$MN_HOST_SHARED_STORAGE_ROOT" "shared storage host mount" "MN_HOST_SHARED_STORAGE_ROOT"
+    ensure_runtime_host_directory "$MN_HOST_OPENSHELL_CONFIG_DIR" "OpenShell config host mount" "MN_HOST_OPENSHELL_CONFIG_DIR"
+    ensure_runtime_host_directory "$MN_HOST_OPENSHELL_STATE_DIR" "OpenShell state host mount" "MN_HOST_OPENSHELL_STATE_DIR"
     cp "$RUNTIME_COMPOSE_TEMPLATE" "$RUNTIME_COMPOSE_FILE"
     if [ "$INSTALL_OPENSHELL" = "Y" ]; then
         write_openshell_compose_config
@@ -1093,6 +1119,9 @@ COMPOSE_PROJECT_NAME=mirror-neuron
 COMPOSE_PROFILES=${profiles}
 MN_HOST_STATE_DIR=${INSTALL_DIR}
 MN_HOST_HOME_DIR=${MN_HOST_HOME_DIR}
+MN_HOST_ARTIFACTS_DIR=${MN_HOST_ARTIFACTS_DIR}
+MN_HOST_BLOB_STORE_DIR=${MN_HOST_BLOB_STORE_DIR}
+MN_HOST_SHARED_STORAGE_ROOT=${MN_HOST_SHARED_STORAGE_ROOT}
 MN_HOST_OPENSHELL_CONFIG_DIR=${MN_HOST_OPENSHELL_CONFIG_DIR}
 MN_HOST_OPENSHELL_STATE_DIR=${MN_HOST_OPENSHELL_STATE_DIR}
 MEMBRANE_DIR=${MEMBRANE_DIR}
@@ -1563,6 +1592,9 @@ DOCS_DIR="${WORKSPACE_DIR}/mn-docs"
 SYSTEM_TESTS_DIR="${WORKSPACE_DIR}/mn-system-tests"
 MEMBRANE_DIR="${WORKSPACE_DIR}/Membrane"
 MN_HOST_HOME_DIR="${MN_HOST_HOME_DIR:-${MN_HOST_MN_DIR:-${INSTALL_DIR}}}"
+MN_HOST_ARTIFACTS_DIR="${MN_HOST_ARTIFACTS_DIR:-${MN_HOST_HOME_DIR}/runs}"
+MN_HOST_BLOB_STORE_DIR="${MN_HOST_BLOB_STORE_DIR:-${MN_HOST_HOME_DIR}/blobs}"
+MN_HOST_SHARED_STORAGE_ROOT="${MN_HOST_SHARED_STORAGE_ROOT:-${MN_HOST_SHARED_ARTIFACT_ROOT:-${MN_HOST_HOME_DIR}/shared}}"
 MN_HOST_OPENSHELL_CONFIG_DIR="${OPENSHELL_CONTAINER_CONFIG_DIR:-${HOME}/.config/openshell-mirror-neuron}"
 MN_HOST_OPENSHELL_STATE_DIR="${MN_HOST_OPENSHELL_STATE_DIR:-${INSTALL_DIR}/openshell-state}"
 OPENSHELL_GATEWAY_USER="${OPENSHELL_GATEWAY_USER:-$(id -u):$(id -g)}"
@@ -2671,6 +2703,23 @@ function resolve_docker_network_external() {
     fi
 }
 
+function ensure_runtime_host_directory() {
+    local path="$1"
+    local description="$2"
+    local override_name="$3"
+
+    if [ -e "$path" ] || [ -L "$path" ]; then
+        if [ ! -d "$path" ]; then
+            print_error "Expected ${description} to be a directory: ${path}"
+            print_error "Move or remove that path, or set ${override_name} to a directory."
+            exit 1
+        fi
+        return 0
+    fi
+
+    mkdir -p "$path"
+}
+
 function write_runtime_compose_files() {
     local model_runner_model profiles network_name network_external network_token redis_password mn_cookie grpc_auth_token grpc_admin_token
     model_runner_model="${MN_CONTEXT_MODEL_RUNNER_MODEL:-hf.co/homerquan/mn-context-engine-model-v-Q4_K_M}"
@@ -2683,7 +2732,13 @@ function write_runtime_compose_files() {
     grpc_auth_token="$(resolve_grpc_auth_token)"
     grpc_admin_token="$(resolve_grpc_admin_token)"
 
-    mkdir -p "$INSTALL_DIR" "$MN_HOST_HOME_DIR" "$MN_HOST_OPENSHELL_CONFIG_DIR" "$MN_HOST_OPENSHELL_STATE_DIR"
+    mkdir -p "$INSTALL_DIR"
+    ensure_runtime_host_directory "$MN_HOST_HOME_DIR" "MirrorNeuron home mount" "MN_HOST_HOME_DIR"
+    ensure_runtime_host_directory "$MN_HOST_ARTIFACTS_DIR" "run artifacts host mount" "MN_HOST_ARTIFACTS_DIR"
+    ensure_runtime_host_directory "$MN_HOST_BLOB_STORE_DIR" "blob store host mount" "MN_HOST_BLOB_STORE_DIR"
+    ensure_runtime_host_directory "$MN_HOST_SHARED_STORAGE_ROOT" "shared storage host mount" "MN_HOST_SHARED_STORAGE_ROOT"
+    ensure_runtime_host_directory "$MN_HOST_OPENSHELL_CONFIG_DIR" "OpenShell config host mount" "MN_HOST_OPENSHELL_CONFIG_DIR"
+    ensure_runtime_host_directory "$MN_HOST_OPENSHELL_STATE_DIR" "OpenShell state host mount" "MN_HOST_OPENSHELL_STATE_DIR"
     cp "$RUNTIME_COMPOSE_TEMPLATE" "$RUNTIME_COMPOSE_FILE"
     if [ "$INSTALL_OPENSHELL" = "Y" ]; then
         write_openshell_compose_config
@@ -2693,6 +2748,9 @@ COMPOSE_PROJECT_NAME=mirror-neuron
 COMPOSE_PROFILES=${profiles}
 MN_HOST_STATE_DIR=${INSTALL_DIR}
 MN_HOST_HOME_DIR=${MN_HOST_HOME_DIR}
+MN_HOST_ARTIFACTS_DIR=${MN_HOST_ARTIFACTS_DIR}
+MN_HOST_BLOB_STORE_DIR=${MN_HOST_BLOB_STORE_DIR}
+MN_HOST_SHARED_STORAGE_ROOT=${MN_HOST_SHARED_STORAGE_ROOT}
 MN_HOST_OPENSHELL_CONFIG_DIR=${MN_HOST_OPENSHELL_CONFIG_DIR}
 MN_HOST_OPENSHELL_STATE_DIR=${MN_HOST_OPENSHELL_STATE_DIR}
 MEMBRANE_DIR=${MEMBRANE_DIR}
@@ -3185,6 +3243,9 @@ MN_GAR_REPOSITORY="${MN_GAR_REPOSITORY:-mirrorneuron-python}"
 MN_PIP_INDEX_URL="${MN_PIP_INDEX_URL:-${MN_PYTHON_INDEX_URL:-}}"
 MN_PIP_EXTRA_INDEX_URL="${MN_PIP_EXTRA_INDEX_URL:-${MN_PYTHON_EXTRA_INDEX_URL:-https://pypi.org/simple}}"
 MN_HOST_HOME_DIR="${MN_HOST_HOME_DIR:-${MN_HOST_MN_DIR:-${INSTALL_DIR}}}"
+MN_HOST_ARTIFACTS_DIR="${MN_HOST_ARTIFACTS_DIR:-${MN_HOST_HOME_DIR}/runs}"
+MN_HOST_BLOB_STORE_DIR="${MN_HOST_BLOB_STORE_DIR:-${MN_HOST_HOME_DIR}/blobs}"
+MN_HOST_SHARED_STORAGE_ROOT="${MN_HOST_SHARED_STORAGE_ROOT:-${MN_HOST_SHARED_ARTIFACT_ROOT:-${MN_HOST_HOME_DIR}/shared}}"
 MN_HOST_OPENSHELL_CONFIG_DIR="${OPENSHELL_CONTAINER_CONFIG_DIR:-${HOME}/.config/openshell-mirror-neuron}"
 MN_HOST_OPENSHELL_STATE_DIR="${MN_HOST_OPENSHELL_STATE_DIR:-${INSTALL_DIR}/openshell-state}"
 OPENSHELL_GATEWAY_USER="${OPENSHELL_GATEWAY_USER:-$(id -u):$(id -g)}"
@@ -4531,6 +4592,23 @@ function resolve_docker_network_external() {
     fi
 }
 
+function ensure_runtime_host_directory() {
+    local path="$1"
+    local description="$2"
+    local override_name="$3"
+
+    if [ -e "$path" ] || [ -L "$path" ]; then
+        if [ ! -d "$path" ]; then
+            print_error "Expected ${description} to be a directory: ${path}"
+            print_error "Move or remove that path, or set ${override_name} to a directory."
+            exit 1
+        fi
+        return 0
+    fi
+
+    mkdir -p "$path"
+}
+
 function write_runtime_compose_files() {
     local model_runner_model profiles network_name network_external network_token redis_password mn_cookie grpc_auth_token grpc_admin_token
     if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
@@ -4546,7 +4624,13 @@ function write_runtime_compose_files() {
     grpc_auth_token="$(resolve_grpc_auth_token)"
     grpc_admin_token="$(resolve_grpc_admin_token)"
 
-    mkdir -p "$INSTALL_DIR" "$MN_HOST_HOME_DIR" "$MN_HOST_OPENSHELL_CONFIG_DIR" "$MN_HOST_OPENSHELL_STATE_DIR"
+    mkdir -p "$INSTALL_DIR"
+    ensure_runtime_host_directory "$MN_HOST_HOME_DIR" "MirrorNeuron home mount" "MN_HOST_HOME_DIR"
+    ensure_runtime_host_directory "$MN_HOST_ARTIFACTS_DIR" "run artifacts host mount" "MN_HOST_ARTIFACTS_DIR"
+    ensure_runtime_host_directory "$MN_HOST_BLOB_STORE_DIR" "blob store host mount" "MN_HOST_BLOB_STORE_DIR"
+    ensure_runtime_host_directory "$MN_HOST_SHARED_STORAGE_ROOT" "shared storage host mount" "MN_HOST_SHARED_STORAGE_ROOT"
+    ensure_runtime_host_directory "$MN_HOST_OPENSHELL_CONFIG_DIR" "OpenShell config host mount" "MN_HOST_OPENSHELL_CONFIG_DIR"
+    ensure_runtime_host_directory "$MN_HOST_OPENSHELL_STATE_DIR" "OpenShell state host mount" "MN_HOST_OPENSHELL_STATE_DIR"
     cp "$RUNTIME_COMPOSE_TEMPLATE" "$RUNTIME_COMPOSE_FILE"
     if [ "$INSTALL_OPENSHELL" = "Y" ]; then
         write_openshell_compose_config
@@ -4556,6 +4640,9 @@ COMPOSE_PROJECT_NAME=mirror-neuron
 COMPOSE_PROFILES=${profiles}
 MN_HOST_STATE_DIR=${INSTALL_DIR}
 MN_HOST_HOME_DIR=${MN_HOST_HOME_DIR}
+MN_HOST_ARTIFACTS_DIR=${MN_HOST_ARTIFACTS_DIR}
+MN_HOST_BLOB_STORE_DIR=${MN_HOST_BLOB_STORE_DIR}
+MN_HOST_SHARED_STORAGE_ROOT=${MN_HOST_SHARED_STORAGE_ROOT}
 MN_HOST_OPENSHELL_CONFIG_DIR=${MN_HOST_OPENSHELL_CONFIG_DIR}
 MN_HOST_OPENSHELL_STATE_DIR=${MN_HOST_OPENSHELL_STATE_DIR}
 MEMBRANE_DIR=${MEMBRANE_DIR}
