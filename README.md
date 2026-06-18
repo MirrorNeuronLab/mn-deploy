@@ -31,6 +31,12 @@ Check or control installed services:
 ./server.sh stop
 ```
 
+Clear runtime Redis state:
+
+```bash
+./scripts/clear-redis.sh --yes
+```
+
 ## Details
 
 - [Google Artifact Registry Python Publishing](./GOOGLE_ARTIFACT_REGISTRY.md)
