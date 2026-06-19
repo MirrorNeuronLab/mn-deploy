@@ -48,7 +48,7 @@ Examples:
   ./$MN_INSTALL_SCRIPT_NAME --interactive
   ./$MN_INSTALL_SCRIPT_NAME --mode github
   ./$MN_INSTALL_SCRIPT_NAME --mode local --no-web-ui --no-skills
-  ./$MN_INSTALL_SCRIPT_NAME --mode binary --core-release-tag v1.1.0
+  ./$MN_INSTALL_SCRIPT_NAME --mode binary --core-release-tag v1.2.6
 EOF
 }
 
@@ -1156,6 +1156,7 @@ MN_BLUEPRINT_WEB_UI_PORT_ALLOCATION_MODE=${MN_BLUEPRINT_WEB_UI_PORT_ALLOCATION_M
 MN_BLUEPRINT_SOURCE=${MN_BLUEPRINT_SOURCE:-github}
 MN_BLUEPRINT_REPO=${MN_BLUEPRINT_REPO:-https://github.com/MirrorNeuronLab/mn-blueprints.git}
 MN_BLUEPRINT_LOCAL=${MN_BLUEPRINT_LOCAL:-}
+MN_WORKSPACE_ROOT=${MN_WORKSPACE_ROOT:-}
 MN_RUNS_ROOT=${MN_RUNS_ROOT:-}
 MN_DOCKER_NETWORK_MODE=${MN_DOCKER_NETWORK_MODE:-bridge}
 MN_DOCKER_NETWORK_NAME=${network_name}
@@ -1186,7 +1187,11 @@ EOF
 }
 
 function runtime_compose() {
-    docker compose --env-file "$RUNTIME_COMPOSE_ENV" -f "$RUNTIME_COMPOSE_FILE" "$@"
+    if command -v docker-compose >/dev/null 2>&1; then
+        docker-compose --env-file "$RUNTIME_COMPOSE_ENV" -f "$RUNTIME_COMPOSE_FILE" "$@"
+    else
+        docker compose --env-file "$RUNTIME_COMPOSE_ENV" -f "$RUNTIME_COMPOSE_FILE" "$@"
+    fi
 }
 
 function runtime_container_name_for_service() {
@@ -1568,7 +1573,11 @@ if [ "$START_NOW" = "Y" ]; then
     if [ "$START_AS_WORKER" = "Y" ]; then
         "$VENV_DIR/bin/mn" runtime start --worker-node
     else
-        "$VENV_DIR/bin/mn" runtime start
+        if ! "$VENV_DIR/bin/mn" runtime start; then
+            print_warning "mn runtime start failed; starting MirrorNeuron Core directly with Docker Compose."
+            runtime_compose up -d mirror-neuron-core
+            "$VENV_DIR/bin/mn" runtime restart-sidecars --api >/dev/null 2>&1 || print_warning "MirrorNeuron Core started, but the REST API sidecar did not start automatically."
+        fi
     fi
 fi
 }
@@ -2801,6 +2810,7 @@ MN_BLUEPRINT_WEB_UI_PORT_ALLOCATION_MODE=${MN_BLUEPRINT_WEB_UI_PORT_ALLOCATION_M
 MN_BLUEPRINT_SOURCE=${MN_BLUEPRINT_SOURCE:-github}
 MN_BLUEPRINT_REPO=${MN_BLUEPRINT_REPO:-https://github.com/MirrorNeuronLab/mn-blueprints.git}
 MN_BLUEPRINT_LOCAL=${MN_BLUEPRINT_LOCAL:-}
+MN_WORKSPACE_ROOT=${MN_WORKSPACE_ROOT:-}
 MN_RUNS_ROOT=${MN_RUNS_ROOT:-}
 MN_DOCKER_NETWORK_MODE=${MN_DOCKER_NETWORK_MODE:-bridge}
 MN_DOCKER_NETWORK_NAME=${network_name}
@@ -2831,7 +2841,11 @@ EOF
 }
 
 function runtime_compose() {
-    docker compose --env-file "$RUNTIME_COMPOSE_ENV" -f "$RUNTIME_COMPOSE_FILE" "$@"
+    if command -v docker-compose >/dev/null 2>&1; then
+        docker-compose --env-file "$RUNTIME_COMPOSE_ENV" -f "$RUNTIME_COMPOSE_FILE" "$@"
+    else
+        docker compose --env-file "$RUNTIME_COMPOSE_ENV" -f "$RUNTIME_COMPOSE_FILE" "$@"
+    fi
 }
 
 function runtime_container_name_for_service() {
@@ -3232,7 +3246,11 @@ if [ "$START_NOW" = "Y" ]; then
     if [ "$START_AS_WORKER" = "Y" ]; then
         "$VENV_DIR/bin/mn" runtime start --worker-node
     else
-        "$VENV_DIR/bin/mn" runtime start
+        if ! "$VENV_DIR/bin/mn" runtime start; then
+            print_warning "mn runtime start failed; starting MirrorNeuron Core directly with Docker Compose."
+            runtime_compose up -d mirror-neuron-core
+            "$VENV_DIR/bin/mn" runtime restart-sidecars --api >/dev/null 2>&1 || print_warning "MirrorNeuron Core started, but the REST API sidecar did not start automatically."
+        fi
     fi
 fi
 }
@@ -3269,8 +3287,9 @@ RUNTIME_COMPOSE_TEMPLATE="${SCRIPT_DIR}/docker-compose.yml"
 RUNTIME_COMPOSE_FILE="${INSTALL_DIR}/docker-compose.yml"
 RUNTIME_COMPOSE_ENV="${INSTALL_DIR}/docker-compose.env"
 CORE_REPO="${MN_CORE_REPO:-MirrorNeuronLab/MirrorNeuron}"
-CORE_RELEASE_TAG="${MN_CORE_RELEASE_TAG:-latest}"
+CORE_RELEASE_TAG="${MN_CORE_RELEASE_TAG:-v1.2.6}"
 CORE_ASSET_URL="${MN_CORE_ASSET_URL:-}"
+MN_PACKAGE_VERSION="1.2.6"
 SKILLS_REPO="${MN_SKILLS_REPO:-MirrorNeuronLab/mn-skills}"
 MEMBRANE_REPO="${MN_MEMBRANE_REPO:-MirrorNeuronLab/Membrane}"
 MEMBRANE_GIT_URL="${MN_MEMBRANE_GIT_URL:-}"
@@ -3395,7 +3414,7 @@ Examples:
   ./$script_name --gar-project my-gcp-project --gar-repository mirrorneuron-python
   ./$script_name --python-index-url https://us-central1-python.pkg.dev/my-gcp-project/mirrorneuron-python/simple/
   MN_PYTHON=/opt/homebrew/bin/python3.11 ./$script_name
-  ./$script_name --core-release-tag v1.1.0 --no-web-ui
+  ./$script_name --core-release-tag v1.2.6 --no-web-ui
 EOF
 }
 
@@ -4020,7 +4039,7 @@ function resolve_core_release_tag() {
     if [ -z "$tag" ] || [ "$tag" = "$effective_url" ]; then
         local script_name="${MN_INSTALL_SCRIPT_NAME:-$(basename "$0")}"
         print_error "Could not resolve the latest MirrorNeuron release tag from $effective_url."
-        print_error "Set MN_CORE_RELEASE_TAG explicitly, for example: MN_CORE_RELEASE_TAG=v1.1.0 ./$script_name"
+        print_error "Set MN_CORE_RELEASE_TAG explicitly, for example: MN_CORE_RELEASE_TAG=v1.2.6 ./$script_name"
         exit 1
     fi
 
@@ -4066,6 +4085,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
     ca-certificates \
     curl \
+    docker.io \
+    docker-buildx \
     libgcc-s1 \
     libstdc++6 \
     libssl3t64 \
@@ -4184,11 +4205,12 @@ PY
 
 function install_indexed_group() {
     local group="$1"
-    local requirement label installed="N"
+    local requirement pinned_requirement label installed="N"
     while IFS= read -r requirement; do
         [ -n "$requirement" ] || continue
-        label="$(printf '%s' "$requirement" | tr -c 'A-Za-z0-9_.-' '_')"
-        run_quiet "install-${label}" "$VENV_DIR/bin/pip" install "${PIP_INDEX_ARGS[@]}" --upgrade "$requirement"
+        pinned_requirement="${requirement}==${MN_PACKAGE_VERSION}"
+        label="$(printf '%s' "$pinned_requirement" | tr -c 'A-Za-z0-9_.-' '_')"
+        run_quiet "install-${label}" "$VENV_DIR/bin/pip" install "${PIP_INDEX_ARGS[@]}" --upgrade "$pinned_requirement"
         installed="Y"
     done < <(indexed_requirements_for_group "$group")
     if [ "$installed" != "Y" ]; then
@@ -4726,6 +4748,7 @@ MN_BLUEPRINT_WEB_UI_PORT_ALLOCATION_MODE=${MN_BLUEPRINT_WEB_UI_PORT_ALLOCATION_M
 MN_BLUEPRINT_SOURCE=${MN_BLUEPRINT_SOURCE:-github}
 MN_BLUEPRINT_REPO=${MN_BLUEPRINT_REPO:-https://github.com/MirrorNeuronLab/mn-blueprints.git}
 MN_BLUEPRINT_LOCAL=${MN_BLUEPRINT_LOCAL:-}
+MN_WORKSPACE_ROOT=${MN_WORKSPACE_ROOT:-}
 MN_RUNS_ROOT=${MN_RUNS_ROOT:-}
 MN_DOCKER_NETWORK_MODE=${MN_DOCKER_NETWORK_MODE:-bridge}
 MN_DOCKER_NETWORK_NAME=${network_name}
@@ -4756,7 +4779,11 @@ EOF
 }
 
 function runtime_compose() {
-    docker compose --env-file "$RUNTIME_COMPOSE_ENV" -f "$RUNTIME_COMPOSE_FILE" "$@"
+    if command -v docker-compose >/dev/null 2>&1; then
+        docker-compose --env-file "$RUNTIME_COMPOSE_ENV" -f "$RUNTIME_COMPOSE_FILE" "$@"
+    else
+        docker compose --env-file "$RUNTIME_COMPOSE_ENV" -f "$RUNTIME_COMPOSE_FILE" "$@"
+    fi
 }
 
 function runtime_container_name_for_service() {
@@ -4858,7 +4885,7 @@ function install_web_ui_package() {
   "dependencies": {
     "@vitejs/plugin-react": "^6.0.1",
     "vite": "^8.0.4",
-    "mirrorneuron-web-ui": "latest"
+    "mirrorneuron-web-ui": "1.2.6"
   },
   "devDependencies": {}
 }
@@ -5102,7 +5129,11 @@ if [ "$START_NOW" = "Y" ]; then
     if [ "$START_AS_WORKER" = "Y" ]; then
         "$VENV_DIR/bin/mn" runtime start --worker-node
     else
-        "$VENV_DIR/bin/mn" runtime start
+        if ! "$VENV_DIR/bin/mn" runtime start; then
+            print_warning "mn runtime start failed; starting MirrorNeuron Core directly with Docker Compose."
+            runtime_compose up -d mirror-neuron-core
+            "$VENV_DIR/bin/mn" runtime restart-sidecars --api >/dev/null 2>&1 || print_warning "MirrorNeuron Core started, but the REST API sidecar did not start automatically."
+        fi
     fi
 fi
 }

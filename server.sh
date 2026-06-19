@@ -176,7 +176,11 @@ runtime_compose_available() {
 }
 
 runtime_compose() {
-    docker compose --env-file "$RUNTIME_COMPOSE_ENV" -f "$RUNTIME_COMPOSE_FILE" "$@"
+    if command -v docker-compose >/dev/null 2>&1; then
+        docker-compose --env-file "$RUNTIME_COMPOSE_ENV" -f "$RUNTIME_COMPOSE_FILE" "$@"
+    else
+        docker compose --env-file "$RUNTIME_COMPOSE_ENV" -f "$RUNTIME_COMPOSE_FILE" "$@"
+    fi
 }
 
 read_runtime_env_value() {
