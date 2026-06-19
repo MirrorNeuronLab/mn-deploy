@@ -1379,7 +1379,7 @@ CMD ["mix", "run", "--no-halt"]
 EOF
     fi
 
-    docker build -t mirror-neuron-core . >/dev/null 2>&1
+    DOCKER_BUILDKIT=0 docker build -t mirror-neuron-core . >/dev/null 2>&1
 ) &
 spinner $! "Cloning and building Core (Docker image mirror-neuron-core)"
 write_runtime_compose_files
@@ -3094,7 +3094,7 @@ print_success "Local component links created under ${INSTALL_DIR}."
 print_step "Building MirrorNeuron Core Docker image from local source"
 (
     cd "$CORE_DIR"
-    docker build -t mirror-neuron-core:latest .
+    DOCKER_BUILDKIT=0 docker build -t mirror-neuron-core:latest .
 )
 print_success "Built local core image mirror-neuron-core:latest."
 
@@ -4123,7 +4123,7 @@ EXPOSE 50051 4369 54370
 CMD ["bin/mirror_neuron", "start"]
 EOF
 
-    docker build --build-arg "CORE_RELEASE_TAG=$tag" -t mirror-neuron-core:latest "$context_dir" >/dev/null
+    DOCKER_BUILDKIT=0 docker build --build-arg "CORE_RELEASE_TAG=$tag" -t mirror-neuron-core:latest "$context_dir" >/dev/null
     cat > "$INSTALL_METADATA_FILE" <<EOF
 {
   "core_release_tag": "$tag",
