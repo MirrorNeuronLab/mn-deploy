@@ -165,6 +165,13 @@ installer_groups = ["skill"]
 binary_default = false
 
 [[packages]]
+name = "mirrorneuron-mcp-client-skill"
+path = "mn-skills/mcp_client_skill"
+publish_group = "skill"
+installer_groups = ["skill"]
+binary_default = false
+
+[[packages]]
 name = "mirrorneuron-meeting-summary-skill"
 path = "mn-skills/meeting_summary_skill"
 publish_group = "skill"
