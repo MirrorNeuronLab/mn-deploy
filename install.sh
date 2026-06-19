@@ -5,7 +5,7 @@ set -euo pipefail
 # Keep installer output visible even when a subcommand redirects stdout/stderr.
 exec 3>&1
 
-MN_INSTALL_MODE="${MN_INSTALL_MODE:-github}"
+MN_INSTALL_MODE="${MN_INSTALL_MODE:-binary}"
 MN_INSTALL_SCRIPT_NAME="$(basename "$0")"
 MN_INSTALL_ARGS=()
 
@@ -16,12 +16,13 @@ Usage: ./$MN_INSTALL_SCRIPT_NAME [--mode github|local|binary] [options]
 Unified MirrorNeuron installer.
 
 Modes:
-  github   Install from GitHub repositories. This is the default.
+  github   Install from GitHub repositories.
   local    Install from local sibling repositories in a mirror-neuron-set checkout.
-  binary   Install released artifacts/packages. Available but not the default.
+  binary   Install released artifacts/packages. This is the default.
 
 Common options:
-  --yes, -y                     Run non-interactively with defaults and flags.
+  --yes, -y                     Run non-interactively with defaults and flags. This is the default.
+  --interactive                 Ask each install question before proceeding.
   --no-reinstall                Keep an existing install instead of overwriting it.
   --web-ui / --no-web-ui        Enable or skip Web UI setup.
   --redis / --no-redis          Enable or skip Redis Docker setup.
@@ -35,18 +36,19 @@ Common options:
   --python-components LIST      Install only these Python components where supported.
   --core-release-tag TAG        Binary mode release tag.
   --core-asset-url URL          Binary mode release asset URL.
-  --gar-project PROJECT         Binary mode Google Artifact Registry project.
+  --gar-project PROJECT         Binary mode Google Artifact Registry project override.
   --gar-location LOCATION       Binary mode GAR location. Default: us-central1.
-  --gar-repository NAME         Binary mode GAR Python repository.
+  --gar-repository NAME         Binary mode GAR Python repository override.
   --python-index-url URL        Binary mode pip index URL override.
   --python-extra-index-url URL  Binary mode dependency fallback index URL.
   -h, --help                    Show this help.
 
 Examples:
-  ./$MN_INSTALL_SCRIPT_NAME --yes --no-web-ui
-  ./$MN_INSTALL_SCRIPT_NAME --mode github --yes
-  ./$MN_INSTALL_SCRIPT_NAME --mode local --yes --no-web-ui --no-skills
-  ./$MN_INSTALL_SCRIPT_NAME --mode binary --yes --core-release-tag v1.1.0
+  ./$MN_INSTALL_SCRIPT_NAME --no-web-ui
+  ./$MN_INSTALL_SCRIPT_NAME --interactive
+  ./$MN_INSTALL_SCRIPT_NAME --mode github
+  ./$MN_INSTALL_SCRIPT_NAME --mode local --no-web-ui --no-skills
+  ./$MN_INSTALL_SCRIPT_NAME --mode binary --core-release-tag v1.1.0
 EOF
 }
 
@@ -493,7 +495,7 @@ INSTALL_REDIS="Y"
 INSTALL_OPENSHELL="Y"
 START_NOW="Y"
 REINSTALL="Y"
-NON_INTERACTIVE="N"
+NON_INTERACTIVE="Y"
 INSTALL_PYTHON_SDK="Y"
 INSTALL_BLUEPRINT_SUPPORT_SKILL="Y"
 INSTALL_CLI="Y"
@@ -507,10 +509,11 @@ function github_usage() {
     cat >&3 <<EOF
 Usage: ./$script_name --mode github [options]
 
-Installs MirrorNeuron from GitHub repositories. This is the default mode.
+Installs MirrorNeuron from GitHub repositories. Use through --mode github.
 
 Options:
-  --yes                         Run non-interactively with defaults and flags.
+  --yes                         Run non-interactively with defaults and flags. This is the default.
+  --interactive                 Ask each install question before proceeding.
   --no-reinstall                Keep an existing install instead of overwriting it.
   --web-ui / --no-web-ui        Enable or skip GitHub Web UI install/build.
   --redis / --no-redis          Enable or skip Redis Docker setup.
@@ -533,9 +536,10 @@ Options:
   -h, --help                    Show this help.
 
 Examples:
-  ./$script_name --yes --no-web-ui
-  ./$script_name --mode github --yes --python-components sdk,api
-  MN_PYTHON=/opt/homebrew/bin/python3.11 ./$script_name --mode github --yes
+  ./$script_name --mode github --no-web-ui
+  ./$script_name --mode github --interactive
+  ./$script_name --mode github --python-components sdk,api
+  MN_PYTHON=/opt/homebrew/bin/python3.11 ./$script_name --mode github
 EOF
 }
 
@@ -587,6 +591,7 @@ function set_python_components() {
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --yes|-y) NON_INTERACTIVE="Y" ;;
+        --interactive) NON_INTERACTIVE="N" ;;
         --no-reinstall) REINSTALL="N" ;;
         --web-ui) INSTALL_WEB_UI="Y" ;;
         --no-web-ui) INSTALL_WEB_UI="N" ;;
@@ -687,10 +692,12 @@ function context_engine_git_url() {
 
 function context_engine_source_dir() {
     if [ -n "$SOURCE_WORKSPACE" ] && [ -f "$SOURCE_WORKSPACE/Membrane/Dockerfile" ]; then
+        MEMBRANE_DIR="$(cd "$SOURCE_WORKSPACE/Membrane" && pwd)"
         printf '%s' "$SOURCE_WORKSPACE/Membrane"
         return 0
     fi
     if [ -n "${MN_MEMBRANE_DIR:-}" ] && [ -f "$MN_MEMBRANE_DIR/Dockerfile" ]; then
+        MEMBRANE_DIR="$(cd "$MN_MEMBRANE_DIR" && pwd)"
         printf '%s' "$MN_MEMBRANE_DIR"
         return 0
     fi
@@ -702,6 +709,7 @@ function context_engine_source_dir() {
             git pull --ff-only >/dev/null 2>&1 || true
         )
     fi
+    MEMBRANE_DIR="$(cd "$MEMBRANE_DIR" && pwd)"
     printf '%s' "$MEMBRANE_DIR"
 }
 
@@ -1487,11 +1495,10 @@ function profile_has_runtime_home() {
 
 function ensure_shell_profile_exports() {
     local needs_path="N"
-    local needs_runtime_home="N"
+    local needs_runtime_home="Y"
     local default_home="${HOME}/.mn"
 
     [[ ":$PATH:" != *":$BIN_DIR:"* ]] && needs_path="Y"
-    [ "$INSTALL_DIR" != "$default_home" ] && needs_runtime_home="Y"
 
     if [ "$needs_path" = "N" ] && [ "$needs_runtime_home" = "N" ]; then
         return
@@ -1516,18 +1523,22 @@ function ensure_shell_profile_exports() {
 
     local profile path_line home_line wrote_header wrote_profile
     path_line="export PATH=\"$BIN_DIR:\$PATH\""
-    home_line="export MN_HOME=$(shell_escape_value "$INSTALL_DIR")"
+    if [ "$INSTALL_DIR" = "$default_home" ]; then
+        home_line='export MN_HOME="$HOME/.mn"'
+    else
+        home_line="export MN_HOME=$(shell_escape_value "$INSTALL_DIR")"
+    fi
 
     for profile in "${detected_profiles[@]}"; do
         wrote_header="N"
         wrote_profile="N"
         if [ "$needs_path" = "Y" ] && ! profile_has_bin_path "$profile"; then
-            [ "$wrote_header" = "N" ] && echo -e "\n# Added by MirrorNeuron Installer" >> "$profile" && wrote_header="Y"
+            [ "$wrote_header" = "N" ] && echo -e "\n# MN and OTTERDESK" >> "$profile" && wrote_header="Y"
             echo "$path_line" >> "$profile"
             wrote_profile="Y"
         fi
         if [ "$needs_runtime_home" = "Y" ] && ! profile_has_runtime_home "$profile"; then
-            [ "$wrote_header" = "N" ] && echo -e "\n# Added by MirrorNeuron Installer" >> "$profile" && wrote_header="Y"
+            [ "$wrote_header" = "N" ] && echo -e "\n# MN and OTTERDESK" >> "$profile" && wrote_header="Y"
             echo "$home_line" >> "$profile"
             wrote_profile="Y"
         fi
@@ -1637,9 +1648,9 @@ INSTALL_REDIS="Y"
 INSTALL_CONTEXT_ENGINE="Y"
 INSTALL_OPENSHELL="Y"
 INSTALL_SKILLS="Y"
-START_NOW="N"
+START_NOW="Y"
 START_AS_WORKER="N"
-NON_INTERACTIVE="N"
+NON_INTERACTIVE="Y"
 
 function print_header() {
     echo -e "${MAGENTA}${BOLD}" >&3
@@ -1889,7 +1900,8 @@ Installs MirrorNeuron from local sibling folders under:
   ${WORKSPACE_DIR}
 
 Options:
-  --yes                 Run non-interactively with defaults.
+  --yes                 Run non-interactively with defaults. This is the default.
+  --interactive         Ask each install question before proceeding.
   --web-ui              Enable local Web UI npm install/build.
   --no-web-ui           Skip local Web UI npm install/build.
   --redis               Enable Redis Docker setup.
@@ -1914,6 +1926,7 @@ EOF
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --yes|-y) NON_INTERACTIVE="Y" ;;
+        --interactive) NON_INTERACTIVE="N" ;;
         --no-reinstall) ;; # Backward-compatible no-op; local installs refresh in place.
         --web-ui) INSTALL_WEB_UI="Y" ;;
         --no-web-ui) INSTALL_WEB_UI="N" ;;
@@ -2936,11 +2949,10 @@ function profile_has_runtime_home() {
 
 function ensure_shell_profile_exports() {
     local needs_path="N"
-    local needs_runtime_home="N"
+    local needs_runtime_home="Y"
     local default_home="${HOME}/.mn"
 
     [[ ":$PATH:" != *":$BIN_DIR:"* ]] && needs_path="Y"
-    [ "$INSTALL_DIR" != "$default_home" ] && needs_runtime_home="Y"
 
     if [ "$needs_path" = "N" ] && [ "$needs_runtime_home" = "N" ]; then
         return
@@ -2965,18 +2977,22 @@ function ensure_shell_profile_exports() {
 
     local profile path_line home_line wrote_header wrote_profile
     path_line="export PATH=\"$BIN_DIR:\$PATH\""
-    home_line="export MN_HOME=$(shell_escape_value "$INSTALL_DIR")"
+    if [ "$INSTALL_DIR" = "$default_home" ]; then
+        home_line='export MN_HOME="$HOME/.mn"'
+    else
+        home_line="export MN_HOME=$(shell_escape_value "$INSTALL_DIR")"
+    fi
 
     for profile in "${detected_profiles[@]}"; do
         wrote_header="N"
         wrote_profile="N"
         if [ "$needs_path" = "Y" ] && ! profile_has_bin_path "$profile"; then
-            [ "$wrote_header" = "N" ] && echo "" >> "$profile" && echo "# Added by MirrorNeuron installer" >> "$profile" && wrote_header="Y"
+            [ "$wrote_header" = "N" ] && echo "" >> "$profile" && echo "# MN and OTTERDESK" >> "$profile" && wrote_header="Y"
             echo "$path_line" >> "$profile"
             wrote_profile="Y"
         fi
         if [ "$needs_runtime_home" = "Y" ] && ! profile_has_runtime_home "$profile"; then
-            [ "$wrote_header" = "N" ] && echo "" >> "$profile" && echo "# Added by MirrorNeuron installer" >> "$profile" && wrote_header="Y"
+            [ "$wrote_header" = "N" ] && echo "" >> "$profile" && echo "# MN and OTTERDESK" >> "$profile" && wrote_header="Y"
             echo "$home_line" >> "$profile"
             wrote_profile="Y"
         fi
@@ -3208,7 +3224,7 @@ if [ "$INSTALL_WEB_UI" = "Y" ]; then
     echo -e "  2. Start UI:     ${GREEN}cd ${UI_LINK_DIR} && npm run dev${RESET}" >&3
 fi
 echo -e "  3. Use CLI:      ${GREEN}mn node list${RESET}" >&3
-echo -e "  4. Rebuild core after Elixir changes: ${GREEN}${SCRIPT_DIR}/install.sh --mode local --yes --no-web-ui --no-skills${RESET}\n" >&3
+echo -e "  4. Rebuild core after Elixir changes: ${GREEN}${SCRIPT_DIR}/install.sh --mode local --no-web-ui --no-skills${RESET}\n" >&3
 
 if [ "$START_NOW" = "Y" ]; then
     print_step "Starting MirrorNeuron Server"
@@ -3263,6 +3279,7 @@ PACKAGE_INDEX_FILE="${MN_PACKAGE_INDEX_FILE:-${SCRIPT_DIR}/package-index/python-
 MN_GAR_PROJECT="${MN_GAR_PROJECT:-}"
 MN_GAR_LOCATION="${MN_GAR_LOCATION:-us-central1}"
 MN_GAR_REPOSITORY="${MN_GAR_REPOSITORY:-mirrorneuron-python}"
+MN_DEFAULT_PIP_INDEX_URL="${MN_DEFAULT_PIP_INDEX_URL:-https://us-central1-python.pkg.dev/mirrorneuron-public-packages/agent-skills/simple/}"
 MN_PIP_INDEX_URL="${MN_PIP_INDEX_URL:-${MN_PYTHON_INDEX_URL:-}}"
 MN_PIP_EXTRA_INDEX_URL="${MN_PIP_EXTRA_INDEX_URL:-${MN_PYTHON_EXTRA_INDEX_URL:-https://pypi.org/simple}}"
 MN_HOST_HOME_DIR="${MN_HOST_HOME_DIR:-${MN_HOST_MN_DIR:-${INSTALL_DIR}}}"
@@ -3301,13 +3318,13 @@ INSTALL_CONTEXT_ENGINE="Y"
 INSTALL_OPENSHELL="Y"
 INSTALL_PYTHON_SDK="Y"
 INSTALL_BLUEPRINT_SUPPORT_SKILL="Y"
-INSTALL_ALL_SKILLS="N"
+INSTALL_ALL_SKILLS="Y"
 INSTALL_CLI="Y"
 INSTALL_API="Y"
 START_NOW="Y"
 START_AS_WORKER="N"
 REINSTALL="Y"
-NON_INTERACTIVE="N"
+NON_INTERACTIVE="Y"
 
 function print_header() {
     echo -e "${MAGENTA}${BOLD}" >&3
@@ -3333,7 +3350,8 @@ Usage: ./$script_name [options]
 Installs MirrorNeuron from released artifacts and packages. Use through --mode binary.
 
 Options:
-  --yes                         Run non-interactively with defaults and flags.
+  --yes                         Run non-interactively with defaults and flags. This is the default.
+  --interactive                 Ask each install question before proceeding.
   --no-reinstall                Keep an existing install instead of overwriting it.
   --web-ui / --no-web-ui        Enable or skip the Web UI npm package.
   --redis / --no-redis          Enable or skip Redis Docker setup.
@@ -3356,10 +3374,10 @@ Python component options:
 Release/source options:
   --core-release-tag TAG        Same as MN_CORE_RELEASE_TAG.
   --core-asset-url URL          Same as MN_CORE_ASSET_URL.
-  --gar-project PROJECT         Same as MN_GAR_PROJECT. Required unless --python-index-url is set.
+  --gar-project PROJECT         Same as MN_GAR_PROJECT. Overrides the default public package index.
   --gar-location LOCATION       Same as MN_GAR_LOCATION. Default: us-central1.
   --gar-repository NAME         Same as MN_GAR_REPOSITORY. Default: mirrorneuron-python.
-  --python-index-url URL        Same as MN_PIP_INDEX_URL.
+  --python-index-url URL        Same as MN_PIP_INDEX_URL. Default: ${MN_DEFAULT_PIP_INDEX_URL}
   --python-extra-index-url URL  Same as MN_PIP_EXTRA_INDEX_URL. Default: https://pypi.org/simple.
   --python PATH                 Same as MN_PYTHON. Must be Python 3.11+.
   --no-managed-python           Do not use uv to install a private Python runtime.
@@ -3371,12 +3389,13 @@ Release/source options:
   -h, --help                    Show this help.
 
 Examples:
-  ./$script_name --yes --no-web-ui
-  ./$script_name --yes --no-web-ui --python-components sdk,api
-  ./$script_name --yes --gar-project my-gcp-project
-  ./$script_name --yes --python-index-url https://us-central1-python.pkg.dev/my-gcp-project/mirrorneuron-python/simple/
-  MN_PYTHON=/opt/homebrew/bin/python3.11 ./$script_name --yes
-  ./$script_name --yes --core-release-tag v1.1.0 --no-web-ui
+  ./$script_name --no-web-ui
+  ./$script_name --interactive
+  ./$script_name --no-web-ui --python-components sdk,api
+  ./$script_name --gar-project my-gcp-project --gar-repository mirrorneuron-python
+  ./$script_name --python-index-url https://us-central1-python.pkg.dev/my-gcp-project/mirrorneuron-python/simple/
+  MN_PYTHON=/opt/homebrew/bin/python3.11 ./$script_name
+  ./$script_name --core-release-tag v1.1.0 --no-web-ui
 EOF
 }
 
@@ -3432,6 +3451,7 @@ function set_python_components() {
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --yes|-y) NON_INTERACTIVE="Y" ;;
+        --interactive) NON_INTERACTIVE="N" ;;
         --no-reinstall) REINSTALL="N" ;;
         --web-ui) INSTALL_WEB_UI="Y" ;;
         --no-web-ui) INSTALL_WEB_UI="N" ;;
@@ -4040,7 +4060,7 @@ function install_core_from_release() {
 
     cp -R "$INSTALL_DIR/mirror_neuron" "$context_dir/mirror_neuron"
     cat > "$context_dir/Dockerfile" <<'EOF'
-FROM debian:bookworm-slim
+FROM ubuntu:24.04
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
@@ -4048,7 +4068,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     libgcc-s1 \
     libstdc++6 \
-    libssl3 \
+    libssl3t64 \
     ncurses-bin \
     openssl \
     procps \
@@ -4077,9 +4097,9 @@ ARG CORE_RELEASE_TAG
 LABEL org.opencontainers.image.version="${CORE_RELEASE_TAG}"
 
 ENV HOME=/opt/mirror_neuron
-EXPOSE 55051 4369 54370
+EXPOSE 50051 4369 54370
 
-CMD ["bin/mirror_neuron", "foreground"]
+CMD ["bin/mirror_neuron", "start"]
 EOF
 
     docker build --build-arg "CORE_RELEASE_TAG=$tag" -t mirror-neuron-core:latest "$context_dir" >/dev/null
@@ -4099,12 +4119,11 @@ PIP_INDEX_ARGS=()
 function resolve_python_index_url() {
     local url="$MN_PIP_INDEX_URL"
     if [ -z "$url" ]; then
-        if [ -z "$MN_GAR_PROJECT" ]; then
-            print_error "Binary Python package installs require --gar-project/MN_GAR_PROJECT or --python-index-url/MN_PIP_INDEX_URL."
-            print_error "Expected GAR simple index: https://${MN_GAR_LOCATION}-python.pkg.dev/PROJECT/${MN_GAR_REPOSITORY}/simple/"
-            exit 1
+        if [ -n "$MN_GAR_PROJECT" ]; then
+            url="https://${MN_GAR_LOCATION}-python.pkg.dev/${MN_GAR_PROJECT}/${MN_GAR_REPOSITORY}/simple/"
+        else
+            url="$MN_DEFAULT_PIP_INDEX_URL"
         fi
-        url="https://${MN_GAR_LOCATION}-python.pkg.dev/${MN_GAR_PROJECT}/${MN_GAR_REPOSITORY}/simple/"
     fi
     case "$url" in
         */) printf '%s' "$url" ;;
@@ -4232,7 +4251,22 @@ function ensure_context_engine_source() {
     local source_dir
     source_dir="$(local_context_engine_dir || true)"
     if [ -n "$source_dir" ]; then
-        printf '%s' "$source_dir"
+        mkdir -p "$(dirname "$MEMBRANE_DIR")"
+        if [ -L "$MEMBRANE_DIR" ] && [ ! -e "$MEMBRANE_DIR" ]; then
+            rm -f "$MEMBRANE_DIR"
+        fi
+        if [ -d "$MEMBRANE_DIR" ] && [ ! -f "$MEMBRANE_DIR/Dockerfile" ] && [ -z "$(find "$MEMBRANE_DIR" -mindepth 1 -maxdepth 1 -print -quit)" ]; then
+            rmdir "$MEMBRANE_DIR"
+        fi
+        if [ ! -e "$MEMBRANE_DIR" ]; then
+            ln -s "$source_dir" "$MEMBRANE_DIR"
+        fi
+        if [ ! -f "$MEMBRANE_DIR/Dockerfile" ]; then
+            print_error "Membrane source at $MEMBRANE_DIR is missing Dockerfile."
+            print_error "Remove that path or set MN_MEMBRANE_DIR to a valid Membrane checkout."
+            exit 1
+        fi
+        printf '%s' "$MEMBRANE_DIR"
         return 0
     fi
 
@@ -4245,6 +4279,7 @@ function ensure_context_engine_source() {
             git pull --ff-only >/dev/null 2>&1 || true
         )
     fi
+    MEMBRANE_DIR="$(cd "$MEMBRANE_DIR" && pwd)"
     printf '%s' "$MEMBRANE_DIR"
 }
 
@@ -4885,11 +4920,10 @@ function profile_has_runtime_home() {
 
 function add_shell_profile_exports() {
     local needs_path="N"
-    local needs_runtime_home="N"
+    local needs_runtime_home="Y"
     local default_home="${HOME}/.mn"
 
     [[ ":$PATH:" != *":$BIN_DIR:"* ]] && needs_path="Y"
-    [ "$INSTALL_DIR" != "$default_home" ] && needs_runtime_home="Y"
 
     if [ "$needs_path" = "N" ] && [ "$needs_runtime_home" = "N" ]; then
         return
@@ -4914,18 +4948,22 @@ function add_shell_profile_exports() {
 
     local profile path_line home_line wrote_header wrote_profile
     path_line="export PATH=\"$BIN_DIR:\$PATH\""
-    home_line="export MN_HOME=$(shell_escape_value "$INSTALL_DIR")"
+    if [ "$INSTALL_DIR" = "$default_home" ]; then
+        home_line='export MN_HOME="$HOME/.mn"'
+    else
+        home_line="export MN_HOME=$(shell_escape_value "$INSTALL_DIR")"
+    fi
 
     for profile in "${detected_profiles[@]}"; do
         wrote_header="N"
         wrote_profile="N"
         if [ "$needs_path" = "Y" ] && ! profile_has_bin_path "$profile"; then
-            [ "$wrote_header" = "N" ] && echo -e "\n# Added by MirrorNeuron Installer" >> "$profile" && wrote_header="Y"
+            [ "$wrote_header" = "N" ] && echo -e "\n# MN and OTTERDESK" >> "$profile" && wrote_header="Y"
             echo "$path_line" >> "$profile"
             wrote_profile="Y"
         fi
         if [ "$needs_runtime_home" = "Y" ] && ! profile_has_runtime_home "$profile"; then
-            [ "$wrote_header" = "N" ] && echo -e "\n# Added by MirrorNeuron Installer" >> "$profile" && wrote_header="Y"
+            [ "$wrote_header" = "N" ] && echo -e "\n# MN and OTTERDESK" >> "$profile" && wrote_header="Y"
             echo "$home_line" >> "$profile"
             wrote_profile="Y"
         fi

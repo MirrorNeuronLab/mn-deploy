@@ -118,16 +118,13 @@ python -m pip install \
 Binary installer example:
 
 ```bash
-./install.sh --mode binary --yes \
-  --python-index-url https://us-central1-python.pkg.dev/mirrorneuron-public-packages/agent-skills/simple/
+./install.sh --mode binary
 ```
 
-Install all indexed skills:
+Skip the indexed skill catalog:
 
 ```bash
-./install.sh --mode binary --yes \
-  --python-index-url https://us-central1-python.pkg.dev/mirrorneuron-public-packages/agent-skills/simple/ \
-  --all-skills
+./install.sh --mode binary --no-all-skills
 ```
 
 ## Package Index Fields

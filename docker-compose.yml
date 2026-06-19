@@ -96,7 +96,23 @@ services:
       - "${MN_GRPC_BIND_HOST:-127.0.0.1}:${MN_GRPC_PORT:-55051}:50051"
       - "${MN_ARTIFACT_PUBLISH_HOST:-127.0.0.1}:${MN_ARTIFACT_PORT:-55660}:${MN_ARTIFACT_PORT:-55660}"
     command: >
-      sh -c 'if [ -n "$$MN_NODE_NAME" ]; then
+      sh -c 'if [ -x "bin/mirror_neuron" ]; then
+      if [ -n "$$MN_NODE_NAME" ]; then
+      if [ -z "$$MN_COOKIE" ] || [ "$$MN_COOKIE" = "mirrorneuron" ]; then
+      echo "MN_COOKIE must be set to a non-default secret when MN_NODE_NAME enables distributed Erlang" >&2; exit 1;
+      fi;
+      unset ERL_EPMD_ADDRESS;
+      epmd_bin="$$(find erts-* -path "*/bin/epmd" -type f | head -n 1)";
+      "$$epmd_bin" -daemon;
+      export RELEASE_DISTRIBUTION=name;
+      export RELEASE_NODE="$$MN_NODE_NAME";
+      export RELEASE_COOKIE="$$MN_COOKIE";
+      else
+      export RELEASE_DISTRIBUTION=none;
+      fi;
+      exec bin/mirror_neuron start;
+      fi;
+      if [ -n "$$MN_NODE_NAME" ]; then
       if [ -z "$$MN_COOKIE" ] || [ "$$MN_COOKIE" = "mirrorneuron" ]; then
       echo "MN_COOKIE must be set to a non-default secret when MN_NODE_NAME enables distributed Erlang" >&2; exit 1;
       fi;

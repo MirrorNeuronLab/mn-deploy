@@ -1,7 +1,7 @@
 # MirrorNeuron Deploy
 
 `mn-deploy` contains the unified installer and local service scripts for MirrorNeuron.
-By default, `install.sh` installs from GitHub repositories.
+By default, `install.sh` installs released artifacts and Python packages.
 
 ## Quick Start
 
@@ -17,10 +17,16 @@ Install the local runtime:
 ./install.sh
 ```
 
-Install released Python packages from Google Artifact Registry:
+Ask before each install choice:
 
 ```bash
-./install.sh --mode binary --gar-project YOUR_GCP_PROJECT
+./install.sh --interactive
+```
+
+Install from GitHub repositories:
+
+```bash
+./install.sh --mode github
 ```
 
 Check or control installed services:
@@ -47,18 +53,23 @@ Clear runtime Redis state:
 
 ## Notes
 
-- Default runtime state is stored under `~/.mn`.
+- Default runtime state is stored under `~/.mn`. The installer also keeps a shell
+  profile export for both MirrorNeuron and OtterDesk:
+  `export MN_HOME="$HOME/.mn"`.
 - Generated Compose settings are stored in `~/.mn/docker-compose.env`.
 - Redis defaults to the Docker Official Image `redis:8`, which includes Redis
   Query Engine support for vector search. Set `MN_REDIS_IMAGE` before install
   or in `~/.mn/docker-compose.env` to pin a specific Redis 8+ tag or digest.
 - The installer can set up the core, SDK, CLI, API, Web UI, Redis, OpenShell,
   and Membrane context engine depending on selected options.
-- Use `./install.sh --mode local` from a monorepo checkout for editable local
-  installs, or `./install.sh --mode binary` for release/package installs.
+- Installs are non-interactive by default and use yes/default selections. Use
+  `--interactive` for the prompt-driven setup flow.
+- Use `./install.sh` or `./install.sh --mode binary` for release/package installs,
+  `./install.sh --mode github` for repository installs, or `./install.sh --mode local`
+  from a monorepo checkout for editable local installs.
 - Python packages published to Google Artifact Registry are controlled by
   `package-index/python-packages.toml`.
-- The current public package repository is
+- Binary mode uses the current public package repository by default:
   `https://us-central1-python.pkg.dev/mirrorneuron-public-packages/agent-skills/simple/`.
 - GAR setup:
 
