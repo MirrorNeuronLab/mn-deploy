@@ -170,6 +170,60 @@ function mn_remove_dockerfile_frontend_directive() {
     rm -f "$tmp_file"
 }
 
+function mn_stop_runtime_containers_for_reinstall() {
+    local container_ids
+
+    if ! command -v docker >/dev/null 2>&1; then
+        return 0
+    fi
+
+    container_ids="$(docker ps -aq --filter "label=com.docker.compose.project=mirror-neuron" 2>/dev/null || true)"
+    if [ -z "$container_ids" ]; then
+        return 0
+    fi
+
+    print_step "Stopping existing MirrorNeuron runtime"
+    if ! docker rm -f $container_ids >/dev/null 2>&1; then
+        print_error "Could not stop existing MirrorNeuron runtime containers."
+        print_error "Stop them with: docker rm -f $container_ids"
+        exit 1
+    fi
+}
+
+function mn_remove_path_or_exit() {
+    local path="$1"
+    local description="$2"
+
+    if [ ! -e "$path" ] && [ ! -L "$path" ]; then
+        return 0
+    fi
+
+    if [ -d "$path" ] && [ ! -L "$path" ]; then
+        chmod -R u+rwX "$path" 2>/dev/null || true
+        if rm -rf "$path"; then
+            return 0
+        fi
+    elif rm -f "$path"; then
+        return 0
+    fi
+
+    print_error "Could not remove ${description}: ${path}"
+    print_error "The path may still be mounted by Docker or owned by another user."
+    print_error "Stop MirrorNeuron containers, repair ownership, and rerun the installer:"
+    print_error "  docker rm -f \$(docker ps -aq --filter label=com.docker.compose.project=mirror-neuron)"
+    print_error "  sudo chown -R $(id -u):$(id -g) \"${path}\""
+    exit 1
+}
+
+function mn_remove_existing_install_paths() {
+    mn_stop_runtime_containers_for_reinstall
+    mn_remove_path_or_exit "$INSTALL_DIR" "MirrorNeuron state directory"
+    mn_remove_path_or_exit "$VENV_DIR" "MirrorNeuron Python virtual environment"
+    mn_remove_path_or_exit "$LEGACY_UI_DIR" "legacy MirrorNeuron Web UI directory"
+    mn_remove_path_or_exit "$BIN_DIR/mn" "MirrorNeuron CLI executable"
+    mn_remove_path_or_exit "$BIN_DIR/mn-api" "MirrorNeuron API executable"
+}
+
 function mn_python_package_index_is_valid() {
     local index_file="$1"
     [ -f "$index_file" ] &&
@@ -1204,14 +1258,21 @@ function ensure_runtime_host_directory() {
             print_error "Move or remove that path, or set ${override_name} to a directory."
             exit 1
         fi
+        chmod u+rwx "$path" 2>/dev/null || true
+        if [ ! -w "$path" ]; then
+            print_error "Expected ${description} to be writable: ${path}"
+            print_error "Repair ownership or set ${override_name} to a writable directory."
+            exit 1
+        fi
         return 0
     fi
 
     mkdir -p "$path"
+    chmod u+rwx "$path" 2>/dev/null || true
 }
 
 function write_runtime_compose_files() {
-    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie grpc_auth_token grpc_admin_token
+    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie grpc_auth_token grpc_admin_token runtime_skills_root runtime_package_index
     if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
         context_engine_source_dir >/dev/null
     fi
@@ -1224,9 +1285,17 @@ function write_runtime_compose_files() {
     mn_cookie="$(resolve_mn_cookie)"
     grpc_auth_token="$(resolve_grpc_auth_token)"
     grpc_admin_token="$(resolve_grpc_admin_token)"
+    runtime_skills_root="${MN_SKILLS_ROOT:-${MN_HOST_HOME_DIR}/skills}"
+    runtime_package_index="${MN_PACKAGE_INDEX_FILE:-}"
+    if [ -n "${PACKAGE_INDEX_FILE:-}" ] && [ -f "$PACKAGE_INDEX_FILE" ]; then
+        runtime_package_index="${INSTALL_DIR}/package-index/python-packages.toml"
+        mkdir -p "$(dirname "$runtime_package_index")"
+        cp "$PACKAGE_INDEX_FILE" "$runtime_package_index"
+    fi
 
     mkdir -p "$INSTALL_DIR"
     ensure_runtime_host_directory "$MN_HOST_HOME_DIR" "MirrorNeuron home mount" "MN_HOST_HOME_DIR"
+    ensure_runtime_host_directory "$runtime_skills_root" "MirrorNeuron runtime modules root" "MN_SKILLS_ROOT"
     ensure_runtime_host_directory "$MN_HOST_ARTIFACTS_DIR" "run artifacts host mount" "MN_HOST_ARTIFACTS_DIR"
     ensure_runtime_host_directory "$MN_HOST_BLOB_STORE_DIR" "blob store host mount" "MN_HOST_BLOB_STORE_DIR"
     ensure_runtime_host_directory "$MN_HOST_SHARED_STORAGE_ROOT" "shared storage host mount" "MN_HOST_SHARED_STORAGE_ROOT"
@@ -1267,6 +1336,11 @@ MN_BLUEPRINT_SOURCE=${MN_BLUEPRINT_SOURCE:-github}
 MN_BLUEPRINT_REPO=${MN_BLUEPRINT_REPO:-https://github.com/MirrorNeuronLab/mn-blueprints.git}
 MN_BLUEPRINT_LOCAL=${MN_BLUEPRINT_LOCAL:-}
 MN_WORKSPACE_ROOT=${MN_WORKSPACE_ROOT:-}
+MN_SKILLS_ROOT=${runtime_skills_root}
+MN_PACKAGE_INDEX_FILE=${runtime_package_index}
+MN_PIP_INDEX_URL=${MN_PIP_INDEX_URL:-${MN_PYTHON_INDEX_URL:-}}
+MN_PIP_EXTRA_INDEX_URL=${MN_PIP_EXTRA_INDEX_URL:-${MN_PYTHON_EXTRA_INDEX_URL:-https://pypi.org/simple}}
+MN_RUNTIME_MODULE_VERSION=${MN_RUNTIME_MODULE_VERSION:-${MN_PACKAGE_VERSION:-}}
 MN_RUNS_ROOT=${MN_RUNS_ROOT:-}
 MN_DOCKER_NETWORK_MODE=${MN_DOCKER_NETWORK_MODE:-bridge}
 MN_DOCKER_NETWORK_NAME=${network_name}
@@ -1401,7 +1475,7 @@ if [ -d "$INSTALL_DIR" ] || [ -f "$BIN_DIR/mn" ]; then
     fi
     echo "" >&3
     # Clean up to ensure a fresh overwrite
-    rm -rf "$INSTALL_DIR" "$VENV_DIR" "$LEGACY_UI_DIR" "$BIN_DIR/mn" "$BIN_DIR/mn-api"
+    mn_remove_existing_install_paths
 fi
 
 # Interactive Prompts
@@ -2857,14 +2931,21 @@ function ensure_runtime_host_directory() {
             print_error "Move or remove that path, or set ${override_name} to a directory."
             exit 1
         fi
+        chmod u+rwx "$path" 2>/dev/null || true
+        if [ ! -w "$path" ]; then
+            print_error "Expected ${description} to be writable: ${path}"
+            print_error "Repair ownership or set ${override_name} to a writable directory."
+            exit 1
+        fi
         return 0
     fi
 
     mkdir -p "$path"
+    chmod u+rwx "$path" 2>/dev/null || true
 }
 
 function write_runtime_compose_files() {
-    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie grpc_auth_token grpc_admin_token
+    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie grpc_auth_token grpc_admin_token runtime_skills_root runtime_package_index
     model_runner_model="${MN_CONTEXT_MODEL_RUNNER_MODEL:-hf.co/homerquan/mn-context-engine-model-v-Q4_K_M}"
     profiles="$(compose_profiles)"
     network_name="${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
@@ -2874,9 +2955,17 @@ function write_runtime_compose_files() {
     mn_cookie="$(resolve_mn_cookie)"
     grpc_auth_token="$(resolve_grpc_auth_token)"
     grpc_admin_token="$(resolve_grpc_admin_token)"
+    runtime_skills_root="${MN_SKILLS_ROOT:-${MN_HOST_HOME_DIR}/skills}"
+    runtime_package_index="${MN_PACKAGE_INDEX_FILE:-}"
+    if [ -n "${PACKAGE_INDEX_FILE:-}" ] && [ -f "$PACKAGE_INDEX_FILE" ]; then
+        runtime_package_index="${INSTALL_DIR}/package-index/python-packages.toml"
+        mkdir -p "$(dirname "$runtime_package_index")"
+        cp "$PACKAGE_INDEX_FILE" "$runtime_package_index"
+    fi
 
     mkdir -p "$INSTALL_DIR"
     ensure_runtime_host_directory "$MN_HOST_HOME_DIR" "MirrorNeuron home mount" "MN_HOST_HOME_DIR"
+    ensure_runtime_host_directory "$runtime_skills_root" "MirrorNeuron runtime modules root" "MN_SKILLS_ROOT"
     ensure_runtime_host_directory "$MN_HOST_ARTIFACTS_DIR" "run artifacts host mount" "MN_HOST_ARTIFACTS_DIR"
     ensure_runtime_host_directory "$MN_HOST_BLOB_STORE_DIR" "blob store host mount" "MN_HOST_BLOB_STORE_DIR"
     ensure_runtime_host_directory "$MN_HOST_SHARED_STORAGE_ROOT" "shared storage host mount" "MN_HOST_SHARED_STORAGE_ROOT"
@@ -2917,6 +3006,11 @@ MN_BLUEPRINT_SOURCE=${MN_BLUEPRINT_SOURCE:-github}
 MN_BLUEPRINT_REPO=${MN_BLUEPRINT_REPO:-https://github.com/MirrorNeuronLab/mn-blueprints.git}
 MN_BLUEPRINT_LOCAL=${MN_BLUEPRINT_LOCAL:-}
 MN_WORKSPACE_ROOT=${MN_WORKSPACE_ROOT:-}
+MN_SKILLS_ROOT=${runtime_skills_root}
+MN_PACKAGE_INDEX_FILE=${runtime_package_index}
+MN_PIP_INDEX_URL=${MN_PIP_INDEX_URL:-${MN_PYTHON_INDEX_URL:-}}
+MN_PIP_EXTRA_INDEX_URL=${MN_PIP_EXTRA_INDEX_URL:-${MN_PYTHON_EXTRA_INDEX_URL:-https://pypi.org/simple}}
+MN_RUNTIME_MODULE_VERSION=${MN_RUNTIME_MODULE_VERSION:-${MN_PACKAGE_VERSION:-}}
 MN_RUNS_ROOT=${MN_RUNS_ROOT:-}
 MN_DOCKER_NETWORK_MODE=${MN_DOCKER_NETWORK_MODE:-bridge}
 MN_DOCKER_NETWORK_NAME=${network_name}
@@ -4178,7 +4272,7 @@ function install_core_from_release() {
     print_success "Using MirrorNeuron core release $tag for Docker platform $platform."
     run_quiet "download-core-release" curl_github -fL "$asset_url" -o "$tarball"
 
-    rm -rf "$INSTALL_DIR"
+    mn_remove_path_or_exit "$INSTALL_DIR" "MirrorNeuron state directory"
     mkdir -p "$INSTALL_DIR"
     tar -xzf "$tarball" -C "$INSTALL_DIR"
 
@@ -4782,14 +4876,21 @@ function ensure_runtime_host_directory() {
             print_error "Move or remove that path, or set ${override_name} to a directory."
             exit 1
         fi
+        chmod u+rwx "$path" 2>/dev/null || true
+        if [ ! -w "$path" ]; then
+            print_error "Expected ${description} to be writable: ${path}"
+            print_error "Repair ownership or set ${override_name} to a writable directory."
+            exit 1
+        fi
         return 0
     fi
 
     mkdir -p "$path"
+    chmod u+rwx "$path" 2>/dev/null || true
 }
 
 function write_runtime_compose_files() {
-    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie grpc_auth_token grpc_admin_token
+    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie grpc_auth_token grpc_admin_token runtime_skills_root runtime_package_index
     if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
         ensure_context_engine_source >/dev/null
     fi
@@ -4802,9 +4903,17 @@ function write_runtime_compose_files() {
     mn_cookie="$(resolve_mn_cookie)"
     grpc_auth_token="$(resolve_grpc_auth_token)"
     grpc_admin_token="$(resolve_grpc_admin_token)"
+    runtime_skills_root="${MN_SKILLS_ROOT:-${MN_HOST_HOME_DIR}/skills}"
+    runtime_package_index="${MN_PACKAGE_INDEX_FILE:-}"
+    if [ -n "${PACKAGE_INDEX_FILE:-}" ] && [ -f "$PACKAGE_INDEX_FILE" ]; then
+        runtime_package_index="${INSTALL_DIR}/package-index/python-packages.toml"
+        mkdir -p "$(dirname "$runtime_package_index")"
+        cp "$PACKAGE_INDEX_FILE" "$runtime_package_index"
+    fi
 
     mkdir -p "$INSTALL_DIR"
     ensure_runtime_host_directory "$MN_HOST_HOME_DIR" "MirrorNeuron home mount" "MN_HOST_HOME_DIR"
+    ensure_runtime_host_directory "$runtime_skills_root" "MirrorNeuron runtime modules root" "MN_SKILLS_ROOT"
     ensure_runtime_host_directory "$MN_HOST_ARTIFACTS_DIR" "run artifacts host mount" "MN_HOST_ARTIFACTS_DIR"
     ensure_runtime_host_directory "$MN_HOST_BLOB_STORE_DIR" "blob store host mount" "MN_HOST_BLOB_STORE_DIR"
     ensure_runtime_host_directory "$MN_HOST_SHARED_STORAGE_ROOT" "shared storage host mount" "MN_HOST_SHARED_STORAGE_ROOT"
@@ -4845,6 +4954,11 @@ MN_BLUEPRINT_SOURCE=${MN_BLUEPRINT_SOURCE:-github}
 MN_BLUEPRINT_REPO=${MN_BLUEPRINT_REPO:-https://github.com/MirrorNeuronLab/mn-blueprints.git}
 MN_BLUEPRINT_LOCAL=${MN_BLUEPRINT_LOCAL:-}
 MN_WORKSPACE_ROOT=${MN_WORKSPACE_ROOT:-}
+MN_SKILLS_ROOT=${runtime_skills_root}
+MN_PACKAGE_INDEX_FILE=${runtime_package_index}
+MN_PIP_INDEX_URL=${MN_PIP_INDEX_URL:-${MN_PYTHON_INDEX_URL:-}}
+MN_PIP_EXTRA_INDEX_URL=${MN_PIP_EXTRA_INDEX_URL:-${MN_PYTHON_EXTRA_INDEX_URL:-https://pypi.org/simple}}
+MN_RUNTIME_MODULE_VERSION=${MN_RUNTIME_MODULE_VERSION:-${MN_PACKAGE_VERSION:-}}
 MN_RUNS_ROOT=${MN_RUNS_ROOT:-}
 MN_DOCKER_NETWORK_MODE=${MN_DOCKER_NETWORK_MODE:-bridge}
 MN_DOCKER_NETWORK_NAME=${network_name}
@@ -5146,7 +5260,7 @@ if [ -d "$INSTALL_DIR" ] || [ -f "$BIN_DIR/mn" ]; then
         exit 0
     fi
     echo "" >&3
-    rm -rf "$INSTALL_DIR" "$VENV_DIR" "$LEGACY_UI_DIR" "$BIN_DIR/mn" "$BIN_DIR/mn-api"
+    mn_remove_existing_install_paths
 fi
 
 print_step "Installing MirrorNeuron Core from GitHub Release"
