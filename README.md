@@ -17,6 +17,12 @@ Install the local runtime:
 ./install.sh
 ```
 
+Install from the published URL:
+
+```bash
+curl -fsSL https://mirrorneuron.io/install.sh | bash
+```
+
 Ask before each install choice:
 
 ```bash
@@ -60,13 +66,21 @@ Clear runtime Redis state:
 - Redis defaults to the Docker Official Image `redis:8`, which includes Redis
   Query Engine support for vector search. Set `MN_REDIS_IMAGE` before install
   or in `~/.mn/docker-compose.env` to pin a specific Redis 8+ tag or digest.
-- The installer can set up the core, SDK, CLI, API, Web UI, Redis, OpenShell,
-  and Membrane context engine depending on selected options.
+- The installer can set up the core, SDK, CLI, API, Web UI, Redis, and
+  OpenShell depending on selected options. The Membrane context engine is
+  provisioned lazily when a blueprint that requires context memory runs.
 - Installs are non-interactive by default and use yes/default selections. Use
   `--interactive` for the prompt-driven setup flow.
 - Use `./install.sh` or `./install.sh --mode binary` for release/package installs,
   `./install.sh --mode github` for repository installs, or `./install.sh --mode local`
   from a monorepo checkout for editable local installs.
+- For URL installs without a local checkout, the installer downloads the runtime
+  Docker Compose template and binary package index from the public `mn-deploy`
+  GitHub repository.
+- Initial installs skip the Membrane context engine by default to keep setup
+  light. Use `--context-engine` with `MN_MEMBRANE_DIR` or a readable
+  `MN_MEMBRANE_GIT_URL` to enable it during install instead of waiting for the
+  first context-memory blueprint run.
 - Python packages published to Google Artifact Registry are controlled by
   `package-index/python-packages.toml`.
 - Binary mode uses the current public package repository by default:

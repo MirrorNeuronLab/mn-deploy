@@ -86,6 +86,115 @@ case "$MN_INSTALL_MODE" in
         ;;
 esac
 
+function mn_script_dir() {
+    local source_path=""
+    if [ "${BASH_SOURCE+x}" = "x" ]; then
+        source_path="${BASH_SOURCE[0]:-}"
+    fi
+    source_path="${source_path:-$0}"
+
+    case "$source_path" in
+        ""|-|bash|sh|/dev/fd/*|/dev/stdin|/proc/self/fd/*)
+            pwd
+            ;;
+        *)
+            cd "$(dirname "$source_path")" && pwd
+            ;;
+    esac
+}
+
+function mn_github_raw_asset_url() {
+    local relative_path="$1"
+    local repo="${MN_DEPLOY_ASSET_REPO:-MirrorNeuronLab/mn-deploy}"
+    local ref="${MN_DEPLOY_ASSET_REF:-main}"
+    local base_url="${MN_DEPLOY_RAW_BASE_URL:-https://raw.githubusercontent.com/${repo}/${ref}}"
+    printf '%s/%s' "${base_url%/}" "$relative_path"
+}
+
+function mn_download_public_repo_asset() {
+    local relative_path="$1"
+    local target="$2"
+    local description="$3"
+    local url
+
+    url="$(mn_github_raw_asset_url "$relative_path")"
+    mkdir -p "$(dirname "$target")"
+    if ! curl_github -fsSL "$url" -o "$target"; then
+        print_error "Could not download ${description} from ${url}."
+        exit 1
+    fi
+}
+
+function mn_runtime_compose_template_is_valid() {
+    local template="$1"
+    [ -f "$template" ] &&
+        grep -q '^name: mirror-neuron$' "$template" &&
+        grep -q 'mirror-neuron-core' "$template"
+}
+
+function mn_ensure_runtime_compose_template_file() {
+    if mn_runtime_compose_template_is_valid "$RUNTIME_COMPOSE_TEMPLATE"; then
+        return 0
+    fi
+
+    RUNTIME_COMPOSE_TEMPLATE="${TMPDIR:-/tmp}/mirror_neuron_install/docker-compose.yml"
+    mn_download_public_repo_asset "docker-compose.yml" "$RUNTIME_COMPOSE_TEMPLATE" "MirrorNeuron runtime Docker Compose template"
+    if ! mn_runtime_compose_template_is_valid "$RUNTIME_COMPOSE_TEMPLATE"; then
+        print_error "Downloaded MirrorNeuron runtime Docker Compose template is invalid: $RUNTIME_COMPOSE_TEMPLATE"
+        exit 1
+    fi
+}
+
+function mn_write_runtime_compose_file() {
+    RUNTIME_COMPOSE_TEMPLATE="$1"
+    local target="$2"
+    mn_ensure_runtime_compose_template_file
+    mkdir -p "$(dirname "$target")"
+    cp "$RUNTIME_COMPOSE_TEMPLATE" "$target"
+}
+
+function mn_remove_dockerfile_frontend_directive() {
+    local dockerfile="$1"
+    local first_line tmp_file
+
+    [ -f "$dockerfile" ] || return 0
+    IFS= read -r first_line < "$dockerfile" || return 0
+    case "$first_line" in
+        "# syntax=docker/dockerfile:"*|"# syntax = docker/dockerfile:"*) ;;
+        *) return 0 ;;
+    esac
+
+    tmp_file="$(mktemp "${TMPDIR:-/tmp}/mn-dockerfile.XXXXXX")"
+    tail -n +2 "$dockerfile" > "$tmp_file"
+    cat "$tmp_file" > "$dockerfile"
+    rm -f "$tmp_file"
+}
+
+function mn_python_package_index_is_valid() {
+    local index_file="$1"
+    [ -f "$index_file" ] &&
+        grep -q 'name = "mirrorneuron-python-sdk"' "$index_file" &&
+        grep -q 'installer_groups = \["sdk"\]' "$index_file"
+}
+
+function mn_ensure_python_package_index_file() {
+    if mn_python_package_index_is_valid "$PACKAGE_INDEX_FILE"; then
+        return 0
+    fi
+
+    if [ -n "${MN_PACKAGE_INDEX_FILE:-}" ]; then
+        print_error "MirrorNeuron Python package index is required but was not found at $PACKAGE_INDEX_FILE."
+        exit 1
+    fi
+
+    PACKAGE_INDEX_FILE="${TMPDIR:-/tmp}/mirror_neuron_install/python-packages.toml"
+    mn_download_public_repo_asset "package-index/python-packages.toml" "$PACKAGE_INDEX_FILE" "MirrorNeuron Python package index"
+    if ! mn_python_package_index_is_valid "$PACKAGE_INDEX_FILE"; then
+        print_error "Downloaded MirrorNeuron Python package index is invalid: $PACKAGE_INDEX_FILE"
+        exit 1
+    fi
+}
+
 run_install_github() {
 #!/usr/bin/env bash
 
@@ -133,7 +242,7 @@ function print_warning() { echo -e "${YELLOW}${BOLD}==>${RESET} ${YELLOW}$1${RES
 
 function find_source_workspace() {
     local script_dir
-    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    script_dir="$(mn_script_dir)"
 
     local candidates=()
     [ -n "${MN_SOURCE_DIR:-}" ] && candidates+=("$MN_SOURCE_DIR")
@@ -458,12 +567,12 @@ BIN_DIR="${HOME}/.local/bin"
 VENV_DIR="${HOME}/.local/share/mn_venv"
 MN_PYTHON_BIN=""
 SOURCE_WORKSPACE=""
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(mn_script_dir)"
 RUNTIME_COMPOSE_TEMPLATE="${SCRIPT_DIR}/docker-compose.yml"
 RUNTIME_COMPOSE_FILE="${INSTALL_DIR}/docker-compose.yml"
 RUNTIME_COMPOSE_ENV="${INSTALL_DIR}/docker-compose.env"
 LEGACY_UI_DIR="${INSTALL_DIR}_ui"
-INSTALL_CONTEXT_ENGINE="Y"
+INSTALL_CONTEXT_ENGINE="N"
 MEMBRANE_REPO="${MN_MEMBRANE_REPO:-MirrorNeuronLab/Membrane}"
 MEMBRANE_GIT_URL="${MN_MEMBRANE_GIT_URL:-}"
 MEMBRANE_DIR="${MN_MEMBRANE_DIR:-${INSTALL_DIR}/Membrane}"
@@ -710,6 +819,7 @@ function context_engine_source_dir() {
         )
     fi
     MEMBRANE_DIR="$(cd "$MEMBRANE_DIR" && pwd)"
+    mn_remove_dockerfile_frontend_directive "$MEMBRANE_DIR/Dockerfile"
     printf '%s' "$MEMBRANE_DIR"
 }
 
@@ -1122,7 +1232,7 @@ function write_runtime_compose_files() {
     ensure_runtime_host_directory "$MN_HOST_SHARED_STORAGE_ROOT" "shared storage host mount" "MN_HOST_SHARED_STORAGE_ROOT"
     ensure_runtime_host_directory "$MN_HOST_OPENSHELL_CONFIG_DIR" "OpenShell config host mount" "MN_HOST_OPENSHELL_CONFIG_DIR"
     ensure_runtime_host_directory "$MN_HOST_OPENSHELL_STATE_DIR" "OpenShell state host mount" "MN_HOST_OPENSHELL_STATE_DIR"
-    cp "$RUNTIME_COMPOSE_TEMPLATE" "$RUNTIME_COMPOSE_FILE"
+    mn_write_runtime_compose_file "$RUNTIME_COMPOSE_TEMPLATE" "$RUNTIME_COMPOSE_FILE"
     if [ "$INSTALL_OPENSHELL" = "Y" ]; then
         write_openshell_compose_config
     fi
@@ -1319,10 +1429,6 @@ if [ "$INSTALL_WEB_UI" = "Y" ]; then
     require_cmd npm
 fi
 
-if [ ! -f "$RUNTIME_COMPOSE_TEMPLATE" ]; then
-    print_error "MirrorNeuron runtime Docker Compose template is missing: $RUNTIME_COMPOSE_TEMPLATE"
-    exit 1
-fi
 if ! docker info >/dev/null 2>&1; then
     print_error "Docker is not running. Please start Docker first."
     exit 1
@@ -1379,7 +1485,7 @@ CMD ["mix", "run", "--no-halt"]
 EOF
     fi
 
-    DOCKER_BUILDKIT=0 docker build -t mirror-neuron-core . >/dev/null 2>&1
+    DOCKER_BUILDKIT="${DOCKER_BUILDKIT:-1}" docker build -t mirror-neuron-core . >/dev/null 2>&1
 ) &
 spinner $! "Cloning and building Core (Docker image mirror-neuron-core)"
 write_runtime_compose_files
@@ -1600,7 +1706,7 @@ CYAN="\033[36m"
 MAGENTA="\033[35m"
 RESET="\033[0m"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(mn_script_dir)"
 WORKSPACE_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 INSTALL_DIR="${MN_HOME:-${HOME}/.mn}"
@@ -1654,7 +1760,7 @@ MN_UV_BIN=""
 
 INSTALL_WEB_UI="Y"
 INSTALL_REDIS="Y"
-INSTALL_CONTEXT_ENGINE="Y"
+INSTALL_CONTEXT_ENGINE="N"
 INSTALL_OPENSHELL="Y"
 INSTALL_SKILLS="Y"
 START_NOW="Y"
@@ -2776,7 +2882,7 @@ function write_runtime_compose_files() {
     ensure_runtime_host_directory "$MN_HOST_SHARED_STORAGE_ROOT" "shared storage host mount" "MN_HOST_SHARED_STORAGE_ROOT"
     ensure_runtime_host_directory "$MN_HOST_OPENSHELL_CONFIG_DIR" "OpenShell config host mount" "MN_HOST_OPENSHELL_CONFIG_DIR"
     ensure_runtime_host_directory "$MN_HOST_OPENSHELL_STATE_DIR" "OpenShell state host mount" "MN_HOST_OPENSHELL_STATE_DIR"
-    cp "$RUNTIME_COMPOSE_TEMPLATE" "$RUNTIME_COMPOSE_FILE"
+    mn_write_runtime_compose_file "$RUNTIME_COMPOSE_TEMPLATE" "$RUNTIME_COMPOSE_FILE"
     if [ "$INSTALL_OPENSHELL" = "Y" ]; then
         write_openshell_compose_config
     fi
@@ -3061,7 +3167,6 @@ if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
     require_dir "$MEMBRANE_DIR" "Membrane context engine"
     require_file "$MEMBRANE_DIR/Dockerfile" "Membrane Dockerfile"
 fi
-require_file "$RUNTIME_COMPOSE_TEMPLATE" "MirrorNeuron runtime Docker Compose template"
 
 if ! docker info >/dev/null 2>&1; then
     print_error "Docker is not running. Please start Docker first."
@@ -3094,7 +3199,7 @@ print_success "Local component links created under ${INSTALL_DIR}."
 print_step "Building MirrorNeuron Core Docker image from local source"
 (
     cd "$CORE_DIR"
-    DOCKER_BUILDKIT=0 docker build -t mirror-neuron-core:latest .
+    DOCKER_BUILDKIT="${DOCKER_BUILDKIT:-1}" docker build -t mirror-neuron-core:latest .
 )
 print_success "Built local core image mirror-neuron-core:latest."
 
@@ -3277,7 +3382,7 @@ CYAN="\033[36m"
 MAGENTA="\033[35m"
 RESET="\033[0m"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(mn_script_dir)"
 INSTALL_DIR="${MN_HOME:-${HOME}/.mn}"
 BIN_DIR="${HOME}/.local/bin"
 VENV_DIR="${HOME}/.local/share/mn_venv"
@@ -3333,7 +3438,7 @@ MN_PYTHON_BIN=""
 
 INSTALL_WEB_UI="Y"
 INSTALL_REDIS="Y"
-INSTALL_CONTEXT_ENGINE="Y"
+INSTALL_CONTEXT_ENGINE="N"
 INSTALL_OPENSHELL="Y"
 INSTALL_PYTHON_SDK="Y"
 INSTALL_BLUEPRINT_SUPPORT_SKILL="Y"
@@ -4123,7 +4228,7 @@ EXPOSE 50051 4369 54370
 CMD ["bin/mirror_neuron", "start"]
 EOF
 
-    DOCKER_BUILDKIT=0 docker build --build-arg "CORE_RELEASE_TAG=$tag" -t mirror-neuron-core:latest "$context_dir" >/dev/null
+    DOCKER_BUILDKIT="${DOCKER_BUILDKIT:-1}" docker build --build-arg "CORE_RELEASE_TAG=$tag" -t mirror-neuron-core:latest "$context_dir" >/dev/null
     cat > "$INSTALL_METADATA_FILE" <<EOF
 {
   "core_release_tag": "$tag",
@@ -4252,20 +4357,10 @@ function context_engine_git_url() {
 }
 
 function local_context_engine_dir() {
-    local script_dir candidate
-    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    for candidate in \
-        "${MN_MEMBRANE_DIR:-}" \
-        "$script_dir/../Membrane" \
-        "$PWD/Membrane" \
-        "$PWD/../Membrane" \
-        "$HOME/Projects/mirror-neuron-set/Membrane" \
-        "$MEMBRANE_DIR"; do
-        if [ -n "$candidate" ] && [ -f "$candidate/Dockerfile" ]; then
-            (cd "$candidate" && pwd)
-            return 0
-        fi
-    done
+    if [ -n "${MN_MEMBRANE_DIR:-}" ] && [ -f "$MN_MEMBRANE_DIR/Dockerfile" ]; then
+        (cd "$MN_MEMBRANE_DIR" && pwd)
+        return 0
+    fi
     return 1
 }
 
@@ -4302,6 +4397,7 @@ function ensure_context_engine_source() {
         )
     fi
     MEMBRANE_DIR="$(cd "$MEMBRANE_DIR" && pwd)"
+    mn_remove_dockerfile_frontend_directive "$MEMBRANE_DIR/Dockerfile"
     printf '%s' "$MEMBRANE_DIR"
 }
 
@@ -4714,7 +4810,7 @@ function write_runtime_compose_files() {
     ensure_runtime_host_directory "$MN_HOST_SHARED_STORAGE_ROOT" "shared storage host mount" "MN_HOST_SHARED_STORAGE_ROOT"
     ensure_runtime_host_directory "$MN_HOST_OPENSHELL_CONFIG_DIR" "OpenShell config host mount" "MN_HOST_OPENSHELL_CONFIG_DIR"
     ensure_runtime_host_directory "$MN_HOST_OPENSHELL_STATE_DIR" "OpenShell state host mount" "MN_HOST_OPENSHELL_STATE_DIR"
-    cp "$RUNTIME_COMPOSE_TEMPLATE" "$RUNTIME_COMPOSE_FILE"
+    mn_write_runtime_compose_file "$RUNTIME_COMPOSE_TEMPLATE" "$RUNTIME_COMPOSE_FILE"
     if [ "$INSTALL_OPENSHELL" = "Y" ]; then
         write_openshell_compose_config
     fi
@@ -5022,9 +5118,8 @@ validate_selections
 print_step "Checking dependencies"
 require_cmd curl
 require_cmd docker
-require_file "$RUNTIME_COMPOSE_TEMPLATE" "MirrorNeuron runtime Docker Compose template"
 if should_install_python_packages; then
-    require_file "$PACKAGE_INDEX_FILE" "MirrorNeuron Python package index"
+    mn_ensure_python_package_index_file
     resolve_python_runtime
     ensure_pip
 fi
