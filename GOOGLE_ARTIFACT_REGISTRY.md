@@ -148,6 +148,45 @@ This publisher uses normal `gcloud auth login` credentials. The Python
 publisher also needs Application Default Credentials because Twine uses the
 Google Artifact Registry keyring backend.
 
+## Public Otterdesk Desktop Packages
+
+Otterdesk desktop app packages can be published manually to the same public GAR
+project without GitHub Actions:
+
+```bash
+./publish_public_otterdesk_to_google_artifact_registry.sh \
+  --apply \
+  --version v1.2.8
+```
+
+By default the script uploads existing package files from
+`../otterdesk-desktop-app/dist/` into:
+
+`us-central1-generic.pkg.dev/mirrorneuron-public-packages/otterdesk-desktop/otterdesk:v1.2.8`
+
+Build locally first when needed:
+
+```bash
+cd ../otterdesk-desktop-app
+npm run build
+npm run dist:mac:all
+cd ../mn-deploy
+./publish_public_otterdesk_to_google_artifact_registry.sh --apply --version v1.2.8
+```
+
+Download a file through GAR:
+
+```bash
+gcloud artifacts generic download \
+  --project=mirrorneuron-public-packages \
+  --location=us-central1 \
+  --repository=otterdesk-desktop \
+  --package=otterdesk \
+  --version=v1.2.8 \
+  --name=otterdesk-v1.2.8-SHA256SUMS.txt \
+  --destination=/tmp/otterdesk-download
+```
+
 ## Install From Public GAR
 
 Example direct install:

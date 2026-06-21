@@ -142,3 +142,11 @@ Clear runtime Redis state:
     --apply \
     --version v1.2.8
   ```
+
+- Public Otterdesk desktop app package GAR apply:
+
+  ```bash
+  ./publish_public_otterdesk_to_google_artifact_registry.sh \
+    --apply \
+    --version v1.2.8
+  ```
