@@ -1427,7 +1427,7 @@ function ensure_runtime_host_directory() {
 }
 
 function write_runtime_compose_files() {
-    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie grpc_auth_token grpc_admin_token runtime_skills_root runtime_package_index
+    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie grpc_auth_token grpc_admin_token runtime_skills_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image
     if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
         context_engine_source_dir >/dev/null
     fi
@@ -1442,6 +1442,17 @@ function write_runtime_compose_files() {
     grpc_admin_token="$(resolve_grpc_admin_token)"
     runtime_skills_root="${MN_SKILLS_ROOT:-${MN_HOST_HOME_DIR}/skills}"
     runtime_package_index="${MN_PACKAGE_INDEX_FILE:-}"
+    membrane_engine_tag="${MN_MEMBRANE_ENGINE_IMAGE_TAG:-${INSTALL_VERSION:-v${MN_PACKAGE_VERSION:-1.2.7}}}"
+    if [[ "$membrane_engine_tag" != v* ]]; then
+        membrane_engine_tag="v${membrane_engine_tag}"
+    fi
+    membrane_engine_image="${ENGINE_IMAGE:-${MN_MEMBRANE_ENGINE_IMAGE:-us-central1-docker.pkg.dev/mirrorneuron-public-packages/mirrorneuron-runtime/membrane-context-engine:${membrane_engine_tag}}}"
+    if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
+        context_memory_enabled="${MN_CONTEXT_MEMORY_ENABLED:-1}"
+    else
+        context_memory_enabled="0"
+    fi
+    otterdesk_context_memory_enabled="${OTTERDESK_CONTEXT_MEMORY_ENABLED:-$context_memory_enabled}"
     if [ -n "${PACKAGE_INDEX_FILE:-}" ] && [ -f "$PACKAGE_INDEX_FILE" ]; then
         runtime_package_index="${INSTALL_DIR}/package-index/python-packages.toml"
         mkdir -p "$(dirname "$runtime_package_index")"
@@ -1471,7 +1482,9 @@ MN_HOST_SHARED_STORAGE_ROOT=${MN_HOST_SHARED_STORAGE_ROOT}
 MN_HOST_OPENSHELL_CONFIG_DIR=${MN_HOST_OPENSHELL_CONFIG_DIR}
 MN_HOST_OPENSHELL_STATE_DIR=${MN_HOST_OPENSHELL_STATE_DIR}
 MEMBRANE_DIR=${MEMBRANE_DIR}
-ENGINE_IMAGE=mirror-neuron-memory-engine:latest
+ENGINE_IMAGE=${membrane_engine_image}
+MN_MEMBRANE_ENGINE_IMAGE=${membrane_engine_image}
+MN_MEMBRANE_ENGINE_IMAGE_TAG=${membrane_engine_tag}
 MN_REDIS_IMAGE=${MN_REDIS_IMAGE:-redis:8}
 MN_CONTEXT_MODEL_RUNNER_MODEL=${model_runner_model}
 MN_GRPC_BIND_HOST=${MN_GRPC_BIND_HOST:-127.0.0.1}
@@ -1496,6 +1509,8 @@ MN_PACKAGE_INDEX_FILE=${runtime_package_index}
 MN_PIP_INDEX_URL=${MN_PIP_INDEX_URL:-${MN_PYTHON_INDEX_URL:-}}
 MN_PIP_EXTRA_INDEX_URL=${MN_PIP_EXTRA_INDEX_URL:-${MN_PYTHON_EXTRA_INDEX_URL:-https://pypi.org/simple}}
 MN_RUNTIME_MODULE_VERSION=${MN_RUNTIME_MODULE_VERSION:-${MN_PACKAGE_VERSION:-}}
+MN_CONTEXT_MEMORY_ENABLED=${context_memory_enabled}
+OTTERDESK_CONTEXT_MEMORY_ENABLED=${otterdesk_context_memory_enabled}
 MN_RUNS_ROOT=${MN_RUNS_ROOT:-}
 MN_DOCKER_NETWORK_MODE=${MN_DOCKER_NETWORK_MODE:-bridge}
 MN_DOCKER_NETWORK_NAME=${network_name}
@@ -3095,7 +3110,7 @@ function ensure_runtime_host_directory() {
 }
 
 function write_runtime_compose_files() {
-    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie grpc_auth_token grpc_admin_token runtime_skills_root runtime_package_index
+    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie grpc_auth_token grpc_admin_token runtime_skills_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image
     model_runner_model="${MN_CONTEXT_MODEL_RUNNER_MODEL:-hf.co/homerquan/mn-context-engine-model-v-Q4_K_M}"
     profiles="$(compose_profiles)"
     network_name="${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
@@ -3107,6 +3122,17 @@ function write_runtime_compose_files() {
     grpc_admin_token="$(resolve_grpc_admin_token)"
     runtime_skills_root="${MN_SKILLS_ROOT:-${MN_HOST_HOME_DIR}/skills}"
     runtime_package_index="${MN_PACKAGE_INDEX_FILE:-}"
+    membrane_engine_tag="${MN_MEMBRANE_ENGINE_IMAGE_TAG:-${INSTALL_VERSION:-v${MN_PACKAGE_VERSION:-1.2.7}}}"
+    if [[ "$membrane_engine_tag" != v* ]]; then
+        membrane_engine_tag="v${membrane_engine_tag}"
+    fi
+    membrane_engine_image="${ENGINE_IMAGE:-${MN_MEMBRANE_ENGINE_IMAGE:-us-central1-docker.pkg.dev/mirrorneuron-public-packages/mirrorneuron-runtime/membrane-context-engine:${membrane_engine_tag}}}"
+    if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
+        context_memory_enabled="${MN_CONTEXT_MEMORY_ENABLED:-1}"
+    else
+        context_memory_enabled="0"
+    fi
+    otterdesk_context_memory_enabled="${OTTERDESK_CONTEXT_MEMORY_ENABLED:-$context_memory_enabled}"
     if [ -n "${PACKAGE_INDEX_FILE:-}" ] && [ -f "$PACKAGE_INDEX_FILE" ]; then
         runtime_package_index="${INSTALL_DIR}/package-index/python-packages.toml"
         mkdir -p "$(dirname "$runtime_package_index")"
@@ -3136,7 +3162,9 @@ MN_HOST_SHARED_STORAGE_ROOT=${MN_HOST_SHARED_STORAGE_ROOT}
 MN_HOST_OPENSHELL_CONFIG_DIR=${MN_HOST_OPENSHELL_CONFIG_DIR}
 MN_HOST_OPENSHELL_STATE_DIR=${MN_HOST_OPENSHELL_STATE_DIR}
 MEMBRANE_DIR=${MEMBRANE_DIR}
-ENGINE_IMAGE=mirror-neuron-memory-engine:latest
+ENGINE_IMAGE=${membrane_engine_image}
+MN_MEMBRANE_ENGINE_IMAGE=${membrane_engine_image}
+MN_MEMBRANE_ENGINE_IMAGE_TAG=${membrane_engine_tag}
 MN_REDIS_IMAGE=${MN_REDIS_IMAGE:-redis:8}
 MN_CONTEXT_MODEL_RUNNER_MODEL=${model_runner_model}
 MN_GRPC_BIND_HOST=${MN_GRPC_BIND_HOST:-127.0.0.1}
@@ -3161,6 +3189,8 @@ MN_PACKAGE_INDEX_FILE=${runtime_package_index}
 MN_PIP_INDEX_URL=${MN_PIP_INDEX_URL:-${MN_PYTHON_INDEX_URL:-}}
 MN_PIP_EXTRA_INDEX_URL=${MN_PIP_EXTRA_INDEX_URL:-${MN_PYTHON_EXTRA_INDEX_URL:-https://pypi.org/simple}}
 MN_RUNTIME_MODULE_VERSION=${MN_RUNTIME_MODULE_VERSION:-${MN_PACKAGE_VERSION:-}}
+MN_CONTEXT_MEMORY_ENABLED=${context_memory_enabled}
+OTTERDESK_CONTEXT_MEMORY_ENABLED=${otterdesk_context_memory_enabled}
 MN_RUNS_ROOT=${MN_RUNS_ROOT:-}
 MN_DOCKER_NETWORK_MODE=${MN_DOCKER_NETWORK_MODE:-bridge}
 MN_DOCKER_NETWORK_NAME=${network_name}
@@ -5076,7 +5106,7 @@ function ensure_runtime_host_directory() {
 }
 
 function write_runtime_compose_files() {
-    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie grpc_auth_token grpc_admin_token runtime_skills_root runtime_package_index
+    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie grpc_auth_token grpc_admin_token runtime_skills_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image
     if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
         ensure_context_engine_source >/dev/null
     fi
@@ -5091,6 +5121,17 @@ function write_runtime_compose_files() {
     grpc_admin_token="$(resolve_grpc_admin_token)"
     runtime_skills_root="${MN_SKILLS_ROOT:-${MN_HOST_HOME_DIR}/skills}"
     runtime_package_index="${MN_PACKAGE_INDEX_FILE:-}"
+    membrane_engine_tag="${MN_MEMBRANE_ENGINE_IMAGE_TAG:-${INSTALL_VERSION:-v${MN_PACKAGE_VERSION:-1.2.7}}}"
+    if [[ "$membrane_engine_tag" != v* ]]; then
+        membrane_engine_tag="v${membrane_engine_tag}"
+    fi
+    membrane_engine_image="${ENGINE_IMAGE:-${MN_MEMBRANE_ENGINE_IMAGE:-us-central1-docker.pkg.dev/mirrorneuron-public-packages/mirrorneuron-runtime/membrane-context-engine:${membrane_engine_tag}}}"
+    if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
+        context_memory_enabled="${MN_CONTEXT_MEMORY_ENABLED:-1}"
+    else
+        context_memory_enabled="0"
+    fi
+    otterdesk_context_memory_enabled="${OTTERDESK_CONTEXT_MEMORY_ENABLED:-$context_memory_enabled}"
     if [ -n "${PACKAGE_INDEX_FILE:-}" ] && [ -f "$PACKAGE_INDEX_FILE" ]; then
         runtime_package_index="${INSTALL_DIR}/package-index/python-packages.toml"
         mkdir -p "$(dirname "$runtime_package_index")"
@@ -5120,7 +5161,9 @@ MN_HOST_SHARED_STORAGE_ROOT=${MN_HOST_SHARED_STORAGE_ROOT}
 MN_HOST_OPENSHELL_CONFIG_DIR=${MN_HOST_OPENSHELL_CONFIG_DIR}
 MN_HOST_OPENSHELL_STATE_DIR=${MN_HOST_OPENSHELL_STATE_DIR}
 MEMBRANE_DIR=${MEMBRANE_DIR}
-ENGINE_IMAGE=mirror-neuron-memory-engine:latest
+ENGINE_IMAGE=${membrane_engine_image}
+MN_MEMBRANE_ENGINE_IMAGE=${membrane_engine_image}
+MN_MEMBRANE_ENGINE_IMAGE_TAG=${membrane_engine_tag}
 MN_REDIS_IMAGE=${MN_REDIS_IMAGE:-redis:8}
 MN_CONTEXT_MODEL_RUNNER_MODEL=${model_runner_model}
 MN_GRPC_BIND_HOST=${MN_GRPC_BIND_HOST:-127.0.0.1}
@@ -5145,6 +5188,8 @@ MN_PACKAGE_INDEX_FILE=${runtime_package_index}
 MN_PIP_INDEX_URL=${MN_PIP_INDEX_URL:-${MN_PYTHON_INDEX_URL:-}}
 MN_PIP_EXTRA_INDEX_URL=${MN_PIP_EXTRA_INDEX_URL:-${MN_PYTHON_EXTRA_INDEX_URL:-https://pypi.org/simple}}
 MN_RUNTIME_MODULE_VERSION=${MN_RUNTIME_MODULE_VERSION:-${MN_PACKAGE_VERSION:-}}
+MN_CONTEXT_MEMORY_ENABLED=${context_memory_enabled}
+OTTERDESK_CONTEXT_MEMORY_ENABLED=${otterdesk_context_memory_enabled}
 MN_RUNS_ROOT=${MN_RUNS_ROOT:-}
 MN_DOCKER_NETWORK_MODE=${MN_DOCKER_NETWORK_MODE:-bridge}
 MN_DOCKER_NETWORK_NAME=${network_name}
