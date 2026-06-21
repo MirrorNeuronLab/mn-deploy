@@ -140,6 +140,12 @@ from pathlib import Path
 def canonical(value: str) -> str:
     return re.sub(r"[-_.]+", "-", value).lower()
 
+def normalize_version(value: object) -> str:
+    text = str(value or "").strip()
+    if text.lower().startswith("v"):
+        text = text[1:]
+    return text
+
 def load_project_name(package_path: Path) -> str:
     pyproject = package_path / "pyproject.toml"
     if not pyproject.exists():
@@ -184,6 +190,7 @@ for package in packages:
     canonical_name = canonical(name)
     path = workspace_root / package["path"]
     build_formats = package.get("build_formats") or ["sdist", "wheel"]
+    version = normalize_version(package.get("version"))
     if canonical_name in seen:
         raise SystemExit(f"Duplicate package in index: {name}")
     seen.add(canonical_name)
@@ -201,7 +208,7 @@ for package in packages:
         raise SystemExit(f"Unknown build_formats for {name}: {', '.join(unknown_formats)}")
     if not build_formats:
         raise SystemExit(f"build_formats must not be empty for {name}")
-    print(f"{name}\t{path}\t{','.join(build_formats)}")
+    print(f"{name}\t{path}\t{','.join(build_formats)}\t{version}")
 PY
 
 "$PYTHON_BIN" - "$PACKAGE_ROWS" > "$INDEXED_NAMES" <<'PY'
@@ -228,7 +235,7 @@ echo "Building indexed Python packages from $INDEX_FILE."
 rm -rf "$DIST_DIR" "$LOCAL_INDEX_DIR"
 mkdir -p "$DIST_DIR" "$LOCAL_INDEX_DIR"
 
-while IFS="$(printf '\t')" read -r package_name package_path build_formats; do
+while IFS="$(printf '\t')" read -r package_name package_path build_formats package_version; do
     [ -n "$package_name" ] || continue
     build_args=()
     case ",${build_formats}," in
@@ -237,9 +244,17 @@ while IFS="$(printf '\t')" read -r package_name package_path build_formats; do
     case ",${build_formats}," in
         *,wheel,*) build_args+=(--wheel) ;;
     esac
-    echo "Building ${package_name} from ${package_path} (${build_formats})."
+    version_label=""
+    if [ -n "$package_version" ]; then
+        version_label=" version ${package_version}"
+    fi
+    echo "Building ${package_name}${version_label} from ${package_path} (${build_formats})."
     rm -rf "${package_path}/build"
-    "$PYTHON_BIN" -m build "$package_path" --outdir "$DIST_DIR" "${build_args[@]}"
+    if [ -n "$package_version" ]; then
+        SETUPTOOLS_SCM_PRETEND_VERSION="$package_version" "$PYTHON_BIN" -m build "$package_path" --outdir "$DIST_DIR" "${build_args[@]}"
+    else
+        "$PYTHON_BIN" -m build "$package_path" --outdir "$DIST_DIR" "${build_args[@]}"
+    fi
 done < "$PACKAGE_ROWS"
 
 echo "Checking distributions."
@@ -254,6 +269,7 @@ import tomllib
 from pathlib import Path
 
 from packaging.utils import canonicalize_name, parse_sdist_filename, parse_wheel_filename
+from packaging.version import Version
 
 index_file = Path(sys.argv[1])
 dist_dir = Path(sys.argv[2])
@@ -262,18 +278,29 @@ indexed_packages = {
     canonicalize_name(package["name"]): package["name"]
     for package in data.get("packages", [])
 }
+expected_versions = {
+    canonicalize_name(package["name"]): str(package["version"]).lstrip("vV")
+    for package in data.get("packages", [])
+    if package.get("version")
+}
 
 for artifact in sorted(dist_dir.iterdir()):
     if artifact.suffix == ".whl":
-        name, *_ = parse_wheel_filename(artifact.name)
+        name, version, *_ = parse_wheel_filename(artifact.name)
     elif artifact.name.endswith((".tar.gz", ".zip")):
-        name, _ = parse_sdist_filename(artifact.name)
+        name, version = parse_sdist_filename(artifact.name)
     else:
         continue
     canonical_name = canonicalize_name(name)
     package_name = indexed_packages.get(canonical_name)
     if package_name is None:
         raise SystemExit(f"Built artifact is not in the package index: {artifact.name}")
+    expected_version = expected_versions.get(canonical_name)
+    if expected_version and version != Version(expected_version):
+        raise SystemExit(
+            f"Built artifact has wrong version for {package_name}: "
+            f"{artifact.name} declares {version}, expected {expected_version}"
+        )
     print(f"{package_name}\t{artifact}\t{artifact.name}")
 PY
 
@@ -342,7 +369,7 @@ PY
 
 echo "Listing distribution files currently in GAR."
 : > "$REMOTE_FILES"
-while IFS="$(printf '\t')" read -r package_name _package_path _build_formats; do
+while IFS="$(printf '\t')" read -r package_name _package_path _build_formats _package_version; do
     [ -n "$package_name" ] || continue
     "$GCLOUD_BIN" artifacts files list \
         --project="$PROJECT" \

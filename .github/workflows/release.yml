@@ -269,6 +269,22 @@ jobs:
             bash -n "$script"
           done < <(find . -path './.git' -prune -o -name '*.sh' -print0)
 
+      - name: Validate install support snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          support_dir="install_support/${TAG_NAME}"
+          if [[ ! -f "${support_dir}/docker-compose.yml" ]]; then
+            echo "Missing versioned Docker Compose support file: ${support_dir}/docker-compose.yml" >&2
+            echo "Run ./save_install_support.sh --version ${TAG_NAME} before tagging." >&2
+            exit 1
+          fi
+          if [[ ! -f "${support_dir}/package-index/python-packages.toml" ]]; then
+            echo "Missing versioned Python package index: ${support_dir}/package-index/python-packages.toml" >&2
+            echo "Run ./save_install_support.sh --version ${TAG_NAME} before tagging." >&2
+            exit 1
+          fi
+
       - name: Create release ZIP
         shell: bash
         run: |

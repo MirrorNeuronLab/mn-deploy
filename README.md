@@ -17,6 +17,12 @@ Install the local runtime:
 ./install.sh
 ```
 
+Install a specific release:
+
+```bash
+./install.sh --version v1.2.6
+```
+
 Install from the published URL:
 
 ```bash
@@ -74,9 +80,18 @@ Clear runtime Redis state:
 - Use `./install.sh` or `./install.sh --mode binary` for release/package installs,
   `./install.sh --mode github` for repository installs, or `./install.sh --mode local`
   from a monorepo checkout for editable local installs.
-- For URL installs without a local checkout, the installer downloads the runtime
-  Docker Compose template and binary package index from the public `mn-deploy`
-  GitHub repository.
+- Use `--version v1.2.6` to install a matching released set of core, CLI, SDK,
+  API, Web UI, package metadata, and runtime support files.
+- Versioned installer support files live under `install_support/<version>/`.
+  Create a release snapshot with:
+
+  ```bash
+  ./save_install_support.sh --version v1.2.6
+  ```
+
+- For URL installs without a local checkout, the installer downloads the
+  versioned runtime Docker Compose template and binary package index from the
+  public `mn-deploy` GitHub repository.
 - Initial installs skip the Membrane context engine by default to keep setup
   light. Use `--context-engine` with `MN_MEMBRANE_DIR` or a readable
   `MN_MEMBRANE_GIT_URL` to enable it during install instead of waiting for the

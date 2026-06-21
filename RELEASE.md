@@ -22,6 +22,15 @@ CI build numbers are for internal artifacts only. Public releases use clean SemV
 ## Create a Stable Release
 
 Before creating a release, make sure `main` is clean and tests pass locally.
+Create the versioned installer support snapshot before tagging:
+
+```bash
+./save_install_support.sh --version v1.0.1
+```
+
+The release workflow validates that `install_support/$TAG_NAME` exists so URL
+installs can fetch release-pinned support files instead of drifting `main`
+templates.
 
 ```bash
 git checkout main
