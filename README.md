@@ -20,7 +20,7 @@ Install the local runtime:
 Install a specific release:
 
 ```bash
-./install.sh --version v1.2.6
+./install.sh --version v1.2.7
 ```
 
 Install from the published URL:
@@ -80,13 +80,13 @@ Clear runtime Redis state:
 - Use `./install.sh` or `./install.sh --mode binary` for release/package installs,
   `./install.sh --mode github` for repository installs, or `./install.sh --mode local`
   from a monorepo checkout for editable local installs.
-- Use `--version v1.2.6` to install a matching released set of core, CLI, SDK,
+- Use `--version v1.2.7` to install a matching released set of core, CLI, SDK,
   API, Web UI, package metadata, and runtime support files.
 - Versioned installer support files live under `install_support/<version>/`.
   Create a release snapshot with:
 
   ```bash
-  ./save_install_support.sh --version v1.2.6
+  ./save_install_support.sh --version v1.2.7
   ```
 
 - For URL installs without a local checkout, the installer downloads the

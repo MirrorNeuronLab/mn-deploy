@@ -8,13 +8,13 @@ FORCE="N"
 
 usage() {
     cat <<EOF
-Usage: ./save_install_support.sh --version v1.2.6 [--force]
+Usage: ./save_install_support.sh --version v1.2.7 [--force]
 
 Copy installer support files from this mn-deploy checkout into
 install_support/<version>/.
 
 Options:
-  --version TAG   Release tag to snapshot, for example v1.2.6.
+  --version TAG   Release tag to snapshot, for example v1.2.7.
   --force         Overwrite an existing snapshot.
   -h, --help      Show this help.
 EOF
