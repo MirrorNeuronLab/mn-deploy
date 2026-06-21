@@ -127,3 +127,18 @@ Clear runtime Redis state:
     --location us-central1 \
     --repository agent-skills
   ```
+
+- Public Membrane Rust binary and Docker image GAR dry run:
+
+  ```bash
+  ./publish_public_membrane_to_google_artifact_registry.sh \
+    --version v1.2.7
+  ```
+
+- Public Membrane Rust binary and Docker image GAR apply:
+
+  ```bash
+  ./publish_public_membrane_to_google_artifact_registry.sh \
+    --apply \
+    --version v1.2.7
+  ```

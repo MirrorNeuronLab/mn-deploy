@@ -104,6 +104,50 @@ The publish script intentionally omits that flag and compares GAR file listings
 before upload so reruns can complete a partially published version without
 resending files that already exist.
 
+## Public Membrane Binaries And Docker Images
+
+Membrane runtime publishing uses the same public GAR project:
+`mirrorneuron-public-packages`.
+
+The dedicated publisher is:
+
+```bash
+./publish_public_membrane_to_google_artifact_registry.sh --version v1.2.7
+```
+
+Dry run is the default. To publish:
+
+```bash
+./publish_public_membrane_to_google_artifact_registry.sh \
+  --apply \
+  --version v1.2.7
+```
+
+Defaults:
+
+- Rust binary archives: `us-central1-generic.pkg.dev/mirrorneuron-public-packages/mirrorneuron-binaries/membrane:v1.2.7`
+- Docker runtime image: `us-central1-docker.pkg.dev/mirrorneuron-public-packages/mirrorneuron-runtime/membrane-context-engine:v1.2.7`
+- Docker platforms: `linux/amd64,linux/arm64`
+
+The script creates the generic and Docker repositories if needed, grants
+`roles/artifactregistry.reader` to `allUsers` with `--condition=None`, uploads
+generic Rust release archives with `gcloud artifacts generic upload
+--skip-existing`, and pushes Docker images with `docker buildx build --push`.
+
+If GitHub release assets were already built, upload those instead of building a
+local host-only Rust archive:
+
+```bash
+./publish_public_membrane_to_google_artifact_registry.sh \
+  --apply \
+  --version v1.2.7 \
+  --binary-artifacts-dir /path/to/membrane-release-assets
+```
+
+This publisher uses normal `gcloud auth login` credentials. The Python
+publisher also needs Application Default Credentials because Twine uses the
+Google Artifact Registry keyring backend.
+
 ## Install From Public GAR
 
 Example direct install:
