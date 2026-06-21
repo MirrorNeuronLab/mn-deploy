@@ -8,7 +8,7 @@ exec 3>&1
 MN_INSTALL_MODE="${MN_INSTALL_MODE:-binary}"
 MN_INSTALL_MODE_EXPLICIT="N"
 MN_INSTALL_HELP_REQUESTED="N"
-LATEST="v1.2.7"
+LATEST="v1.2.8"
 MN_DEFAULT_INSTALL_VERSION="${MN_DEFAULT_INSTALL_VERSION:-$LATEST}"
 MN_INSTALL_VERSION="${MN_INSTALL_VERSION:-}"
 MN_INSTALL_SCRIPT_NAME="$(basename "$0")"
@@ -26,7 +26,7 @@ Modes:
   binary   Install released artifacts/packages. This is the default.
 
 Common options:
-  --version TAG                 Install this release version, for example v1.2.7.
+  --version TAG                 Install this release version, for example v1.2.8.
   --yes, -y                     Run non-interactively with defaults and flags. This is the default.
   --interactive                 Ask each install question before proceeding.
   --no-reinstall                Keep an existing install instead of overwriting it.
@@ -54,8 +54,8 @@ Examples:
   ./$MN_INSTALL_SCRIPT_NAME --interactive
   ./$MN_INSTALL_SCRIPT_NAME --mode github
   ./$MN_INSTALL_SCRIPT_NAME --mode local --no-web-ui --no-skills
-  ./$MN_INSTALL_SCRIPT_NAME --version v1.2.7
-  ./$MN_INSTALL_SCRIPT_NAME --mode github --version v1.2.7
+  ./$MN_INSTALL_SCRIPT_NAME --version v1.2.8
+  ./$MN_INSTALL_SCRIPT_NAME --mode github --version v1.2.8
 EOF
 }
 
@@ -111,7 +111,7 @@ while [ "$#" -gt 0 ]; do
         --version)
             shift
             if [ "$#" -eq 0 ]; then
-                echo "install.sh: --version requires a release tag such as v1.2.7." >&3
+                echo "install.sh: --version requires a release tag such as v1.2.8." >&3
                 print_unified_usage
                 exit 1
             fi
@@ -790,7 +790,7 @@ Options:
 
 Examples:
   ./$script_name --mode github --no-web-ui
-  ./$script_name --mode github --version v1.2.7
+  ./$script_name --mode github --version v1.2.8
   ./$script_name --mode github --interactive
   ./$script_name --mode github --python-components sdk,api
   MN_PYTHON=/opt/homebrew/bin/python3.11 ./$script_name --mode github
@@ -869,7 +869,7 @@ while [ "$#" -gt 0 ]; do
         --version)
             shift
             if [ "$#" -eq 0 ]; then
-                print_error "--version requires a release tag such as v1.2.7."
+                print_error "--version requires a release tag such as v1.2.8."
                 github_usage
                 exit 1
             fi
@@ -1442,16 +1442,12 @@ function write_runtime_compose_files() {
     grpc_admin_token="$(resolve_grpc_admin_token)"
     runtime_skills_root="${MN_SKILLS_ROOT:-${MN_HOST_HOME_DIR}/skills}"
     runtime_package_index="${MN_PACKAGE_INDEX_FILE:-}"
-    membrane_engine_tag="${MN_MEMBRANE_ENGINE_IMAGE_TAG:-${INSTALL_VERSION:-v${MN_PACKAGE_VERSION:-1.2.7}}}"
+    membrane_engine_tag="${MN_MEMBRANE_ENGINE_IMAGE_TAG:-${INSTALL_VERSION:-v${MN_PACKAGE_VERSION:-1.2.8}}}"
     if [[ "$membrane_engine_tag" != v* ]]; then
         membrane_engine_tag="v${membrane_engine_tag}"
     fi
     membrane_engine_image="${ENGINE_IMAGE:-${MN_MEMBRANE_ENGINE_IMAGE:-us-central1-docker.pkg.dev/mirrorneuron-public-packages/mirrorneuron-runtime/membrane-context-engine:${membrane_engine_tag}}}"
-    if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
-        context_memory_enabled="${MN_CONTEXT_MEMORY_ENABLED:-1}"
-    else
-        context_memory_enabled="0"
-    fi
+    context_memory_enabled="${MN_CONTEXT_MEMORY_ENABLED:-1}"
     otterdesk_context_memory_enabled="${OTTERDESK_CONTEXT_MEMORY_ENABLED:-$context_memory_enabled}"
     if [ -n "${PACKAGE_INDEX_FILE:-}" ] && [ -f "$PACKAGE_INDEX_FILE" ]; then
         runtime_package_index="${INSTALL_DIR}/package-index/python-packages.toml"
@@ -3122,16 +3118,12 @@ function write_runtime_compose_files() {
     grpc_admin_token="$(resolve_grpc_admin_token)"
     runtime_skills_root="${MN_SKILLS_ROOT:-${MN_HOST_HOME_DIR}/skills}"
     runtime_package_index="${MN_PACKAGE_INDEX_FILE:-}"
-    membrane_engine_tag="${MN_MEMBRANE_ENGINE_IMAGE_TAG:-${INSTALL_VERSION:-v${MN_PACKAGE_VERSION:-1.2.7}}}"
+    membrane_engine_tag="${MN_MEMBRANE_ENGINE_IMAGE_TAG:-${INSTALL_VERSION:-v${MN_PACKAGE_VERSION:-1.2.8}}}"
     if [[ "$membrane_engine_tag" != v* ]]; then
         membrane_engine_tag="v${membrane_engine_tag}"
     fi
     membrane_engine_image="${ENGINE_IMAGE:-${MN_MEMBRANE_ENGINE_IMAGE:-us-central1-docker.pkg.dev/mirrorneuron-public-packages/mirrorneuron-runtime/membrane-context-engine:${membrane_engine_tag}}}"
-    if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
-        context_memory_enabled="${MN_CONTEXT_MEMORY_ENABLED:-1}"
-    else
-        context_memory_enabled="0"
-    fi
+    context_memory_enabled="${MN_CONTEXT_MEMORY_ENABLED:-1}"
     otterdesk_context_memory_enabled="${OTTERDESK_CONTEXT_MEMORY_ENABLED:-$context_memory_enabled}"
     if [ -n "${PACKAGE_INDEX_FILE:-}" ] && [ -f "$PACKAGE_INDEX_FILE" ]; then
         runtime_package_index="${INSTALL_DIR}/package-index/python-packages.toml"
@@ -3787,13 +3779,13 @@ Release/source options:
 
 Examples:
   ./$script_name --no-web-ui
-  ./$script_name --version v1.2.7
+  ./$script_name --version v1.2.8
   ./$script_name --interactive
   ./$script_name --no-web-ui --python-components sdk,api
   ./$script_name --gar-project my-gcp-project --gar-repository mirrorneuron-python
   ./$script_name --python-index-url https://us-central1-python.pkg.dev/my-gcp-project/mirrorneuron-python/simple/
   MN_PYTHON=/opt/homebrew/bin/python3.11 ./$script_name
-  ./$script_name --version v1.2.7 --no-web-ui
+  ./$script_name --version v1.2.8 --no-web-ui
 EOF
 }
 
@@ -3875,7 +3867,7 @@ while [ "$#" -gt 0 ]; do
         --version)
             shift
             if [ "$#" -eq 0 ]; then
-                print_error "--version requires a release tag such as v1.2.7."
+                print_error "--version requires a release tag such as v1.2.8."
                 usage
                 exit 1
             fi
@@ -4453,7 +4445,7 @@ function resolve_core_release_tag() {
     if [ -z "$tag" ] || [ "$tag" = "$effective_url" ]; then
         local script_name="${MN_INSTALL_SCRIPT_NAME:-$(basename "$0")}"
         print_error "Could not resolve the latest MirrorNeuron release tag from $effective_url."
-        print_error "Set MN_CORE_RELEASE_TAG explicitly, for example: MN_CORE_RELEASE_TAG=v1.2.7 ./$script_name"
+        print_error "Set MN_CORE_RELEASE_TAG explicitly, for example: MN_CORE_RELEASE_TAG=v1.2.8 ./$script_name"
         exit 1
     fi
 
@@ -5121,16 +5113,12 @@ function write_runtime_compose_files() {
     grpc_admin_token="$(resolve_grpc_admin_token)"
     runtime_skills_root="${MN_SKILLS_ROOT:-${MN_HOST_HOME_DIR}/skills}"
     runtime_package_index="${MN_PACKAGE_INDEX_FILE:-}"
-    membrane_engine_tag="${MN_MEMBRANE_ENGINE_IMAGE_TAG:-${INSTALL_VERSION:-v${MN_PACKAGE_VERSION:-1.2.7}}}"
+    membrane_engine_tag="${MN_MEMBRANE_ENGINE_IMAGE_TAG:-${INSTALL_VERSION:-v${MN_PACKAGE_VERSION:-1.2.8}}}"
     if [[ "$membrane_engine_tag" != v* ]]; then
         membrane_engine_tag="v${membrane_engine_tag}"
     fi
     membrane_engine_image="${ENGINE_IMAGE:-${MN_MEMBRANE_ENGINE_IMAGE:-us-central1-docker.pkg.dev/mirrorneuron-public-packages/mirrorneuron-runtime/membrane-context-engine:${membrane_engine_tag}}}"
-    if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
-        context_memory_enabled="${MN_CONTEXT_MEMORY_ENABLED:-1}"
-    else
-        context_memory_enabled="0"
-    fi
+    context_memory_enabled="${MN_CONTEXT_MEMORY_ENABLED:-1}"
     otterdesk_context_memory_enabled="${OTTERDESK_CONTEXT_MEMORY_ENABLED:-$context_memory_enabled}"
     if [ -n "${PACKAGE_INDEX_FILE:-}" ] && [ -f "$PACKAGE_INDEX_FILE" ]; then
         runtime_package_index="${INSTALL_DIR}/package-index/python-packages.toml"

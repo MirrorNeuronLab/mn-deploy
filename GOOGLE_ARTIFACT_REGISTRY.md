@@ -112,7 +112,7 @@ Membrane runtime publishing uses the same public GAR project:
 The dedicated publisher is:
 
 ```bash
-./publish_public_membrane_to_google_artifact_registry.sh --version v1.2.7
+./publish_public_membrane_to_google_artifact_registry.sh --version v1.2.8
 ```
 
 Dry run is the default. To publish:
@@ -120,13 +120,13 @@ Dry run is the default. To publish:
 ```bash
 ./publish_public_membrane_to_google_artifact_registry.sh \
   --apply \
-  --version v1.2.7
+  --version v1.2.8
 ```
 
 Defaults:
 
-- Rust binary archives: `us-central1-generic.pkg.dev/mirrorneuron-public-packages/mirrorneuron-binaries/membrane:v1.2.7`
-- Docker runtime image: `us-central1-docker.pkg.dev/mirrorneuron-public-packages/mirrorneuron-runtime/membrane-context-engine:v1.2.7`
+- Rust binary archives: `us-central1-generic.pkg.dev/mirrorneuron-public-packages/mirrorneuron-binaries/membrane:v1.2.8`
+- Docker runtime image: `us-central1-docker.pkg.dev/mirrorneuron-public-packages/mirrorneuron-runtime/membrane-context-engine:v1.2.8`
 - Docker platforms: `linux/amd64,linux/arm64`
 
 The script creates the generic and Docker repositories if needed, grants
@@ -140,7 +140,7 @@ local host-only Rust archive:
 ```bash
 ./publish_public_membrane_to_google_artifact_registry.sh \
   --apply \
-  --version v1.2.7 \
+  --version v1.2.8 \
   --binary-artifacts-dir /path/to/membrane-release-assets
 ```
 
