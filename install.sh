@@ -4594,6 +4594,40 @@ EOF
 
 PIP_INDEX_ARGS=()
 
+function normalize_python_distribution_name() {
+    "$MN_PYTHON_BIN" - "$1" <<'PY'
+import re
+import sys
+
+name = sys.argv[1].split("[", 1)[0].strip().lower()
+print(re.sub(r"[-_.]+", "_", name))
+PY
+}
+
+function bundled_wheel_for_requirement() {
+    local requirement="$1"
+    local package_part version dist_name wheel_dir wheel
+
+    case "$requirement" in
+        *"=="*) ;;
+        *) return 1 ;;
+    esac
+
+    package_part="${requirement%%==*}"
+    package_part="${package_part%%[*}"
+    version="${requirement#*==}"
+    version="${version%%[[:space:];,<>=!~]*}"
+    [ -n "$package_part" ] && [ -n "$version" ] || return 1
+
+    dist_name="$(normalize_python_distribution_name "$package_part")"
+    wheel_dir="${MN_BUNDLED_WHEEL_DIR:-${SCRIPT_DIR}/install_support/${INSTALL_VERSION}/python-wheels}"
+    [ -d "$wheel_dir" ] || return 1
+
+    wheel="$(find "$wheel_dir" -maxdepth 1 -type f -name "${dist_name}-${version}-*.whl" -print | head -n 1 || true)"
+    [ -n "$wheel" ] || return 1
+    printf '%s\n' "$wheel"
+}
+
 function resolve_python_index_url() {
     local url="$MN_PIP_INDEX_URL"
     if [ -z "$url" ]; then
@@ -4663,7 +4697,7 @@ PY
 
 function install_indexed_group() {
     local group="$1"
-    local requirement pinned_requirement label installed="N"
+    local requirement pinned_requirement label bundled_wheel installed="N"
     while IFS= read -r requirement; do
         [ -n "$requirement" ] || continue
         case "$requirement" in
@@ -4671,7 +4705,11 @@ function install_indexed_group() {
             *) pinned_requirement="${requirement}==${MN_PACKAGE_VERSION}" ;;
         esac
         label="$(printf '%s' "$pinned_requirement" | tr -c 'A-Za-z0-9_.-' '_')"
-        run_quiet "install-${label}" "$VENV_DIR/bin/pip" install "${PIP_INDEX_ARGS[@]}" --upgrade "$pinned_requirement"
+        if bundled_wheel="$(bundled_wheel_for_requirement "$pinned_requirement")"; then
+            run_quiet "install-${label}" "$VENV_DIR/bin/pip" install --upgrade "$bundled_wheel"
+        else
+            run_quiet "install-${label}" "$VENV_DIR/bin/pip" install "${PIP_INDEX_ARGS[@]}" --upgrade "$pinned_requirement"
+        fi
         installed="Y"
     done < <(indexed_requirements_for_group "$group")
     if [ "$installed" != "Y" ]; then
@@ -4759,10 +4797,8 @@ function ensure_context_engine_source() {
 }
 
 function setup_context_engine() {
-    ensure_context_engine_source >/dev/null
     remove_stale_runtime_containers_for_services context-engine-model membrane-context-engine
     ensure_docker_model_runner
-    runtime_compose build membrane-context-engine
     runtime_compose up -d membrane-context-engine >/dev/null
 }
 
@@ -5146,9 +5182,6 @@ function ensure_runtime_host_directory() {
 
 function write_runtime_compose_files() {
     local model_runner_model profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image
-    if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
-        ensure_context_engine_source >/dev/null
-    fi
     model_runner_model="${MN_CONTEXT_MODEL_RUNNER_MODEL:-hf.co/homerquan/mn-context-engine-model-v-Q4_K_M}"
     profiles="$(compose_profiles)"
     network_name="${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
@@ -5337,9 +5370,6 @@ function start_runtime_compose_sidecars() {
     if [ "${#services[@]}" -gt 0 ]; then
         remove_stale_runtime_containers_for_services context-engine-model "${services[@]}"
         ensure_docker_model_runner
-        if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
-            runtime_compose build membrane-context-engine
-        fi
         runtime_compose up -d "${services[@]}" >/dev/null
     fi
 }
