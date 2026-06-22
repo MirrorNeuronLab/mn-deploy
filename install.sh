@@ -1351,14 +1351,6 @@ function resolve_mn_cookie() {
     resolve_secret_file "${MN_COOKIE:-}" "${INSTALL_DIR}/erlang.cookie" "MN_COOKIE"
 }
 
-function resolve_grpc_auth_token() {
-    resolve_secret_file "${MN_GRPC_AUTH_TOKEN:-}" "${INSTALL_DIR}/grpc_auth.token" "MN_GRPC_AUTH_TOKEN"
-}
-
-function resolve_grpc_admin_token() {
-    resolve_secret_file "${MN_GRPC_ADMIN_TOKEN:-${MN_MIRROR_NEURON_GRPC_ADMIN_TOKEN:-}}" "${INSTALL_DIR}/grpc_admin.token" "MN_GRPC_ADMIN_TOKEN"
-}
-
 function resolve_network_token() {
     resolve_secret_file "${MN_NETWORK_JOIN_TOKEN:-}" "${INSTALL_DIR}/network.token" "MN_NETWORK_JOIN_TOKEN"
 }
@@ -1527,7 +1519,7 @@ function ensure_runtime_host_directory() {
 }
 
 function write_runtime_compose_files() {
-    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie grpc_auth_token grpc_admin_token runtime_skills_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image
+    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image
     if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
         context_engine_source_dir >/dev/null
     fi
@@ -1538,8 +1530,6 @@ function write_runtime_compose_files() {
     network_token="$(resolve_network_token)"
     redis_password="$(derive_network_secret "$network_token" "redis")"
     mn_cookie="$(resolve_mn_cookie)"
-    grpc_auth_token="$(resolve_grpc_auth_token)"
-    grpc_admin_token="$(resolve_grpc_admin_token)"
     runtime_skills_root="${MN_SKILLS_ROOT:-${MN_HOST_HOME_DIR}/skills}"
     runtime_package_index="${MN_PACKAGE_INDEX_FILE:-}"
     membrane_engine_tag="${MN_MEMBRANE_ENGINE_IMAGE_TAG:-${INSTALL_VERSION:-v${MN_PACKAGE_VERSION:-1.2.15}}}"
@@ -1631,8 +1621,8 @@ OPENSHELL_GATEWAY_USER=${OPENSHELL_GATEWAY_USER}
 OPENSHELL_GATEWAY_DOCKER_GROUP=${OPENSHELL_GATEWAY_DOCKER_GROUP}
 DOCKER_HOST_SOCKET=${DOCKER_HOST_SOCKET}
 MN_COOKIE=${mn_cookie}
-MN_GRPC_AUTH_TOKEN=${grpc_auth_token}
-MN_GRPC_ADMIN_TOKEN=${grpc_admin_token}
+MN_GRPC_AUTH_TOKEN=mirror_neuron_password
+MN_GRPC_ADMIN_TOKEN=mirror_neuron_password_admin
 EOF
     chmod 600 "$RUNTIME_COMPOSE_ENV" 2>/dev/null || true
 }
@@ -2779,72 +2769,6 @@ function resolve_mn_cookie() {
     printf '%s\n' "$cookie"
 }
 
-function resolve_grpc_auth_token() {
-    local env_token="${MN_GRPC_AUTH_TOKEN:-}"
-    local token_file="${INSTALL_DIR}/grpc_auth.token"
-    local token
-
-    if [ -n "$env_token" ]; then
-        printf '%s\n' "$env_token"
-        return 0
-    fi
-
-    mkdir -p "$INSTALL_DIR"
-    if [ -s "$token_file" ]; then
-        token="$(tr -d '[:space:]' < "$token_file")"
-        if [ -n "$token" ]; then
-            chmod 600 "$token_file" 2>/dev/null || true
-            printf '%s\n' "$token"
-            return 0
-        fi
-    fi
-
-    if ! token="$(generate_mn_cookie)"; then
-        token=""
-    fi
-    if [ -z "$token" ]; then
-        print_error "Failed to generate MN_GRPC_AUTH_TOKEN."
-        exit 1
-    fi
-
-    printf '%s\n' "$token" > "$token_file"
-    chmod 600 "$token_file" 2>/dev/null || true
-    printf '%s\n' "$token"
-}
-
-function resolve_grpc_admin_token() {
-    local env_token="${MN_GRPC_ADMIN_TOKEN:-${MN_MIRROR_NEURON_GRPC_ADMIN_TOKEN:-}}"
-    local token_file="${INSTALL_DIR}/grpc_admin.token"
-    local token
-
-    if [ -n "$env_token" ]; then
-        printf '%s\n' "$env_token"
-        return 0
-    fi
-
-    mkdir -p "$INSTALL_DIR"
-    if [ -s "$token_file" ]; then
-        token="$(tr -d '[:space:]' < "$token_file")"
-        if [ -n "$token" ]; then
-            chmod 600 "$token_file" 2>/dev/null || true
-            printf '%s\n' "$token"
-            return 0
-        fi
-    fi
-
-    if ! token="$(generate_mn_cookie)"; then
-        token=""
-    fi
-    if [ -z "$token" ]; then
-        print_error "Failed to generate MN_GRPC_ADMIN_TOKEN."
-        exit 1
-    fi
-
-    printf '%s\n' "$token" > "$token_file"
-    chmod 600 "$token_file" 2>/dev/null || true
-    printf '%s\n' "$token"
-}
-
 function resolve_network_token() {
     local env_token="${MN_NETWORK_JOIN_TOKEN:-}"
     local token_file="${INSTALL_DIR}/network.token"
@@ -3026,18 +2950,14 @@ function start_core_container() {
     local epmd_publish_host="$epmd_host"
     local dist_publish_host="$dist_host"
     local mn_cookie
-    local grpc_auth_token
-    local grpc_admin_token
     mn_cookie="$(resolve_mn_cookie)"
-    grpc_auth_token="$(resolve_grpc_auth_token)"
-    grpc_admin_token="$(resolve_grpc_admin_token)"
     [ "$core_publish_host" = "localhost" ] && core_publish_host="127.0.0.1"
     [ "$epmd_publish_host" = "localhost" ] && epmd_publish_host="127.0.0.1"
     [ "$dist_publish_host" = "localhost" ] && dist_publish_host="127.0.0.1"
 
     cmd+=("-e" "MN_COOKIE=${mn_cookie}")
-    cmd+=("-e" "MN_GRPC_AUTH_TOKEN=${grpc_auth_token}")
-    cmd+=("-e" "MN_GRPC_ADMIN_TOKEN=${grpc_admin_token}")
+    cmd+=("-e" "MN_GRPC_AUTH_TOKEN=mirror_neuron_password")
+    cmd+=("-e" "MN_GRPC_ADMIN_TOKEN=mirror_neuron_password_admin")
     cmd+=("-e" "MN_GRPC_PORT=${grpc_port}")
     if [ -n "${MN_NODE_NAME:-}" ]; then
         cmd+=("-e" "MN_NODE_NAME=${MN_NODE_NAME}")
@@ -3238,7 +3158,7 @@ function ensure_runtime_host_directory() {
 }
 
 function write_runtime_compose_files() {
-    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie grpc_auth_token grpc_admin_token runtime_skills_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image
+    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image
     model_runner_model="${MN_CONTEXT_MODEL_RUNNER_MODEL:-hf.co/homerquan/mn-context-engine-model-v-Q4_K_M}"
     profiles="$(compose_profiles)"
     network_name="${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
@@ -3246,8 +3166,6 @@ function write_runtime_compose_files() {
     network_token="$(resolve_network_token)"
     redis_password="$(derive_network_secret "$network_token" "redis")"
     mn_cookie="$(resolve_mn_cookie)"
-    grpc_auth_token="$(resolve_grpc_auth_token)"
-    grpc_admin_token="$(resolve_grpc_admin_token)"
     runtime_skills_root="${MN_SKILLS_ROOT:-${MN_HOST_HOME_DIR}/skills}"
     runtime_package_index="${MN_PACKAGE_INDEX_FILE:-}"
     membrane_engine_tag="${MN_MEMBRANE_ENGINE_IMAGE_TAG:-${INSTALL_VERSION:-v${MN_PACKAGE_VERSION:-1.2.15}}}"
@@ -3339,8 +3257,8 @@ OPENSHELL_GATEWAY_USER=${OPENSHELL_GATEWAY_USER}
 OPENSHELL_GATEWAY_DOCKER_GROUP=${OPENSHELL_GATEWAY_DOCKER_GROUP}
 DOCKER_HOST_SOCKET=${DOCKER_HOST_SOCKET}
 MN_COOKIE=${mn_cookie}
-MN_GRPC_AUTH_TOKEN=${grpc_auth_token}
-MN_GRPC_ADMIN_TOKEN=${grpc_admin_token}
+MN_GRPC_AUTH_TOKEN=mirror_neuron_password
+MN_GRPC_ADMIN_TOKEN=mirror_neuron_password_admin
 EOF
     chmod 600 "$RUNTIME_COMPOSE_ENV" 2>/dev/null || true
 }
@@ -5059,14 +4977,6 @@ function resolve_mn_cookie() {
     resolve_secret_file "${MN_COOKIE:-}" "${INSTALL_DIR}/erlang.cookie" "MN_COOKIE"
 }
 
-function resolve_grpc_auth_token() {
-    resolve_secret_file "${MN_GRPC_AUTH_TOKEN:-}" "${INSTALL_DIR}/grpc_auth.token" "MN_GRPC_AUTH_TOKEN"
-}
-
-function resolve_grpc_admin_token() {
-    resolve_secret_file "${MN_GRPC_ADMIN_TOKEN:-${MN_MIRROR_NEURON_GRPC_ADMIN_TOKEN:-}}" "${INSTALL_DIR}/grpc_admin.token" "MN_GRPC_ADMIN_TOKEN"
-}
-
 function resolve_network_token() {
     resolve_secret_file "${MN_NETWORK_JOIN_TOKEN:-}" "${INSTALL_DIR}/network.token" "MN_NETWORK_JOIN_TOKEN"
 }
@@ -5235,7 +5145,7 @@ function ensure_runtime_host_directory() {
 }
 
 function write_runtime_compose_files() {
-    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie grpc_auth_token grpc_admin_token runtime_skills_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image
+    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image
     if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
         ensure_context_engine_source >/dev/null
     fi
@@ -5246,8 +5156,6 @@ function write_runtime_compose_files() {
     network_token="$(resolve_network_token)"
     redis_password="$(derive_network_secret "$network_token" "redis")"
     mn_cookie="$(resolve_mn_cookie)"
-    grpc_auth_token="$(resolve_grpc_auth_token)"
-    grpc_admin_token="$(resolve_grpc_admin_token)"
     runtime_skills_root="${MN_SKILLS_ROOT:-${MN_HOST_HOME_DIR}/skills}"
     runtime_package_index="${MN_PACKAGE_INDEX_FILE:-}"
     membrane_engine_tag="${MN_MEMBRANE_ENGINE_IMAGE_TAG:-${INSTALL_VERSION:-v${MN_PACKAGE_VERSION:-1.2.15}}}"
@@ -5339,8 +5247,8 @@ OPENSHELL_GATEWAY_USER=${OPENSHELL_GATEWAY_USER}
 OPENSHELL_GATEWAY_DOCKER_GROUP=${OPENSHELL_GATEWAY_DOCKER_GROUP}
 DOCKER_HOST_SOCKET=${DOCKER_HOST_SOCKET}
 MN_COOKIE=${mn_cookie}
-MN_GRPC_AUTH_TOKEN=${grpc_auth_token}
-MN_GRPC_ADMIN_TOKEN=${grpc_admin_token}
+MN_GRPC_AUTH_TOKEN=mirror_neuron_password
+MN_GRPC_ADMIN_TOKEN=mirror_neuron_password_admin
 EOF
     chmod 600 "$RUNTIME_COMPOSE_ENV" 2>/dev/null || true
 }

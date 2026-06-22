@@ -78,72 +78,6 @@ resolve_mn_cookie() {
     printf '%s\n' "$cookie"
 }
 
-resolve_grpc_auth_token() {
-    local env_token="${MN_GRPC_AUTH_TOKEN:-}"
-    local token_file="${DIR}/grpc_auth.token"
-    local token
-
-    if [ -n "$env_token" ]; then
-        printf '%s\n' "$env_token"
-        return 0
-    fi
-
-    mkdir -p "$DIR"
-    if [ -s "$token_file" ]; then
-        token="$(tr -d '[:space:]' < "$token_file")"
-        if [ -n "$token" ]; then
-            chmod 600 "$token_file" 2>/dev/null || true
-            printf '%s\n' "$token"
-            return 0
-        fi
-    fi
-
-    if ! token="$(generate_mn_cookie)"; then
-        token=""
-    fi
-    if [ -z "$token" ]; then
-        echo "=> Error: failed to generate MN_GRPC_AUTH_TOKEN."
-        exit 1
-    fi
-
-    printf '%s\n' "$token" > "$token_file"
-    chmod 600 "$token_file" 2>/dev/null || true
-    printf '%s\n' "$token"
-}
-
-resolve_grpc_admin_token() {
-    local env_token="${MN_GRPC_ADMIN_TOKEN:-${MN_MIRROR_NEURON_GRPC_ADMIN_TOKEN:-}}"
-    local token_file="${DIR}/grpc_admin.token"
-    local token
-
-    if [ -n "$env_token" ]; then
-        printf '%s\n' "$env_token"
-        return 0
-    fi
-
-    mkdir -p "$DIR"
-    if [ -s "$token_file" ]; then
-        token="$(tr -d '[:space:]' < "$token_file")"
-        if [ -n "$token" ]; then
-            chmod 600 "$token_file" 2>/dev/null || true
-            printf '%s\n' "$token"
-            return 0
-        fi
-    fi
-
-    if ! token="$(generate_mn_cookie)"; then
-        token=""
-    fi
-    if [ -z "$token" ]; then
-        echo "=> Error: failed to generate MN_GRPC_ADMIN_TOKEN."
-        exit 1
-    fi
-
-    printf '%s\n' "$token" > "$token_file"
-    chmod 600 "$token_file" 2>/dev/null || true
-    printf '%s\n' "$token"
-}
-
 print_ascii_art() {
     cat << "ASCIIEOF"
   __  __ _                     _   _                     
@@ -301,10 +235,6 @@ start_services() {
     echo "==========================================="
 
     mn_cookie="$(resolve_mn_cookie)"
-    grpc_auth_token="$(resolve_grpc_auth_token)"
-    grpc_admin_token="$(resolve_grpc_admin_token)"
-    export MN_GRPC_AUTH_TOKEN="${MN_GRPC_AUTH_TOKEN:-$grpc_auth_token}"
-    export MN_GRPC_ADMIN_TOKEN="${MN_GRPC_ADMIN_TOKEN:-$grpc_admin_token}"
     if runtime_compose_available; then
         echo "=> Starting MirrorNeuron Docker runtime (Compose)..."
         runtime_compose up -d >/dev/null
@@ -315,8 +245,8 @@ start_services() {
         core_cmd=(
             docker run -d --name mirror-neuron-core --network host
             -e "MN_COOKIE=${mn_cookie}"
-            -e "MN_GRPC_AUTH_TOKEN=${MN_GRPC_AUTH_TOKEN}"
-            -e "MN_GRPC_ADMIN_TOKEN=${MN_GRPC_ADMIN_TOKEN}"
+            -e "MN_GRPC_AUTH_TOKEN=mirror_neuron_password"
+            -e "MN_GRPC_ADMIN_TOKEN=mirror_neuron_password_admin"
             -e "MN_CORE_HOST=${MN_CORE_HOST:-localhost}"
             -e "MN_REDIS_HOST=${MN_REDIS_HOST:-localhost}"
             -e "ERL_EPMD_ADDRESS=${MN_EPMD_HOST:-localhost}"
