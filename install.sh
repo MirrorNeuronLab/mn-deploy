@@ -338,6 +338,7 @@ exec 3>&1
 
 # Never let git/pip block the installer by asking for GitHub credentials.
 export GIT_TERMINAL_PROMPT="${GIT_TERMINAL_PROMPT:-0}"
+export GH_PROMPT_DISABLED="${GH_PROMPT_DISABLED:-1}"
 export PIP_NO_INPUT="${PIP_NO_INPUT:-1}"
 
 # Define Colors
@@ -356,6 +357,9 @@ MN_MANAGED_PYTHON_VERSION="${MN_MANAGED_PYTHON_VERSION:-3.11}"
 MN_MANAGED_PYTHON_ROOT="${MN_MANAGED_PYTHON_DIR:-${HOME}/.local/share/mn_python}"
 MN_UV_ROOT="${MN_UV_DIR:-${HOME}/.local/share/mn_uv}"
 MN_UV_BIN=""
+MN_GITHUB_TOKEN_LOOKED_UP="N"
+MN_GITHUB_TOKEN_VALUE=""
+MN_GITHUB_GIT_AUTH_CONFIGURED="N"
 
 function print_header() {
     echo -e "${MAGENTA}${BOLD}" >&3
@@ -411,6 +415,9 @@ function run_quiet() {
     if ! "$@" >"$log_file" 2>&1; then
         print_error "$label failed. Log: $log_file"
         tail -n 20 "$log_file" >&3 2>/dev/null || true
+        if grep -Eqi "could not read Username for 'https://github.com'|authentication failed|repository not found" "$log_file" 2>/dev/null; then
+            print_error "GitHub clone authentication failed. For private MirrorNeuron repositories, run 'gh auth login' or set GITHUB_TOKEN/GH_TOKEN and rerun."
+        fi
         exit 1
     fi
 }
@@ -482,6 +489,53 @@ function require_cmd() {
     fi
 }
 
+function resolve_github_token() {
+    local token=""
+
+    if [ "$MN_GITHUB_TOKEN_LOOKED_UP" = "Y" ]; then
+        return 0
+    fi
+
+    token="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+    if [ -z "$token" ] && command -v gh >/dev/null 2>&1; then
+        token="$(gh auth token 2>/dev/null || true)"
+    fi
+
+    MN_GITHUB_TOKEN_LOOKED_UP="Y"
+    MN_GITHUB_TOKEN_VALUE="$token"
+}
+
+function configure_github_git_auth() {
+    local token askpass log_dir
+
+    if [ "$MN_GITHUB_GIT_AUTH_CONFIGURED" = "Y" ]; then
+        return 0
+    fi
+
+    resolve_github_token
+    token="$MN_GITHUB_TOKEN_VALUE"
+    if [ -z "$token" ]; then
+        return 0
+    fi
+
+    log_dir="${TMPDIR:-/tmp}/mirror_neuron_install"
+    mkdir -p "$log_dir"
+    askpass="${log_dir}/github-askpass.$$"
+    cat > "$askpass" <<'EOF'
+#!/usr/bin/env sh
+case "$1" in
+    *Username*) printf '%s\n' "x-access-token" ;;
+    *Password*) printf '%s\n' "$MN_GITHUB_TOKEN_FOR_GIT" ;;
+    *) printf '%s\n' "$MN_GITHUB_TOKEN_FOR_GIT" ;;
+esac
+EOF
+    chmod 700 "$askpass"
+    export MN_GITHUB_TOKEN_FOR_GIT="$token"
+    export GIT_ASKPASS="$askpass"
+    MN_GITHUB_GIT_AUTH_CONFIGURED="Y"
+    print_success "Configured GitHub authentication for non-interactive Git clones."
+}
+
 function python_version() {
     "$1" -c 'import sys; print(".".join(str(part) for part in sys.version_info[:3]))' 2>/dev/null
 }
@@ -499,7 +553,9 @@ function python_is_selected_minor() {
 }
 
 function curl_github() {
-    local token="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+    local token
+    resolve_github_token
+    token="$MN_GITHUB_TOKEN_VALUE"
     if [ -n "$token" ]; then
         curl -H "Authorization: Bearer $token" "$@"
     else
@@ -762,7 +818,7 @@ Usage: ./$script_name --mode github [options]
 Installs MirrorNeuron from GitHub repositories. Use through --mode github.
 
 Options:
-  --version TAG                 Install this release tag from each GitHub repo. Default: ${MN_DEFAULT_INSTALL_VERSION}.
+  --version TAG                 Install this release tag from each GitHub repo. If omitted, use each repo's default branch.
   --yes                         Run non-interactively with defaults and flags. This is the default.
   --interactive                 Ask each install question before proceeding.
   --no-reinstall                Keep an existing install instead of overwriting it.
@@ -786,6 +842,7 @@ Options:
   --core-release-tag TAG        Legacy alias for --version.
   --core-asset-url URL          Accepted for CLI compatibility; used by binary mode.
   MN_HOME=/path                 Override the runtime state directory. Defaults to ${HOME}/.mn.
+  GITHUB_TOKEN/GH_TOKEN         Token for private GitHub repositories. An existing gh auth login is also used.
   -h, --help                    Show this help.
 
 Examples:
@@ -955,18 +1012,61 @@ function finalize_github_install_version() {
             exit 1
         fi
         INSTALL_VERSION="$CORE_RELEASE_TAG"
+        INSTALL_VERSION_EXPLICIT="Y"
     fi
-    INSTALL_VERSION="${INSTALL_VERSION:-$MN_DEFAULT_INSTALL_VERSION}"
-    mn_validate_version_tag_or_exit "$INSTALL_VERSION"
-    MN_INSTALL_VERSION="$INSTALL_VERSION"
-    CORE_RELEASE_TAG="$INSTALL_VERSION"
-    MN_PACKAGE_VERSION="$(mn_package_version_from_tag "$INSTALL_VERSION")"
-    MN_NPM_PACKAGE_VERSION="$(mn_npm_version_from_tag "$INSTALL_VERSION")"
-    RUNTIME_COMPOSE_TEMPLATE="${RUNTIME_COMPOSE_TEMPLATE:-${SCRIPT_DIR}/install_support/${INSTALL_VERSION}/docker-compose.yml}"
+
+    if [ -n "$INSTALL_VERSION" ]; then
+        mn_validate_version_tag_or_exit "$INSTALL_VERSION"
+        MN_INSTALL_VERSION="$INSTALL_VERSION"
+        CORE_RELEASE_TAG="$INSTALL_VERSION"
+        MN_PACKAGE_VERSION="$(mn_package_version_from_tag "$INSTALL_VERSION")"
+        MN_NPM_PACKAGE_VERSION="$(mn_npm_version_from_tag "$INSTALL_VERSION")"
+        RUNTIME_COMPOSE_TEMPLATE="${RUNTIME_COMPOSE_TEMPLATE:-${SCRIPT_DIR}/install_support/${INSTALL_VERSION}/docker-compose.yml}"
+    else
+        MN_INSTALL_VERSION=""
+        CORE_RELEASE_TAG=""
+        RUNTIME_COMPOSE_TEMPLATE="${RUNTIME_COMPOSE_TEMPLATE:-${SCRIPT_DIR}/docker-compose.yml}"
+    fi
     export MN_INSTALL_VERSION
 }
 
 finalize_github_install_version
+
+function github_ref_suffix() {
+    if [ -n "$INSTALL_VERSION" ]; then
+        printf '@%s' "$INSTALL_VERSION"
+    fi
+}
+
+function github_clone() {
+    local url="$1"
+    local target="$2"
+
+    if [ -n "$INSTALL_VERSION" ]; then
+        git clone --branch "$INSTALL_VERSION" --depth 1 "$url" "$target"
+    else
+        git clone --depth 1 "$url" "$target"
+    fi
+}
+
+function github_checkout_existing() {
+    local default_branch
+
+    if [ -n "$INSTALL_VERSION" ]; then
+        git fetch --tags origin "$INSTALL_VERSION" >/dev/null 2>&1
+        git checkout --force "$INSTALL_VERSION" >/dev/null 2>&1
+        return 0
+    fi
+
+    default_branch="$(git remote show origin 2>/dev/null | awk -F': ' '/HEAD branch/ {print $2; exit}')"
+    if [ -n "$default_branch" ]; then
+        git fetch origin "$default_branch" >/dev/null 2>&1
+        git checkout --force "$default_branch" >/dev/null 2>&1
+        git pull --ff-only origin "$default_branch" >/dev/null 2>&1
+    else
+        git pull --ff-only >/dev/null 2>&1
+    fi
+}
 
 function should_install_python_packages() {
     [ "$INSTALL_PYTHON_SDK" = "Y" ] || \
@@ -1019,12 +1119,11 @@ function context_engine_source_dir() {
         return 0
     fi
     if [ ! -d "$MEMBRANE_DIR" ]; then
-        run_quiet "clone-membrane-context-engine" git clone --branch "$INSTALL_VERSION" --depth 1 "$(context_engine_git_url)" "$MEMBRANE_DIR"
+        run_quiet "clone-membrane-context-engine" github_clone "$(context_engine_git_url)" "$MEMBRANE_DIR"
     else
         (
             cd "$MEMBRANE_DIR"
-            git fetch --tags origin "$INSTALL_VERSION" >/dev/null 2>&1
-            git checkout --force "$INSTALL_VERSION" >/dev/null 2>&1
+            github_checkout_existing
         )
     fi
     MEMBRANE_DIR="$(cd "$MEMBRANE_DIR" && pwd)"
@@ -1630,6 +1729,7 @@ function start_runtime_compose_sidecars() {
 print_step "Checking Python runtime"
 resolve_python_runtime
 
+EXISTING_INSTALL="N"
 if [ -d "$INSTALL_DIR" ] || [ -f "$BIN_DIR/mn" ]; then
     print_warning "MirrorNeuron appears to be already installed."
     if [ "$NON_INTERACTIVE" != "Y" ]; then
@@ -1640,8 +1740,7 @@ if [ -d "$INSTALL_DIR" ] || [ -f "$BIN_DIR/mn" ]; then
         exit 0
     fi
     echo "" >&3
-    # Clean up to ensure a fresh overwrite
-    mn_remove_existing_install_paths
+    EXISTING_INSTALL="Y"
 fi
 
 # Interactive Prompts
@@ -1661,6 +1760,7 @@ print_step "Checking Dependencies"
 require_cmd git
 require_cmd curl
 require_cmd docker
+configure_github_git_auth
 if should_install_python_packages; then
     resolve_python_runtime
 fi
@@ -1676,10 +1776,15 @@ fi
 
 print_success "All dependencies found or installed."
 
+if [ "$EXISTING_INSTALL" = "Y" ]; then
+    print_step "Preparing fresh install"
+    mn_remove_existing_install_paths
+fi
+
 print_step "Installing MirrorNeuron Core (Docker)"
 
 (
-    git clone --branch "$INSTALL_VERSION" --depth 1 "$(core_git_url)" "$INSTALL_DIR" >/dev/null 2>&1
+    github_clone "$(core_git_url)" "$INSTALL_DIR" >/dev/null 2>&1
     cd "$INSTALL_DIR"
     
     if [ ! -f "Dockerfile" ]; then
@@ -1730,25 +1835,41 @@ if should_install_python_packages; then
         "$MN_PYTHON_BIN" -m venv "$VENV_DIR" >/dev/null 2>&1
         run_quiet "pip-upgrade" "$VENV_DIR/bin/pip" install --upgrade pip
         if [ "$INSTALL_PYTHON_SDK" = "Y" ]; then
-            run_quiet "install-mn-python-sdk-github" "$VENV_DIR/bin/pip" install "git+https://github.com/MirrorNeuronLab/mn-python-sdk.git@${INSTALL_VERSION}"
+            run_quiet "install-mn-python-sdk-github" "$VENV_DIR/bin/pip" install "git+https://github.com/MirrorNeuronLab/mn-python-sdk.git$(github_ref_suffix)"
         fi
         if [ "$INSTALL_BLUEPRINT_SUPPORT_SKILL" = "Y" ]; then
-            run_quiet "install-blueprint-support-skill-github" "$VENV_DIR/bin/pip" install "mirrorneuron-blueprint-support-skill[webui] @ git+$(blueprint_support_skill_git_url)@${INSTALL_VERSION}#subdirectory=blueprint_support_skill"
+            run_quiet "install-blueprint-support-skill-github" "$VENV_DIR/bin/pip" install "mirrorneuron-blueprint-support-skill[webui] @ git+$(blueprint_support_skill_git_url)$(github_ref_suffix)#subdirectory=blueprint_support_skill"
         fi
         if [ "$INSTALL_CLI" = "Y" ]; then
-            run_quiet "install-mn-cli-github" "$VENV_DIR/bin/pip" install "git+https://github.com/MirrorNeuronLab/mn-cli.git@${INSTALL_VERSION}"
+            run_quiet "install-mn-cli-github" "$VENV_DIR/bin/pip" install "git+https://github.com/MirrorNeuronLab/mn-cli.git$(github_ref_suffix)"
         fi
         if [ "$INSTALL_API" = "Y" ]; then
-            run_quiet "install-mn-api-github" "$VENV_DIR/bin/pip" install "git+https://github.com/MirrorNeuronLab/mn-api.git@${INSTALL_VERSION}"
+            run_quiet "install-mn-api-github" "$VENV_DIR/bin/pip" install "git+https://github.com/MirrorNeuronLab/mn-api.git$(github_ref_suffix)"
         fi
         if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
-            run_quiet "install-membrane-python-sdk-github" "$VENV_DIR/bin/pip" install "mirrorneuron-membrane-python-sdk @ git+$(context_engine_git_url)@${INSTALL_VERSION}#subdirectory=mn-context-engine-python-sdk"
+            run_quiet "install-membrane-python-sdk-github" "$VENV_DIR/bin/pip" install "mirrorneuron-membrane-python-sdk @ git+$(context_engine_git_url)$(github_ref_suffix)#subdirectory=mn-context-engine-python-sdk"
         fi
     ) &
     spinner $! "Setting up virtualenv and installing Python packages"
 else
     print_warning "Skipping Python component installation."
 fi
+
+function require_github_command_targets() {
+    local missing="N"
+    if [ "$INSTALL_CLI" = "Y" ] && [ ! -x "$VENV_DIR/bin/mn" ]; then
+        print_error "Expected executable mn CLI target was not created: $VENV_DIR/bin/mn"
+        missing="Y"
+    fi
+    if [ "$INSTALL_API" = "Y" ] && [ ! -x "$VENV_DIR/bin/mn-api" ]; then
+        print_error "Expected executable mn-api target was not created: $VENV_DIR/bin/mn-api"
+        missing="Y"
+    fi
+    if [ "$missing" = "Y" ]; then
+        print_error "GitHub Python install did not produce the required command targets; command symlinks were not created."
+        exit 1
+    fi
+}
 
 if [ "$INSTALL_WEB_UI" = "Y" ]; then
     print_step "Installing Web UI"
@@ -1766,12 +1887,11 @@ if [ "$INSTALL_WEB_UI" = "Y" ]; then
             ln -s "$SOURCE_WORKSPACE/mn-web-ui" "$UI_DIR"
         elif [ -d "$UI_DIR" ]; then
             cd "$UI_DIR"
-            git fetch --tags origin "$INSTALL_VERSION" >/dev/null 2>&1
-            git checkout --force "$INSTALL_VERSION" >/dev/null 2>&1
+            github_checkout_existing
             run_quiet "web-ui-npm-install-existing" npm install
             run_quiet "web-ui-npm-build-existing" npm run build
         else
-            run_quiet "web-ui-git-clone" git clone --branch "$INSTALL_VERSION" --depth 1 https://github.com/MirrorNeuronLab/mn-web-ui.git "$UI_DIR"
+            run_quiet "web-ui-git-clone" github_clone https://github.com/MirrorNeuronLab/mn-web-ui.git "$UI_DIR"
             cd "$UI_DIR"
             run_quiet "web-ui-npm-install-github" npm install
             run_quiet "web-ui-npm-build-github" npm run build
@@ -1789,13 +1909,23 @@ if [ "$INSTALL_REDIS" = "Y" ] || [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] || [ "$INST
     spinner $! "Docker runtime services are available"
 fi
 
-print_step "Creating Symlinks"
-mkdir -p "$BIN_DIR"
-rm -f "$BIN_DIR/mn" "$BIN_DIR/mn-api" "$INSTALL_DIR/mn"
-ln -s "$VENV_DIR/bin/mn" "$BIN_DIR/mn"
-ln -s "$VENV_DIR/bin/mn-api" "$BIN_DIR/mn-api"
-ln -s "$VENV_DIR/bin/mn" "$INSTALL_DIR/mn"
-print_success "Symlinks created in $BIN_DIR and $INSTALL_DIR."
+if [ "$INSTALL_CLI" = "Y" ] || [ "$INSTALL_API" = "Y" ]; then
+    print_step "Creating command symlinks"
+    require_github_command_targets
+    mkdir -p "$BIN_DIR" "$INSTALL_DIR"
+    if [ "$INSTALL_CLI" = "Y" ]; then
+        rm -f "$BIN_DIR/mn" "$INSTALL_DIR/mn"
+        ln -s "$VENV_DIR/bin/mn" "$BIN_DIR/mn"
+        ln -s "$VENV_DIR/bin/mn" "$INSTALL_DIR/mn"
+    fi
+    if [ "$INSTALL_API" = "Y" ]; then
+        rm -f "$BIN_DIR/mn-api"
+        ln -s "$VENV_DIR/bin/mn-api" "$BIN_DIR/mn-api"
+    fi
+    print_success "Command symlinks created."
+else
+    print_warning "Skipping command symlink creation because CLI/API installation is disabled."
+fi
 
 echo "" >&3
 print_success "MirrorNeuron GitHub installation successfully completed!" >&3

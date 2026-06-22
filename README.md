@@ -80,6 +80,9 @@ Clear runtime Redis state:
 - Use `./install.sh` or `./install.sh --mode binary` for release/package installs,
   `./install.sh --mode github` for repository installs, or `./install.sh --mode local`
   from a monorepo checkout for editable local installs.
+- GitHub mode without `--version` installs from each repository's default branch.
+  Use `--version v1.2.8` only when you want to pin GitHub installs to matching
+  release tags.
 - Use `--version v1.2.8` to install a matching released set of core, CLI, SDK,
   API, Web UI, package metadata, and runtime support files.
 - Versioned installer support files live under `install_support/<version>/`.
