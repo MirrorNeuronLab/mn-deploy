@@ -4595,8 +4595,9 @@ def requirement(package: dict) -> str:
     name = package["name"]
     extras = package.get("default_extras") or []
     if extras:
-        return f"{name}[{','.join(extras)}]"
-    return name
+        name = f"{name}[{','.join(extras)}]"
+    version = str(package.get("version") or "").strip().lstrip("vV")
+    return f"{name}=={version}" if version else name
 
 for package in data.get("packages", []):
     groups = package.get("installer_groups") or []
@@ -4614,7 +4615,10 @@ function install_indexed_group() {
     local requirement pinned_requirement label installed="N"
     while IFS= read -r requirement; do
         [ -n "$requirement" ] || continue
-        pinned_requirement="${requirement}==${MN_PACKAGE_VERSION}"
+        case "$requirement" in
+            *"=="*|*">="*|*"<="*|*"~="*|*"!="*|*">"*|*"<"*) pinned_requirement="$requirement" ;;
+            *) pinned_requirement="${requirement}==${MN_PACKAGE_VERSION}" ;;
+        esac
         label="$(printf '%s' "$pinned_requirement" | tr -c 'A-Za-z0-9_.-' '_')"
         run_quiet "install-${label}" "$VENV_DIR/bin/pip" install "${PIP_INDEX_ARGS[@]}" --upgrade "$pinned_requirement"
         installed="Y"
