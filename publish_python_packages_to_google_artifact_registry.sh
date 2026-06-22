@@ -250,7 +250,9 @@ while IFS="$(printf '\t')" read -r package_name package_path build_formats packa
     fi
     echo "Building ${package_name}${version_label} from ${package_path} (${build_formats})."
     rm -rf "${package_path}/build"
-    if [ -n "$package_version" ]; then
+    if [ -n "$package_version" ] && [ "$package_name" = "mirrorneuron-membrane-python-sdk" ]; then
+        MEMBRANE_PYTHON_SDK_VERSION="$package_version" "$PYTHON_BIN" -m build "$package_path" --outdir "$DIST_DIR" "${build_args[@]}"
+    elif [ -n "$package_version" ]; then
         SETUPTOOLS_SCM_PRETEND_VERSION="$package_version" "$PYTHON_BIN" -m build "$package_path" --outdir "$DIST_DIR" "${build_args[@]}"
     else
         "$PYTHON_BIN" -m build "$package_path" --outdir "$DIST_DIR" "${build_args[@]}"
