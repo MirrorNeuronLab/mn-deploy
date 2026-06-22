@@ -2,3 +2,4 @@
 .venv-gar-publish/
 dist/python-packages/
 local-python-index/
+dist
