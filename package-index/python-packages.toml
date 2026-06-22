@@ -5,6 +5,7 @@
 name = "mirrorneuron-python-sdk"
 path = "mn-python-sdk"
 publish_group = "runtime"
+version = "1.2.14"
 installer_groups = ["sdk"]
 binary_default = true
 
@@ -12,6 +13,7 @@ binary_default = true
 name = "mirrorneuron-cli"
 path = "mn-cli"
 publish_group = "runtime"
+version = "1.2.16"
 installer_groups = ["cli"]
 binary_default = true
 
