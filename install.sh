@@ -158,6 +158,7 @@ if [ "$MN_INSTALL_HELP_REQUESTED" = "Y" ]; then
 fi
 
 export MN_INSTALL_VERSION
+export MN_HOME="${MN_HOME:-${HOME}/.mn}"
 
 function mn_script_dir() {
     local source_path=""
@@ -1595,6 +1596,7 @@ MN_BLUEPRINT_WEB_UI_PUBLIC_HOST=${MN_BLUEPRINT_WEB_UI_PUBLIC_HOST:-localhost}
 MN_BLUEPRINT_WEB_UI_PORT_START=${MN_BLUEPRINT_WEB_UI_PORT_START:-61000}
 MN_BLUEPRINT_WEB_UI_PORT_END=${MN_BLUEPRINT_WEB_UI_PORT_END:-61049}
 MN_BLUEPRINT_WEB_UI_PORT_ALLOCATION_MODE=${MN_BLUEPRINT_WEB_UI_PORT_ALLOCATION_MODE:-prepublished}
+MN_ENV=${MN_ENV:-dev}
 MN_BLUEPRINT_SOURCE=${MN_BLUEPRINT_SOURCE:-github}
 MN_BLUEPRINT_REPO=${MN_BLUEPRINT_REPO:-https://github.com/MirrorNeuronLab/mn-blueprints.git}
 MN_BLUEPRINT_LOCAL=${MN_BLUEPRINT_LOCAL:-}
@@ -3302,6 +3304,7 @@ MN_BLUEPRINT_WEB_UI_PUBLIC_HOST=${MN_BLUEPRINT_WEB_UI_PUBLIC_HOST:-localhost}
 MN_BLUEPRINT_WEB_UI_PORT_START=${MN_BLUEPRINT_WEB_UI_PORT_START:-61000}
 MN_BLUEPRINT_WEB_UI_PORT_END=${MN_BLUEPRINT_WEB_UI_PORT_END:-61049}
 MN_BLUEPRINT_WEB_UI_PORT_ALLOCATION_MODE=${MN_BLUEPRINT_WEB_UI_PORT_ALLOCATION_MODE:-prepublished}
+MN_ENV=${MN_ENV:-dev}
 MN_BLUEPRINT_SOURCE=${MN_BLUEPRINT_SOURCE:-github}
 MN_BLUEPRINT_REPO=${MN_BLUEPRINT_REPO:-https://github.com/MirrorNeuronLab/mn-blueprints.git}
 MN_BLUEPRINT_LOCAL=${MN_BLUEPRINT_LOCAL:-}
@@ -5301,6 +5304,7 @@ MN_BLUEPRINT_WEB_UI_PUBLIC_HOST=${MN_BLUEPRINT_WEB_UI_PUBLIC_HOST:-localhost}
 MN_BLUEPRINT_WEB_UI_PORT_START=${MN_BLUEPRINT_WEB_UI_PORT_START:-61000}
 MN_BLUEPRINT_WEB_UI_PORT_END=${MN_BLUEPRINT_WEB_UI_PORT_END:-61049}
 MN_BLUEPRINT_WEB_UI_PORT_ALLOCATION_MODE=${MN_BLUEPRINT_WEB_UI_PORT_ALLOCATION_MODE:-prepublished}
+MN_ENV=${MN_ENV:-dev}
 MN_BLUEPRINT_SOURCE=${MN_BLUEPRINT_SOURCE:-github}
 MN_BLUEPRINT_REPO=${MN_BLUEPRINT_REPO:-https://github.com/MirrorNeuronLab/mn-blueprints.git}
 MN_BLUEPRINT_LOCAL=${MN_BLUEPRINT_LOCAL:-}
@@ -5509,11 +5513,14 @@ function profile_has_runtime_home() {
 }
 
 function add_shell_profile_exports() {
+    local include_path="${1:-Y}"
     local needs_path="N"
     local needs_runtime_home="Y"
     local default_home="${HOME}/.mn"
 
-    [[ ":$PATH:" != *":$BIN_DIR:"* ]] && needs_path="Y"
+    if [ "$include_path" = "Y" ]; then
+        [[ ":$PATH:" != *":$BIN_DIR:"* ]] && needs_path="Y"
+    fi
 
     if [ "$needs_path" = "N" ] && [ "$needs_runtime_home" = "N" ]; then
         return
@@ -5658,7 +5665,9 @@ if [ "$INSTALL_API" = "Y" ]; then
 fi
 print_success "Command links ready."
 if [ "$INSTALL_CLI" = "Y" ] || [ "$INSTALL_API" = "Y" ]; then
-    add_shell_profile_exports
+    add_shell_profile_exports "Y"
+else
+    add_shell_profile_exports "N"
 fi
 
 if [ "$START_NOW" = "Y" ]; then
