@@ -1397,6 +1397,25 @@ function derive_network_secret() {
     exit 1
 }
 
+function resolve_redis_password() {
+    local admin_token="$1"
+    local mn_env="${MN_ENV:-dev}"
+    local password
+
+    case "$mn_env" in
+        prod|production)
+            password="$(derive_network_secret "$admin_token" "redis")"
+            mkdir -p "$INSTALL_DIR"
+            printf '%s\n' "$password" > "${INSTALL_DIR}/redis.password"
+            chmod 600 "${INSTALL_DIR}/redis.password" 2>/dev/null || true
+            printf '%s\n' "$password"
+            ;;
+        *)
+            printf '%s\n' "mirror_neuron_redis_dev"
+            ;;
+    esac
+}
+
 function read_env_value() {
     local file="$1"
     local key="$2"
@@ -1528,7 +1547,7 @@ function write_runtime_compose_files() {
     network_name="${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
     network_external="$(resolve_docker_network_external "$network_name")"
     network_token="$(resolve_network_token)"
-    redis_password="$(derive_network_secret "$network_token" "redis")"
+    redis_password="$(resolve_redis_password "mirror_neuron_password_admin")"
     mn_cookie="$(resolve_mn_cookie)"
     runtime_skills_root="${MN_SKILLS_ROOT:-${MN_HOST_HOME_DIR}/skills}"
     runtime_package_index="${MN_PACKAGE_INDEX_FILE:-}"
@@ -2845,6 +2864,25 @@ function derive_network_secret() {
     exit 1
 }
 
+function resolve_redis_password() {
+    local admin_token="$1"
+    local mn_env="${MN_ENV:-dev}"
+    local password
+
+    case "$mn_env" in
+        prod|production)
+            password="$(derive_network_secret "$admin_token" "redis")"
+            mkdir -p "$INSTALL_DIR"
+            printf '%s\n' "$password" > "${INSTALL_DIR}/redis.password"
+            chmod 600 "${INSTALL_DIR}/redis.password" 2>/dev/null || true
+            printf '%s\n' "$password"
+            ;;
+        *)
+            printf '%s\n' "mirror_neuron_redis_dev"
+            ;;
+    esac
+}
+
 function read_env_value() {
     local file="$1"
     local key="$2"
@@ -3164,7 +3202,7 @@ function write_runtime_compose_files() {
     network_name="${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
     network_external="$(resolve_docker_network_external "$network_name")"
     network_token="$(resolve_network_token)"
-    redis_password="$(derive_network_secret "$network_token" "redis")"
+    redis_password="$(resolve_redis_password "mirror_neuron_password_admin")"
     mn_cookie="$(resolve_mn_cookie)"
     runtime_skills_root="${MN_SKILLS_ROOT:-${MN_HOST_HOME_DIR}/skills}"
     runtime_package_index="${MN_PACKAGE_INDEX_FILE:-}"
@@ -5059,6 +5097,25 @@ function derive_network_secret() {
     exit 1
 }
 
+function resolve_redis_password() {
+    local admin_token="$1"
+    local mn_env="${MN_ENV:-dev}"
+    local password
+
+    case "$mn_env" in
+        prod|production)
+            password="$(derive_network_secret "$admin_token" "redis")"
+            mkdir -p "$INSTALL_DIR"
+            printf '%s\n' "$password" > "${INSTALL_DIR}/redis.password"
+            chmod 600 "${INSTALL_DIR}/redis.password" 2>/dev/null || true
+            printf '%s\n' "$password"
+            ;;
+        *)
+            printf '%s\n' "mirror_neuron_redis_dev"
+            ;;
+    esac
+}
+
 function read_env_value() {
     local file="$1"
     local key="$2"
@@ -5187,7 +5244,7 @@ function write_runtime_compose_files() {
     network_name="${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
     network_external="$(resolve_docker_network_external "$network_name")"
     network_token="$(resolve_network_token)"
-    redis_password="$(derive_network_secret "$network_token" "redis")"
+    redis_password="$(resolve_redis_password "mirror_neuron_password_admin")"
     mn_cookie="$(resolve_mn_cookie)"
     runtime_skills_root="${MN_SKILLS_ROOT:-${MN_HOST_HOME_DIR}/skills}"
     runtime_package_index="${MN_PACKAGE_INDEX_FILE:-}"
