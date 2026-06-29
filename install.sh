@@ -35,6 +35,7 @@ Common options:
   --context-engine / --no-context-engine
                                 Enable or skip Membrane context engine setup.
   --openshell / --no-openshell  Enable or skip OpenShell gateway setup.
+  --nfs / --no-nfs              Enable or skip NFS shared-storage preparation.
   --start / --no-start          Start or skip starting MirrorNeuron after install.
   --start-as-worker             Start MirrorNeuron as a worker node after install.
   --python PATH                 Same as MN_PYTHON. Must be Python 3.11.x.
@@ -228,6 +229,33 @@ function mn_write_runtime_compose_file() {
     mn_ensure_runtime_compose_template_file
     mkdir -p "$(dirname "$target")"
     cp "$RUNTIME_COMPOSE_TEMPLATE" "$target"
+}
+
+function mn_install_nfs_support_if_possible() {
+    local enabled="${MN_NFS_ENABLED:-auto}"
+    case "$(printf '%s' "$enabled" | tr '[:upper:]' '[:lower:]')" in
+        0|false|no|n|off|disabled) return 0 ;;
+    esac
+
+    case "$(uname -s)" in
+        Darwin)
+            if command -v nfsd >/dev/null 2>&1 && command -v mount_nfs >/dev/null 2>&1; then
+                return 0
+            fi
+            echo "install.sh: warning: macOS NFS tools were not found; install Xcode command line tools or enable NFS manually." >&3
+            ;;
+        Linux)
+            if command -v mount.nfs >/dev/null 2>&1 || command -v mount_nfs >/dev/null 2>&1; then
+                return 0
+            fi
+            if command -v apt-get >/dev/null 2>&1 && command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
+                sudo -n apt-get update
+                sudo -n apt-get install -y nfs-common nfs-kernel-server
+                return 0
+            fi
+            echo "install.sh: warning: NFS client tools are not installed. Install nfs-common/nfs-kernel-server or set MN_NFS_ENABLED=0." >&3
+            ;;
+    esac
 }
 
 function mn_remove_dockerfile_frontend_directive() {
@@ -770,6 +798,9 @@ MN_HOST_HOME_DIR="${MN_HOST_HOME_DIR:-${MN_HOST_MN_DIR:-${INSTALL_DIR}}}"
 MN_HOST_ARTIFACTS_DIR="${MN_HOST_ARTIFACTS_DIR:-${MN_HOST_HOME_DIR}/runs}"
 MN_HOST_BLOB_STORE_DIR="${MN_HOST_BLOB_STORE_DIR:-${MN_HOST_HOME_DIR}/blobs}"
 MN_HOST_SHARED_STORAGE_ROOT="${MN_HOST_SHARED_STORAGE_ROOT:-${MN_HOST_SHARED_ARTIFACT_ROOT:-${MN_HOST_HOME_DIR}/shared}}"
+MN_NFS_ENABLED="${MN_NFS_ENABLED:-auto}"
+MN_NFS_REQUIRED="${MN_NFS_REQUIRED:-0}"
+MN_NFS_EXPORT_PATH="${MN_NFS_EXPORT_PATH:-${MN_HOST_SHARED_STORAGE_ROOT}}"
 MN_HOST_OPENSHELL_CONFIG_DIR="${OPENSHELL_CONTAINER_CONFIG_DIR:-${HOME}/.config/openshell-mirror-neuron}"
 MN_HOST_OPENSHELL_STATE_DIR="${MN_HOST_OPENSHELL_STATE_DIR:-${INSTALL_DIR}/openshell-state}"
 OPENSHELL_GATEWAY_USER="${OPENSHELL_GATEWAY_USER:-$(id -u):$(id -g)}"
@@ -828,6 +859,7 @@ Options:
   --context-engine / --no-context-engine
                                 Enable or skip Membrane context engine setup.
   --openshell / --no-openshell  Enable or skip OpenShell gateway setup.
+  --nfs / --no-nfs              Enable or skip NFS shared-storage preparation.
   --start / --no-start          Start or skip starting MirrorNeuron after install.
   --start-as-worker             Start MirrorNeuron as a worker node after install.
   --python-components LIST      Install only these components: sdk,skill,cli,api.
@@ -913,6 +945,8 @@ while [ "$#" -gt 0 ]; do
         --no-context-engine) INSTALL_CONTEXT_ENGINE="N" ;;
         --openshell) INSTALL_OPENSHELL="Y" ;;
         --no-openshell) INSTALL_OPENSHELL="N" ;;
+        --nfs) MN_NFS_ENABLED="auto" ;;
+        --no-nfs) MN_NFS_ENABLED="0" ;;
         --start) START_NOW="Y" ;;
         --no-start) START_NOW="N" ;;
         --start-as-worker) START_AS_WORKER="Y"; START_NOW="Y" ;;
@@ -1549,6 +1583,9 @@ function write_runtime_compose_files() {
     network_token="$(resolve_network_token)"
     redis_password="$(resolve_redis_password "mirror_neuron_password_admin")"
     mn_cookie="$(resolve_mn_cookie)"
+    printf '%s\n' "mirror_neuron_password" > "${INSTALL_DIR}/grpc_auth.token"
+    printf '%s\n' "mirror_neuron_password_admin" > "${INSTALL_DIR}/grpc_admin.token"
+    chmod 600 "${INSTALL_DIR}/grpc_auth.token" "${INSTALL_DIR}/grpc_admin.token" 2>/dev/null || true
     runtime_skills_root="${MN_SKILLS_ROOT:-${MN_HOST_HOME_DIR}/skills}"
     runtime_package_index="${MN_PACKAGE_INDEX_FILE:-}"
     membrane_engine_tag="${MN_MEMBRANE_ENGINE_IMAGE_TAG:-${INSTALL_VERSION:-v${MN_PACKAGE_VERSION:-1.2.18}}}"
@@ -1570,6 +1607,7 @@ function write_runtime_compose_files() {
     ensure_runtime_host_directory "$MN_HOST_ARTIFACTS_DIR" "run artifacts host mount" "MN_HOST_ARTIFACTS_DIR"
     ensure_runtime_host_directory "$MN_HOST_BLOB_STORE_DIR" "blob store host mount" "MN_HOST_BLOB_STORE_DIR"
     ensure_runtime_host_directory "$MN_HOST_SHARED_STORAGE_ROOT" "shared storage host mount" "MN_HOST_SHARED_STORAGE_ROOT"
+    mn_install_nfs_support_if_possible
     ensure_runtime_host_directory "$MN_HOST_OPENSHELL_CONFIG_DIR" "OpenShell config host mount" "MN_HOST_OPENSHELL_CONFIG_DIR"
     ensure_runtime_host_directory "$MN_HOST_OPENSHELL_STATE_DIR" "OpenShell state host mount" "MN_HOST_OPENSHELL_STATE_DIR"
     mn_write_runtime_compose_file "$RUNTIME_COMPOSE_TEMPLATE" "$RUNTIME_COMPOSE_FILE"
@@ -1584,6 +1622,9 @@ MN_HOST_HOME_DIR=${MN_HOST_HOME_DIR}
 MN_HOST_ARTIFACTS_DIR=${MN_HOST_ARTIFACTS_DIR}
 MN_HOST_BLOB_STORE_DIR=${MN_HOST_BLOB_STORE_DIR}
 MN_HOST_SHARED_STORAGE_ROOT=${MN_HOST_SHARED_STORAGE_ROOT}
+MN_NFS_ENABLED=${MN_NFS_ENABLED}
+MN_NFS_REQUIRED=${MN_NFS_REQUIRED}
+MN_NFS_EXPORT_PATH=${MN_NFS_EXPORT_PATH}
 MN_HOST_OPENSHELL_CONFIG_DIR=${MN_HOST_OPENSHELL_CONFIG_DIR}
 MN_HOST_OPENSHELL_STATE_DIR=${MN_HOST_OPENSHELL_STATE_DIR}
 MEMBRANE_DIR=${MEMBRANE_DIR}
@@ -2109,6 +2150,9 @@ MN_HOST_HOME_DIR="${MN_HOST_HOME_DIR:-${MN_HOST_MN_DIR:-${INSTALL_DIR}}}"
 MN_HOST_ARTIFACTS_DIR="${MN_HOST_ARTIFACTS_DIR:-${MN_HOST_HOME_DIR}/runs}"
 MN_HOST_BLOB_STORE_DIR="${MN_HOST_BLOB_STORE_DIR:-${MN_HOST_HOME_DIR}/blobs}"
 MN_HOST_SHARED_STORAGE_ROOT="${MN_HOST_SHARED_STORAGE_ROOT:-${MN_HOST_SHARED_ARTIFACT_ROOT:-${MN_HOST_HOME_DIR}/shared}}"
+MN_NFS_ENABLED="${MN_NFS_ENABLED:-auto}"
+MN_NFS_REQUIRED="${MN_NFS_REQUIRED:-0}"
+MN_NFS_EXPORT_PATH="${MN_NFS_EXPORT_PATH:-${MN_HOST_SHARED_STORAGE_ROOT}}"
 MN_HOST_OPENSHELL_CONFIG_DIR="${OPENSHELL_CONTAINER_CONFIG_DIR:-${HOME}/.config/openshell-mirror-neuron}"
 MN_HOST_OPENSHELL_STATE_DIR="${MN_HOST_OPENSHELL_STATE_DIR:-${INSTALL_DIR}/openshell-state}"
 OPENSHELL_GATEWAY_USER="${OPENSHELL_GATEWAY_USER:-$(id -u):$(id -g)}"
@@ -2401,6 +2445,7 @@ Options:
   --no-context-engine   Skip Membrane context engine setup.
   --openshell           Install/start OpenShell gateway for sandbox workers.
   --no-openshell        Skip OpenShell gateway setup.
+  --nfs / --no-nfs      Enable or skip NFS shared-storage preparation.
   --no-skills           Skip editable install of packages under mn-skills.
   --start               Start MirrorNeuron after install.
   --no-start            Skip starting MirrorNeuron after install.
@@ -2428,6 +2473,8 @@ while [ "$#" -gt 0 ]; do
         --openshell) INSTALL_OPENSHELL="Y" ;;
         --no-openshell) INSTALL_OPENSHELL="N" ;;
         --no-skills) INSTALL_SKILLS="N" ;;
+        --nfs) MN_NFS_ENABLED="auto" ;;
+        --no-nfs) MN_NFS_ENABLED="0" ;;
         --start) START_NOW="Y" ;;
         --no-start) START_NOW="N" ;;
         --start-as-worker) START_AS_WORKER="Y"; START_NOW="Y" ;;
@@ -3204,6 +3251,9 @@ function write_runtime_compose_files() {
     network_token="$(resolve_network_token)"
     redis_password="$(resolve_redis_password "mirror_neuron_password_admin")"
     mn_cookie="$(resolve_mn_cookie)"
+    printf '%s\n' "mirror_neuron_password" > "${INSTALL_DIR}/grpc_auth.token"
+    printf '%s\n' "mirror_neuron_password_admin" > "${INSTALL_DIR}/grpc_admin.token"
+    chmod 600 "${INSTALL_DIR}/grpc_auth.token" "${INSTALL_DIR}/grpc_admin.token" 2>/dev/null || true
     runtime_skills_root="${MN_SKILLS_ROOT:-${MN_HOST_HOME_DIR}/skills}"
     runtime_package_index="${MN_PACKAGE_INDEX_FILE:-}"
     membrane_engine_tag="${MN_MEMBRANE_ENGINE_IMAGE_TAG:-${INSTALL_VERSION:-v${MN_PACKAGE_VERSION:-1.2.18}}}"
@@ -3225,6 +3275,7 @@ function write_runtime_compose_files() {
     ensure_runtime_host_directory "$MN_HOST_ARTIFACTS_DIR" "run artifacts host mount" "MN_HOST_ARTIFACTS_DIR"
     ensure_runtime_host_directory "$MN_HOST_BLOB_STORE_DIR" "blob store host mount" "MN_HOST_BLOB_STORE_DIR"
     ensure_runtime_host_directory "$MN_HOST_SHARED_STORAGE_ROOT" "shared storage host mount" "MN_HOST_SHARED_STORAGE_ROOT"
+    mn_install_nfs_support_if_possible
     ensure_runtime_host_directory "$MN_HOST_OPENSHELL_CONFIG_DIR" "OpenShell config host mount" "MN_HOST_OPENSHELL_CONFIG_DIR"
     ensure_runtime_host_directory "$MN_HOST_OPENSHELL_STATE_DIR" "OpenShell state host mount" "MN_HOST_OPENSHELL_STATE_DIR"
     mn_write_runtime_compose_file "$RUNTIME_COMPOSE_TEMPLATE" "$RUNTIME_COMPOSE_FILE"
@@ -3239,6 +3290,9 @@ MN_HOST_HOME_DIR=${MN_HOST_HOME_DIR}
 MN_HOST_ARTIFACTS_DIR=${MN_HOST_ARTIFACTS_DIR}
 MN_HOST_BLOB_STORE_DIR=${MN_HOST_BLOB_STORE_DIR}
 MN_HOST_SHARED_STORAGE_ROOT=${MN_HOST_SHARED_STORAGE_ROOT}
+MN_NFS_ENABLED=${MN_NFS_ENABLED}
+MN_NFS_REQUIRED=${MN_NFS_REQUIRED}
+MN_NFS_EXPORT_PATH=${MN_NFS_EXPORT_PATH}
 MN_HOST_OPENSHELL_CONFIG_DIR=${MN_HOST_OPENSHELL_CONFIG_DIR}
 MN_HOST_OPENSHELL_STATE_DIR=${MN_HOST_OPENSHELL_STATE_DIR}
 MEMBRANE_DIR=${MEMBRANE_DIR}
@@ -3769,6 +3823,9 @@ MN_HOST_HOME_DIR="${MN_HOST_HOME_DIR:-${MN_HOST_MN_DIR:-${INSTALL_DIR}}}"
 MN_HOST_ARTIFACTS_DIR="${MN_HOST_ARTIFACTS_DIR:-${MN_HOST_HOME_DIR}/runs}"
 MN_HOST_BLOB_STORE_DIR="${MN_HOST_BLOB_STORE_DIR:-${MN_HOST_HOME_DIR}/blobs}"
 MN_HOST_SHARED_STORAGE_ROOT="${MN_HOST_SHARED_STORAGE_ROOT:-${MN_HOST_SHARED_ARTIFACT_ROOT:-${MN_HOST_HOME_DIR}/shared}}"
+MN_NFS_ENABLED="${MN_NFS_ENABLED:-auto}"
+MN_NFS_REQUIRED="${MN_NFS_REQUIRED:-0}"
+MN_NFS_EXPORT_PATH="${MN_NFS_EXPORT_PATH:-${MN_HOST_SHARED_STORAGE_ROOT}}"
 MN_HOST_OPENSHELL_CONFIG_DIR="${OPENSHELL_CONTAINER_CONFIG_DIR:-${HOME}/.config/openshell-mirror-neuron}"
 MN_HOST_OPENSHELL_STATE_DIR="${MN_HOST_OPENSHELL_STATE_DIR:-${INSTALL_DIR}/openshell-state}"
 OPENSHELL_GATEWAY_USER="${OPENSHELL_GATEWAY_USER:-$(id -u):$(id -g)}"
@@ -3836,6 +3893,7 @@ Options:
   --context-engine / --no-context-engine
                                 Enable or skip Membrane context engine setup.
   --openshell / --no-openshell  Enable or skip OpenShell gateway setup.
+  --nfs / --no-nfs              Enable or skip NFS shared-storage preparation.
   --start / --no-start          Start or skip starting MirrorNeuron after install.
   --start-as-worker             Start MirrorNeuron as a worker node after install.
 
@@ -3940,6 +3998,8 @@ while [ "$#" -gt 0 ]; do
         --no-context-engine) INSTALL_CONTEXT_ENGINE="N" ;;
         --openshell) INSTALL_OPENSHELL="Y" ;;
         --no-openshell) INSTALL_OPENSHELL="N" ;;
+        --nfs) MN_NFS_ENABLED="auto" ;;
+        --no-nfs) MN_NFS_ENABLED="0" ;;
         --start) START_NOW="Y" ;;
         --no-start) START_NOW="N" ;;
         --start-as-worker) START_AS_WORKER="Y"; START_NOW="Y" ;;
@@ -5246,6 +5306,9 @@ function write_runtime_compose_files() {
     network_token="$(resolve_network_token)"
     redis_password="$(resolve_redis_password "mirror_neuron_password_admin")"
     mn_cookie="$(resolve_mn_cookie)"
+    printf '%s\n' "mirror_neuron_password" > "${INSTALL_DIR}/grpc_auth.token"
+    printf '%s\n' "mirror_neuron_password_admin" > "${INSTALL_DIR}/grpc_admin.token"
+    chmod 600 "${INSTALL_DIR}/grpc_auth.token" "${INSTALL_DIR}/grpc_admin.token" 2>/dev/null || true
     runtime_skills_root="${MN_SKILLS_ROOT:-${MN_HOST_HOME_DIR}/skills}"
     runtime_package_index="${MN_PACKAGE_INDEX_FILE:-}"
     membrane_engine_tag="${MN_MEMBRANE_ENGINE_IMAGE_TAG:-${INSTALL_VERSION:-v${MN_PACKAGE_VERSION:-1.2.18}}}"
@@ -5267,6 +5330,7 @@ function write_runtime_compose_files() {
     ensure_runtime_host_directory "$MN_HOST_ARTIFACTS_DIR" "run artifacts host mount" "MN_HOST_ARTIFACTS_DIR"
     ensure_runtime_host_directory "$MN_HOST_BLOB_STORE_DIR" "blob store host mount" "MN_HOST_BLOB_STORE_DIR"
     ensure_runtime_host_directory "$MN_HOST_SHARED_STORAGE_ROOT" "shared storage host mount" "MN_HOST_SHARED_STORAGE_ROOT"
+    mn_install_nfs_support_if_possible
     ensure_runtime_host_directory "$MN_HOST_OPENSHELL_CONFIG_DIR" "OpenShell config host mount" "MN_HOST_OPENSHELL_CONFIG_DIR"
     ensure_runtime_host_directory "$MN_HOST_OPENSHELL_STATE_DIR" "OpenShell state host mount" "MN_HOST_OPENSHELL_STATE_DIR"
     mn_write_runtime_compose_file "$RUNTIME_COMPOSE_TEMPLATE" "$RUNTIME_COMPOSE_FILE"
@@ -5281,6 +5345,9 @@ MN_HOST_HOME_DIR=${MN_HOST_HOME_DIR}
 MN_HOST_ARTIFACTS_DIR=${MN_HOST_ARTIFACTS_DIR}
 MN_HOST_BLOB_STORE_DIR=${MN_HOST_BLOB_STORE_DIR}
 MN_HOST_SHARED_STORAGE_ROOT=${MN_HOST_SHARED_STORAGE_ROOT}
+MN_NFS_ENABLED=${MN_NFS_ENABLED}
+MN_NFS_REQUIRED=${MN_NFS_REQUIRED}
+MN_NFS_EXPORT_PATH=${MN_NFS_EXPORT_PATH}
 MN_HOST_OPENSHELL_CONFIG_DIR=${MN_HOST_OPENSHELL_CONFIG_DIR}
 MN_HOST_OPENSHELL_STATE_DIR=${MN_HOST_OPENSHELL_STATE_DIR}
 MEMBRANE_DIR=${MEMBRANE_DIR}
