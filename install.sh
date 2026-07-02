@@ -204,7 +204,12 @@ function mn_runtime_compose_template_is_valid() {
     local template="$1"
     [ -f "$template" ] &&
         grep -q '^name: mirror-neuron$' "$template" &&
-        grep -q 'mirror-neuron-core' "$template"
+        grep -q 'mirror-neuron-core' "$template" || return 1
+    if [ "${START_AS_WORKER:-N}" = "Y" ]; then
+        grep -q 'mn-native-sdk-grpc:' "$template" &&
+            grep -q 'mn-litellm-proxy:' "$template" &&
+            grep -q 'MN_NATIVE_SDK_GRPC_TARGET' "$template"
+    fi
 }
 
 function mn_ensure_runtime_compose_template_file() {
@@ -1610,6 +1615,18 @@ MN_CONTEXT_MODEL_RUNNER_MODEL=${model_runner_model}
 MN_GRPC_BIND_HOST=${MN_GRPC_BIND_HOST:-127.0.0.1}
 MN_GRPC_PORT=${MN_GRPC_PORT:-55051}
 MN_GRPC_TARGET=${MN_GRPC_TARGET:-localhost:${MN_GRPC_PORT:-55051}}
+MN_GRPC_ADVERTISE_PORT=${MN_GRPC_ADVERTISE_PORT:-${MN_GRPC_PORT:-55051}}
+MN_NATIVE_SDK_GRPC_HOST=${MN_NATIVE_SDK_GRPC_HOST:-127.0.0.1}
+MN_NATIVE_SDK_GRPC_PORT=${MN_NATIVE_SDK_GRPC_PORT:-55052}
+MN_NATIVE_SDK_GRPC_ADVERTISE_HOST=${MN_NATIVE_SDK_GRPC_ADVERTISE_HOST:-${MN_NETWORK_ADVERTISE_HOST:-}}
+MN_NATIVE_SDK_GRPC_ADVERTISE_PORT=${MN_NATIVE_SDK_GRPC_ADVERTISE_PORT:-${MN_NATIVE_SDK_GRPC_PORT:-55052}}
+MN_NATIVE_SDK_GRPC_TARGET=${MN_NATIVE_SDK_GRPC_TARGET:-mn-native-sdk-grpc:55052}
+MN_NATIVE_SDK_GRPC_PROXY_PORT=${MN_NATIVE_SDK_GRPC_PROXY_PORT:-${MN_NATIVE_SDK_GRPC_PORT:-55052}}
+MN_NATIVE_SDK_GRPC_PROXY_TARGET_HOST=${MN_NATIVE_SDK_GRPC_PROXY_TARGET_HOST:-host.docker.internal}
+MN_NATIVE_SDK_GRPC_PROXY_TARGET_PORT=${MN_NATIVE_SDK_GRPC_PROXY_TARGET_PORT:-${MN_NATIVE_SDK_GRPC_PORT:-55052}}
+MN_LITELLM_GATEWAY_BIND_HOST=${MN_LITELLM_GATEWAY_BIND_HOST:-127.0.0.1}
+MN_LITELLM_GATEWAY_PORT=${MN_LITELLM_GATEWAY_PORT:-4000}
+MN_LITELLM_GATEWAY_INTERNAL_API_BASE=${MN_LITELLM_GATEWAY_INTERNAL_API_BASE:-http://mn-litellm-proxy:4000/v1}
 MN_API_HOST=${MN_API_HOST:-localhost}
 MN_API_PORT=${MN_API_PORT:-54001}
 MN_DIST_PORT=${MN_DIST_PORT:-54370}
@@ -1751,6 +1768,8 @@ function ensure_docker_model_runner() {
 function start_runtime_compose_sidecars() {
     local services=()
     [ "$INSTALL_REDIS" = "Y" ] && services+=("redis")
+    grep -q '^  mn-native-sdk-grpc:' "$RUNTIME_COMPOSE_FILE" 2>/dev/null && services+=("mn-native-sdk-grpc")
+    grep -q '^  mn-litellm-proxy:' "$RUNTIME_COMPOSE_FILE" 2>/dev/null && services+=("mn-litellm-proxy")
     [ "$INSTALL_OPENSHELL" = "Y" ] && services+=("openshell")
     if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
         services+=("membrane-context-engine")
@@ -2081,11 +2100,14 @@ echo -e "  3. Use the CLI:    ${GREEN}mn node list${RESET}\n" >&3
 if [ "$START_NOW" = "Y" ]; then
     print_step "Starting MirrorNeuron Server..."
     if [ "$START_AS_WORKER" = "Y" ]; then
-        "$VENV_DIR/bin/mn" runtime start --worker-node
+        if ! "$VENV_DIR/bin/mn" runtime start --worker-node; then
+            print_warning "mn runtime start --worker-node failed; starting worker gateway services with Docker Compose."
+            runtime_compose up -d mn-native-sdk-grpc mn-litellm-proxy
+        fi
     else
         if ! "$VENV_DIR/bin/mn" runtime start; then
-            print_warning "mn runtime start failed; starting MirrorNeuron Core directly with Docker Compose."
-            runtime_compose up -d mirror-neuron-core
+            print_warning "mn runtime start failed; starting MirrorNeuron Docker Compose runtime."
+            runtime_compose up -d
             "$VENV_DIR/bin/mn" runtime restart-sidecars --api >/dev/null 2>&1 || print_warning "MirrorNeuron Core started, but the REST API sidecar did not start automatically."
         fi
     fi
@@ -3293,6 +3315,18 @@ MN_CONTEXT_MODEL_RUNNER_MODEL=${model_runner_model}
 MN_GRPC_BIND_HOST=${MN_GRPC_BIND_HOST:-127.0.0.1}
 MN_GRPC_PORT=${MN_GRPC_PORT:-55051}
 MN_GRPC_TARGET=${MN_GRPC_TARGET:-localhost:${MN_GRPC_PORT:-55051}}
+MN_GRPC_ADVERTISE_PORT=${MN_GRPC_ADVERTISE_PORT:-${MN_GRPC_PORT:-55051}}
+MN_NATIVE_SDK_GRPC_HOST=${MN_NATIVE_SDK_GRPC_HOST:-127.0.0.1}
+MN_NATIVE_SDK_GRPC_PORT=${MN_NATIVE_SDK_GRPC_PORT:-55052}
+MN_NATIVE_SDK_GRPC_ADVERTISE_HOST=${MN_NATIVE_SDK_GRPC_ADVERTISE_HOST:-${MN_NETWORK_ADVERTISE_HOST:-}}
+MN_NATIVE_SDK_GRPC_ADVERTISE_PORT=${MN_NATIVE_SDK_GRPC_ADVERTISE_PORT:-${MN_NATIVE_SDK_GRPC_PORT:-55052}}
+MN_NATIVE_SDK_GRPC_TARGET=${MN_NATIVE_SDK_GRPC_TARGET:-mn-native-sdk-grpc:55052}
+MN_NATIVE_SDK_GRPC_PROXY_PORT=${MN_NATIVE_SDK_GRPC_PROXY_PORT:-${MN_NATIVE_SDK_GRPC_PORT:-55052}}
+MN_NATIVE_SDK_GRPC_PROXY_TARGET_HOST=${MN_NATIVE_SDK_GRPC_PROXY_TARGET_HOST:-host.docker.internal}
+MN_NATIVE_SDK_GRPC_PROXY_TARGET_PORT=${MN_NATIVE_SDK_GRPC_PROXY_TARGET_PORT:-${MN_NATIVE_SDK_GRPC_PORT:-55052}}
+MN_LITELLM_GATEWAY_BIND_HOST=${MN_LITELLM_GATEWAY_BIND_HOST:-127.0.0.1}
+MN_LITELLM_GATEWAY_PORT=${MN_LITELLM_GATEWAY_PORT:-4000}
+MN_LITELLM_GATEWAY_INTERNAL_API_BASE=${MN_LITELLM_GATEWAY_INTERNAL_API_BASE:-http://mn-litellm-proxy:4000/v1}
 MN_API_HOST=${MN_API_HOST:-localhost}
 MN_API_PORT=${MN_API_PORT:-54001}
 MN_DIST_PORT=${MN_DIST_PORT:-54370}
@@ -3434,6 +3468,8 @@ function ensure_docker_model_runner() {
 function start_runtime_compose_sidecars() {
     local services=()
     [ "$INSTALL_REDIS" = "Y" ] && services+=("redis")
+    grep -q '^  mn-native-sdk-grpc:' "$RUNTIME_COMPOSE_FILE" 2>/dev/null && services+=("mn-native-sdk-grpc")
+    grep -q '^  mn-litellm-proxy:' "$RUNTIME_COMPOSE_FILE" 2>/dev/null && services+=("mn-litellm-proxy")
     [ "$INSTALL_OPENSHELL" = "Y" ] && services+=("openshell")
     if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
         services+=("membrane-context-engine")
@@ -3760,11 +3796,14 @@ if [ "$START_NOW" = "Y" ]; then
     print_step "Starting MirrorNeuron Server"
     "$VENV_DIR/bin/mn" runtime stop >/dev/null 2>&1 || true
     if [ "$START_AS_WORKER" = "Y" ]; then
-        "$VENV_DIR/bin/mn" runtime start --worker-node
+        if ! "$VENV_DIR/bin/mn" runtime start --worker-node; then
+            print_warning "mn runtime start --worker-node failed; starting worker gateway services with Docker Compose."
+            runtime_compose up -d mn-native-sdk-grpc mn-litellm-proxy
+        fi
     else
         if ! "$VENV_DIR/bin/mn" runtime start; then
-            print_warning "mn runtime start failed; starting MirrorNeuron Core directly with Docker Compose."
-            runtime_compose up -d mirror-neuron-core
+            print_warning "mn runtime start failed; starting MirrorNeuron Docker Compose runtime."
+            runtime_compose up -d
             "$VENV_DIR/bin/mn" runtime restart-sidecars --api >/dev/null 2>&1 || print_warning "MirrorNeuron Core started, but the REST API sidecar did not start automatically."
         fi
     fi
@@ -5362,6 +5401,18 @@ MN_CONTEXT_MODEL_RUNNER_MODEL=${model_runner_model}
 MN_GRPC_BIND_HOST=${MN_GRPC_BIND_HOST:-127.0.0.1}
 MN_GRPC_PORT=${MN_GRPC_PORT:-55051}
 MN_GRPC_TARGET=${MN_GRPC_TARGET:-localhost:${MN_GRPC_PORT:-55051}}
+MN_GRPC_ADVERTISE_PORT=${MN_GRPC_ADVERTISE_PORT:-${MN_GRPC_PORT:-55051}}
+MN_NATIVE_SDK_GRPC_HOST=${MN_NATIVE_SDK_GRPC_HOST:-127.0.0.1}
+MN_NATIVE_SDK_GRPC_PORT=${MN_NATIVE_SDK_GRPC_PORT:-55052}
+MN_NATIVE_SDK_GRPC_ADVERTISE_HOST=${MN_NATIVE_SDK_GRPC_ADVERTISE_HOST:-${MN_NETWORK_ADVERTISE_HOST:-}}
+MN_NATIVE_SDK_GRPC_ADVERTISE_PORT=${MN_NATIVE_SDK_GRPC_ADVERTISE_PORT:-${MN_NATIVE_SDK_GRPC_PORT:-55052}}
+MN_NATIVE_SDK_GRPC_TARGET=${MN_NATIVE_SDK_GRPC_TARGET:-mn-native-sdk-grpc:55052}
+MN_NATIVE_SDK_GRPC_PROXY_PORT=${MN_NATIVE_SDK_GRPC_PROXY_PORT:-${MN_NATIVE_SDK_GRPC_PORT:-55052}}
+MN_NATIVE_SDK_GRPC_PROXY_TARGET_HOST=${MN_NATIVE_SDK_GRPC_PROXY_TARGET_HOST:-host.docker.internal}
+MN_NATIVE_SDK_GRPC_PROXY_TARGET_PORT=${MN_NATIVE_SDK_GRPC_PROXY_TARGET_PORT:-${MN_NATIVE_SDK_GRPC_PORT:-55052}}
+MN_LITELLM_GATEWAY_BIND_HOST=${MN_LITELLM_GATEWAY_BIND_HOST:-127.0.0.1}
+MN_LITELLM_GATEWAY_PORT=${MN_LITELLM_GATEWAY_PORT:-4000}
+MN_LITELLM_GATEWAY_INTERNAL_API_BASE=${MN_LITELLM_GATEWAY_INTERNAL_API_BASE:-http://mn-litellm-proxy:4000/v1}
 MN_API_HOST=${MN_API_HOST:-localhost}
 MN_API_PORT=${MN_API_PORT:-54001}
 MN_DIST_PORT=${MN_DIST_PORT:-54370}
@@ -5503,6 +5554,8 @@ function ensure_docker_model_runner() {
 function start_runtime_compose_sidecars() {
     local services=()
     [ "$INSTALL_REDIS" = "Y" ] && services+=("redis")
+    grep -q '^  mn-native-sdk-grpc:' "$RUNTIME_COMPOSE_FILE" 2>/dev/null && services+=("mn-native-sdk-grpc")
+    grep -q '^  mn-litellm-proxy:' "$RUNTIME_COMPOSE_FILE" 2>/dev/null && services+=("mn-litellm-proxy")
     [ "$INSTALL_OPENSHELL" = "Y" ] && services+=("openshell")
     if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
         services+=("membrane-context-engine")
@@ -5751,11 +5804,14 @@ fi
 if [ "$START_NOW" = "Y" ]; then
     print_step "Starting MirrorNeuron"
     if [ "$START_AS_WORKER" = "Y" ]; then
-        "$VENV_DIR/bin/mn" runtime start --worker-node
+        if ! "$VENV_DIR/bin/mn" runtime start --worker-node; then
+            print_warning "mn runtime start --worker-node failed; starting worker gateway services with Docker Compose."
+            runtime_compose up -d mn-native-sdk-grpc mn-litellm-proxy
+        fi
     else
         if ! "$VENV_DIR/bin/mn" runtime start; then
-            print_warning "mn runtime start failed; starting MirrorNeuron Core directly with Docker Compose."
-            runtime_compose up -d mirror-neuron-core
+            print_warning "mn runtime start failed; starting MirrorNeuron Docker Compose runtime."
+            runtime_compose up -d
             "$VENV_DIR/bin/mn" runtime restart-sidecars --api >/dev/null 2>&1 || print_warning "MirrorNeuron Core started, but the REST API sidecar did not start automatically."
         fi
     fi
