@@ -81,6 +81,77 @@ services:
     networks:
       - runtime
 
+  mn-native-sdk-grpc:
+    image: mirror-neuron-core:latest
+    container_name: mirror-neuron-native-sdk-grpc
+    restart: unless-stopped
+    command:
+      - python3
+      - -u
+      - -c
+      - |
+        import os
+        import socket
+        import threading
+
+        listen_host = os.getenv("MN_NATIVE_SDK_GRPC_PROXY_LISTEN_HOST", "0.0.0.0")
+        listen_port = int(os.getenv("MN_NATIVE_SDK_GRPC_PROXY_PORT", "55052"))
+        target_host = os.getenv("MN_NATIVE_SDK_GRPC_PROXY_TARGET_HOST", "host.docker.internal")
+        target_port = int(os.getenv("MN_NATIVE_SDK_GRPC_PROXY_TARGET_PORT", "55052"))
+
+        def relay(src, dst):
+            try:
+                while True:
+                    data = src.recv(65536)
+                    if not data:
+                        break
+                    dst.sendall(data)
+            finally:
+                try:
+                    dst.shutdown(socket.SHUT_WR)
+                except OSError:
+                    pass
+
+        def handle(client):
+            upstream = None
+            try:
+                upstream = socket.create_connection((target_host, target_port), timeout=10)
+                thread = threading.Thread(target=relay, args=(client, upstream), daemon=True)
+                thread.start()
+                relay(upstream, client)
+            except Exception as exc:
+                print(f"native SDK gRPC proxy connection failed: {exc}", flush=True)
+            finally:
+                for sock in (client, upstream):
+                    if sock is None:
+                        continue
+                    try:
+                        sock.close()
+                    except OSError:
+                        pass
+
+        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server.bind((listen_host, listen_port))
+        server.listen(128)
+        print(
+            f"native SDK gRPC proxy listening on {listen_host}:{listen_port} -> {target_host}:{target_port}",
+            flush=True,
+        )
+
+        while True:
+            client, _addr = server.accept()
+            threading.Thread(target=handle, args=(client,), daemon=True).start()
+    environment:
+      MN_NATIVE_SDK_GRPC_PROXY_LISTEN_HOST: 0.0.0.0
+      MN_NATIVE_SDK_GRPC_PROXY_PORT: ${MN_NATIVE_SDK_GRPC_PROXY_PORT:-55052}
+      MN_NATIVE_SDK_GRPC_PROXY_TARGET_HOST: ${MN_NATIVE_SDK_GRPC_PROXY_TARGET_HOST:-host.docker.internal}
+      MN_NATIVE_SDK_GRPC_PROXY_TARGET_PORT: ${MN_NATIVE_SDK_GRPC_PROXY_TARGET_PORT:-${MN_NATIVE_SDK_GRPC_PORT:-55052}}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - runtime
+
   mirror-neuron-core:
     image: mirror-neuron-core:latest
     container_name: mirror-neuron-core
@@ -140,7 +211,9 @@ services:
       MN_REDIS_RECONNECT_MAX_BACKOFF_MS: ${MN_REDIS_RECONNECT_MAX_BACKOFF_MS:-2000}
       MN_NETWORK_JOIN_TOKEN: ${MN_NETWORK_JOIN_TOKEN:-}
       MN_NETWORK_ADVERTISE_HOST: ${MN_NETWORK_ADVERTISE_HOST:-}
+      MN_GRPC_ADVERTISE_PORT: ${MN_GRPC_ADVERTISE_PORT:-${MN_GRPC_PORT:-55051}}
       MN_MODEL_SERVICE_NODE_NAME: ${MN_MODEL_SERVICE_NODE_NAME:-}
+      MN_NATIVE_SDK_GRPC_TARGET: ${MN_NATIVE_SDK_GRPC_TARGET:-mn-native-sdk-grpc:55052}
       MN_NETWORK_REDIS_HOST: ${MN_NETWORK_REDIS_HOST:-}
       MN_NETWORK_REDIS_PORT: ${MN_NETWORK_REDIS_PORT:-}
       MN_CONTEXT_ADDR: membrane-context-engine:50052
@@ -209,6 +282,8 @@ services:
     depends_on:
       redis:
         condition: service_started
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ${MN_HOST_STATE_DIR:-./state}:/root/.mirror_neuron
       - ${MN_HOST_STATE_DIR:-./state}:/opt/mirror_neuron/.mirror_neuron
