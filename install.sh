@@ -234,6 +234,7 @@ function mn_write_runtime_compose_file() {
     mn_ensure_runtime_compose_template_file
     mkdir -p "$(dirname "$target")"
     cp "$RUNTIME_COMPOSE_TEMPLATE" "$target"
+    rm -f "$(dirname "$target")/docker-compose.models.yml"
 }
 
 function mn_remove_dockerfile_frontend_directive() {
@@ -1612,6 +1613,7 @@ MN_MEMBRANE_ENGINE_IMAGE=${membrane_engine_image}
 MN_MEMBRANE_ENGINE_IMAGE_TAG=${membrane_engine_tag}
 MN_REDIS_IMAGE=${MN_REDIS_IMAGE:-redis:8}
 MN_CONTEXT_MODEL_RUNNER_MODEL=${model_runner_model}
+MN_LLM_MODEL_RUNNER_MODEL=${MN_LLM_MODEL_RUNNER_MODEL:-gemma4:e2b}
 MN_GRPC_BIND_HOST=${MN_GRPC_BIND_HOST:-127.0.0.1}
 MN_GRPC_PORT=${MN_GRPC_PORT:-55051}
 MN_GRPC_TARGET=${MN_GRPC_TARGET:-localhost:${MN_GRPC_PORT:-55051}}
@@ -3312,6 +3314,7 @@ MN_MEMBRANE_ENGINE_IMAGE=${membrane_engine_image}
 MN_MEMBRANE_ENGINE_IMAGE_TAG=${membrane_engine_tag}
 MN_REDIS_IMAGE=${MN_REDIS_IMAGE:-redis:8}
 MN_CONTEXT_MODEL_RUNNER_MODEL=${model_runner_model}
+MN_LLM_MODEL_RUNNER_MODEL=${MN_LLM_MODEL_RUNNER_MODEL:-gemma4:e2b}
 MN_GRPC_BIND_HOST=${MN_GRPC_BIND_HOST:-127.0.0.1}
 MN_GRPC_PORT=${MN_GRPC_PORT:-55051}
 MN_GRPC_TARGET=${MN_GRPC_TARGET:-localhost:${MN_GRPC_PORT:-55051}}
@@ -5398,6 +5401,7 @@ MN_MEMBRANE_ENGINE_IMAGE=${membrane_engine_image}
 MN_MEMBRANE_ENGINE_IMAGE_TAG=${membrane_engine_tag}
 MN_REDIS_IMAGE=${MN_REDIS_IMAGE:-redis:8}
 MN_CONTEXT_MODEL_RUNNER_MODEL=${model_runner_model}
+MN_LLM_MODEL_RUNNER_MODEL=${MN_LLM_MODEL_RUNNER_MODEL:-gemma4:e2b}
 MN_GRPC_BIND_HOST=${MN_GRPC_BIND_HOST:-127.0.0.1}
 MN_GRPC_PORT=${MN_GRPC_PORT:-55051}
 MN_GRPC_TARGET=${MN_GRPC_TARGET:-localhost:${MN_GRPC_PORT:-55051}}
