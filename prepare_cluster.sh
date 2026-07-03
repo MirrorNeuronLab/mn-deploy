@@ -1,0 +1,10 @@
+mn stop
+
+MN_NETWORK_ADVERTISE_HOST=192.168.4.20 \
+MN_GRPC_BIND_HOST=0.0.0.0 \
+MN_EPMD_BIND_HOST=0.0.0.0 \
+MN_DIST_BIND_HOST=0.0.0.0 \
+ERL_EPMD_ADDRESS=0.0.0.0 \
+mn start
+
+docker port mirror-neuron-core 50051
