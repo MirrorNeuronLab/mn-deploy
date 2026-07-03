@@ -1551,13 +1551,26 @@ function ensure_runtime_host_directory() {
     chmod u+rwx "$path" 2>/dev/null || true
 }
 
+function prepare_litellm_gateway_config() {
+    local gateway_dir="${MN_HOST_HOME_DIR}/models/litellm-gateway"
+    mkdir -p "$gateway_dir"
+    if [ ! -e "${gateway_dir}/config.yaml" ]; then
+        printf '{"model_list":[]}\n' > "${gateway_dir}/config.yaml"
+    fi
+    chmod u+rwX "$gateway_dir" "${gateway_dir}/config.yaml" 2>/dev/null || true
+}
+
 function write_runtime_compose_files() {
-    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image
+    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image litellm_gateway_bind_host
     if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
         context_engine_source_dir >/dev/null
     fi
     model_runner_model="${MN_CONTEXT_MODEL_RUNNER_MODEL:-hf.co/homerquan/mn-context-engine-model-v-Q4_K_M}"
     profiles="$(compose_profiles)"
+    litellm_gateway_bind_host="${MN_LITELLM_GATEWAY_BIND_HOST:-127.0.0.1}"
+    if [ "${START_AS_WORKER:-N}" = "Y" ] && [ -z "${MN_LITELLM_GATEWAY_BIND_HOST:-}" ]; then
+        litellm_gateway_bind_host="0.0.0.0"
+    fi
     network_name="${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
     network_external="$(resolve_docker_network_external "$network_name")"
     network_token="$(resolve_network_token)"
@@ -1589,6 +1602,7 @@ function write_runtime_compose_files() {
     ensure_runtime_host_directory "$MN_HOST_SHARED_STORAGE_ROOT" "shared storage host mount" "MN_HOST_SHARED_STORAGE_ROOT"
     ensure_runtime_host_directory "$MN_HOST_OPENSHELL_CONFIG_DIR" "OpenShell config host mount" "MN_HOST_OPENSHELL_CONFIG_DIR"
     ensure_runtime_host_directory "$MN_HOST_OPENSHELL_STATE_DIR" "OpenShell state host mount" "MN_HOST_OPENSHELL_STATE_DIR"
+    prepare_litellm_gateway_config
     mn_write_runtime_compose_file "$RUNTIME_COMPOSE_TEMPLATE" "$RUNTIME_COMPOSE_FILE"
     if [ "$INSTALL_OPENSHELL" = "Y" ]; then
         write_openshell_compose_config
@@ -1626,7 +1640,7 @@ MN_NATIVE_SDK_GRPC_TARGET=${MN_NATIVE_SDK_GRPC_TARGET:-mn-native-sdk-grpc:55052}
 MN_NATIVE_SDK_GRPC_PROXY_PORT=${MN_NATIVE_SDK_GRPC_PROXY_PORT:-${MN_NATIVE_SDK_GRPC_PORT:-55052}}
 MN_NATIVE_SDK_GRPC_PROXY_TARGET_HOST=${MN_NATIVE_SDK_GRPC_PROXY_TARGET_HOST:-host.docker.internal}
 MN_NATIVE_SDK_GRPC_PROXY_TARGET_PORT=${MN_NATIVE_SDK_GRPC_PROXY_TARGET_PORT:-${MN_NATIVE_SDK_GRPC_PORT:-55052}}
-MN_LITELLM_GATEWAY_BIND_HOST=${MN_LITELLM_GATEWAY_BIND_HOST:-127.0.0.1}
+MN_LITELLM_GATEWAY_BIND_HOST=${litellm_gateway_bind_host}
 MN_LITELLM_GATEWAY_PORT=${MN_LITELLM_GATEWAY_PORT:-4000}
 MN_LITELLM_GATEWAY_INTERNAL_API_BASE=${MN_LITELLM_GATEWAY_INTERNAL_API_BASE:-http://mn-litellm-proxy:4000/v1}
 MN_API_HOST=${MN_API_HOST:-localhost}
@@ -3255,10 +3269,23 @@ function ensure_runtime_host_directory() {
     chmod u+rwx "$path" 2>/dev/null || true
 }
 
+function prepare_litellm_gateway_config() {
+    local gateway_dir="${MN_HOST_HOME_DIR}/models/litellm-gateway"
+    mkdir -p "$gateway_dir"
+    if [ ! -e "${gateway_dir}/config.yaml" ]; then
+        printf '{"model_list":[]}\n' > "${gateway_dir}/config.yaml"
+    fi
+    chmod u+rwX "$gateway_dir" "${gateway_dir}/config.yaml" 2>/dev/null || true
+}
+
 function write_runtime_compose_files() {
-    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image
+    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image litellm_gateway_bind_host
     model_runner_model="${MN_CONTEXT_MODEL_RUNNER_MODEL:-hf.co/homerquan/mn-context-engine-model-v-Q4_K_M}"
     profiles="$(compose_profiles)"
+    litellm_gateway_bind_host="${MN_LITELLM_GATEWAY_BIND_HOST:-127.0.0.1}"
+    if [ "${START_AS_WORKER:-N}" = "Y" ] && [ -z "${MN_LITELLM_GATEWAY_BIND_HOST:-}" ]; then
+        litellm_gateway_bind_host="0.0.0.0"
+    fi
     network_name="${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
     network_external="$(resolve_docker_network_external "$network_name")"
     network_token="$(resolve_network_token)"
@@ -3290,6 +3317,7 @@ function write_runtime_compose_files() {
     ensure_runtime_host_directory "$MN_HOST_SHARED_STORAGE_ROOT" "shared storage host mount" "MN_HOST_SHARED_STORAGE_ROOT"
     ensure_runtime_host_directory "$MN_HOST_OPENSHELL_CONFIG_DIR" "OpenShell config host mount" "MN_HOST_OPENSHELL_CONFIG_DIR"
     ensure_runtime_host_directory "$MN_HOST_OPENSHELL_STATE_DIR" "OpenShell state host mount" "MN_HOST_OPENSHELL_STATE_DIR"
+    prepare_litellm_gateway_config
     mn_write_runtime_compose_file "$RUNTIME_COMPOSE_TEMPLATE" "$RUNTIME_COMPOSE_FILE"
     if [ "$INSTALL_OPENSHELL" = "Y" ]; then
         write_openshell_compose_config
@@ -3327,7 +3355,7 @@ MN_NATIVE_SDK_GRPC_TARGET=${MN_NATIVE_SDK_GRPC_TARGET:-mn-native-sdk-grpc:55052}
 MN_NATIVE_SDK_GRPC_PROXY_PORT=${MN_NATIVE_SDK_GRPC_PROXY_PORT:-${MN_NATIVE_SDK_GRPC_PORT:-55052}}
 MN_NATIVE_SDK_GRPC_PROXY_TARGET_HOST=${MN_NATIVE_SDK_GRPC_PROXY_TARGET_HOST:-host.docker.internal}
 MN_NATIVE_SDK_GRPC_PROXY_TARGET_PORT=${MN_NATIVE_SDK_GRPC_PROXY_TARGET_PORT:-${MN_NATIVE_SDK_GRPC_PORT:-55052}}
-MN_LITELLM_GATEWAY_BIND_HOST=${MN_LITELLM_GATEWAY_BIND_HOST:-127.0.0.1}
+MN_LITELLM_GATEWAY_BIND_HOST=${litellm_gateway_bind_host}
 MN_LITELLM_GATEWAY_PORT=${MN_LITELLM_GATEWAY_PORT:-4000}
 MN_LITELLM_GATEWAY_INTERNAL_API_BASE=${MN_LITELLM_GATEWAY_INTERNAL_API_BASE:-http://mn-litellm-proxy:4000/v1}
 MN_API_HOST=${MN_API_HOST:-localhost}
@@ -5342,10 +5370,23 @@ function ensure_runtime_host_directory() {
     chmod u+rwx "$path" 2>/dev/null || true
 }
 
+function prepare_litellm_gateway_config() {
+    local gateway_dir="${MN_HOST_HOME_DIR}/models/litellm-gateway"
+    mkdir -p "$gateway_dir"
+    if [ ! -e "${gateway_dir}/config.yaml" ]; then
+        printf '{"model_list":[]}\n' > "${gateway_dir}/config.yaml"
+    fi
+    chmod u+rwX "$gateway_dir" "${gateway_dir}/config.yaml" 2>/dev/null || true
+}
+
 function write_runtime_compose_files() {
-    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image
+    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image litellm_gateway_bind_host
     model_runner_model="${MN_CONTEXT_MODEL_RUNNER_MODEL:-hf.co/homerquan/mn-context-engine-model-v-Q4_K_M}"
     profiles="$(compose_profiles)"
+    litellm_gateway_bind_host="${MN_LITELLM_GATEWAY_BIND_HOST:-127.0.0.1}"
+    if [ "${START_AS_WORKER:-N}" = "Y" ] && [ -z "${MN_LITELLM_GATEWAY_BIND_HOST:-}" ]; then
+        litellm_gateway_bind_host="0.0.0.0"
+    fi
     network_name="${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
     network_external="$(resolve_docker_network_external "$network_name")"
     network_token="$(resolve_network_token)"
@@ -5377,6 +5418,7 @@ function write_runtime_compose_files() {
     ensure_runtime_host_directory "$MN_HOST_SHARED_STORAGE_ROOT" "shared storage host mount" "MN_HOST_SHARED_STORAGE_ROOT"
     ensure_runtime_host_directory "$MN_HOST_OPENSHELL_CONFIG_DIR" "OpenShell config host mount" "MN_HOST_OPENSHELL_CONFIG_DIR"
     ensure_runtime_host_directory "$MN_HOST_OPENSHELL_STATE_DIR" "OpenShell state host mount" "MN_HOST_OPENSHELL_STATE_DIR"
+    prepare_litellm_gateway_config
     mn_write_runtime_compose_file "$RUNTIME_COMPOSE_TEMPLATE" "$RUNTIME_COMPOSE_FILE"
     if [ "$INSTALL_OPENSHELL" = "Y" ]; then
         write_openshell_compose_config
@@ -5414,7 +5456,7 @@ MN_NATIVE_SDK_GRPC_TARGET=${MN_NATIVE_SDK_GRPC_TARGET:-mn-native-sdk-grpc:55052}
 MN_NATIVE_SDK_GRPC_PROXY_PORT=${MN_NATIVE_SDK_GRPC_PROXY_PORT:-${MN_NATIVE_SDK_GRPC_PORT:-55052}}
 MN_NATIVE_SDK_GRPC_PROXY_TARGET_HOST=${MN_NATIVE_SDK_GRPC_PROXY_TARGET_HOST:-host.docker.internal}
 MN_NATIVE_SDK_GRPC_PROXY_TARGET_PORT=${MN_NATIVE_SDK_GRPC_PROXY_TARGET_PORT:-${MN_NATIVE_SDK_GRPC_PORT:-55052}}
-MN_LITELLM_GATEWAY_BIND_HOST=${MN_LITELLM_GATEWAY_BIND_HOST:-127.0.0.1}
+MN_LITELLM_GATEWAY_BIND_HOST=${litellm_gateway_bind_host}
 MN_LITELLM_GATEWAY_PORT=${MN_LITELLM_GATEWAY_PORT:-4000}
 MN_LITELLM_GATEWAY_INTERNAL_API_BASE=${MN_LITELLM_GATEWAY_INTERNAL_API_BASE:-http://mn-litellm-proxy:4000/v1}
 MN_API_HOST=${MN_API_HOST:-localhost}
