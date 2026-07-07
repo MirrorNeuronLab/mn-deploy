@@ -24,9 +24,9 @@ Publishing requires both normal `gcloud` auth and Application Default
 Credentials because Twine uses Google's Artifact Registry keyring backend.
 
 ```bash
-/Users/homer/google-cloud-sdk/bin/gcloud auth login
-/Users/homer/google-cloud-sdk/bin/gcloud auth application-default login
-/Users/homer/google-cloud-sdk/bin/gcloud auth application-default set-quota-project mirrorneuron-public-packages
+$HOME/google-cloud-sdk/bin/gcloud auth login
+$HOME/google-cloud-sdk/bin/gcloud auth application-default login
+$HOME/google-cloud-sdk/bin/gcloud auth application-default set-quota-project mirrorneuron-public-packages
 ```
 
 Use the full `gcloud` path above if the SDK is not on `PATH`.
@@ -36,9 +36,9 @@ Use the full `gcloud` path above if the SDK is not on `PATH`.
 Run this from `mn-deploy`:
 
 ```bash
-cd /Users/homer/Projects/mirror-neuron-set/mn-deploy
+cd $HOME/Projects/mirror-neuron-set/mn-deploy
 
-PATH="/Users/homer/google-cloud-sdk/bin:$PATH" \
+PATH="$HOME/google-cloud-sdk/bin:$PATH" \
 ./setup_google_artifact_registry.sh \
   --project mirrorneuron-public-packages \
   --location us-central1 \
@@ -60,7 +60,7 @@ Always run the dry run first. It builds all indexed packages, runs
 prints stale package names that would be deleted. It does not upload or delete.
 
 ```bash
-PATH="/Users/homer/google-cloud-sdk/bin:$PATH" \
+PATH="$HOME/google-cloud-sdk/bin:$PATH" \
 ./publish_python_packages_to_google_artifact_registry.sh \
   --project mirrorneuron-public-packages \
   --location us-central1 \
@@ -85,7 +85,7 @@ This uploads built distributions that are missing from GAR and deletes GAR
 package names that are not present in the local package index.
 
 ```bash
-PATH="/Users/homer/google-cloud-sdk/bin:$PATH" \
+PATH="$HOME/google-cloud-sdk/bin:$PATH" \
 ./publish_python_packages_to_google_artifact_registry.sh \
   --apply \
   --project mirrorneuron-public-packages \
@@ -233,10 +233,10 @@ because its custom `mn_build_backend` implements `build_wheel` but not
 The public repo requires:
 
 ```bash
-/Users/homer/google-cloud-sdk/bin/gcloud org-policies set-policy /private/tmp/public-registry-drs-exception.yaml \
+$HOME/google-cloud-sdk/bin/gcloud org-policies set-policy /private/tmp/public-registry-drs-exception.yaml \
   --project=mirrorneuron-public-packages
 
-/Users/homer/google-cloud-sdk/bin/gcloud artifacts repositories add-iam-policy-binding agent-skills \
+$HOME/google-cloud-sdk/bin/gcloud artifacts repositories add-iam-policy-binding agent-skills \
   --project=mirrorneuron-public-packages \
   --location=us-central1 \
   --member=allUsers \
@@ -250,7 +250,7 @@ when the public reader binding was created.
 Verify:
 
 ```bash
-/Users/homer/google-cloud-sdk/bin/gcloud artifacts repositories get-iam-policy agent-skills \
+$HOME/google-cloud-sdk/bin/gcloud artifacts repositories get-iam-policy agent-skills \
   --project=mirrorneuron-public-packages \
   --location=us-central1 \
   --format='table(bindings.role,bindings.members)'
@@ -268,8 +268,8 @@ ROLE                               MEMBERS
 If `setup_google_artifact_registry.sh` says ADC is missing, rerun:
 
 ```bash
-/Users/homer/google-cloud-sdk/bin/gcloud auth application-default login
-/Users/homer/google-cloud-sdk/bin/gcloud auth application-default set-quota-project mirrorneuron-public-packages
+$HOME/google-cloud-sdk/bin/gcloud auth application-default login
+$HOME/google-cloud-sdk/bin/gcloud auth application-default set-quota-project mirrorneuron-public-packages
 ```
 
 If adding `allUsers` fails with `constraints/iam.allowedPolicyMemberDomains`,

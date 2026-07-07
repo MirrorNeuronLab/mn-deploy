@@ -12,7 +12,7 @@ Usage:
   clone_all_repos.sh [--dest-root PATH] [--clean] [--dry-run] [--recurse-submodules] [--help]
 
 Options:
-  --dest-root PATH        Target root directory for clones (default: /Users/homer/Projects/mirror-neuron-set)
+  --dest-root PATH        Target root directory for clones (default: $HOME/Projects/mirror-neuron-set)
   --clean                 Remove existing destination repo folders before cloning
   --dry-run               Print actions without changing disk
   --recurse-submodules    Pass --recurse-submodules to git clone

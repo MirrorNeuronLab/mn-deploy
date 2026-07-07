@@ -773,6 +773,10 @@ INSTALL_CONTEXT_ENGINE="N"
 MEMBRANE_REPO="${MN_MEMBRANE_REPO:-MirrorNeuronLab/Membrane}"
 MEMBRANE_GIT_URL="${MN_MEMBRANE_GIT_URL:-}"
 MEMBRANE_DIR="${MN_MEMBRANE_DIR:-${INSTALL_DIR}/Membrane}"
+AGENTS_REPO="${MN_AGENTS_REPO:-MirrorNeuronLab/mn-agents}"
+MN_AGENTS_GIT_URL="${MN_AGENTS_GIT_URL:-}"
+MN_AGENTS_ROOT="${MN_AGENTS_ROOT:-}"
+MN_AGENTS_REF="${MN_AGENTS_REF:-}"
 MN_HOST_HOME_DIR="${MN_HOST_HOME_DIR:-${MN_HOST_MN_DIR:-${INSTALL_DIR}}}"
 MN_HOST_ARTIFACTS_DIR="${MN_HOST_ARTIFACTS_DIR:-${MN_HOST_HOME_DIR}/runs}"
 MN_HOST_BLOB_STORE_DIR="${MN_HOST_BLOB_STORE_DIR:-${MN_HOST_HOME_DIR}/blobs}"
@@ -850,6 +854,10 @@ Options:
   --api / --no-api
   --skills-repo OWNER/REPO      Same as MN_SKILLS_REPO. Default: MirrorNeuronLab/mn-skills.
   --skills-git-url URL          Same as MN_SKILLS_GIT_URL.
+  MN_AGENTS_ROOT=/path          Override the local agent template catalog.
+  MN_AGENTS_REPO=OWNER/REPO     Agent template catalog repo. Default: MirrorNeuronLab/mn-agents.
+  MN_AGENTS_GIT_URL=URL         Full agent template catalog Git URL override.
+  MN_AGENTS_REF=REF             Agent template catalog ref. Default: --version or repo default branch.
   --python PATH                 Same as MN_PYTHON. Must be Python 3.11.x.
   --no-managed-python           Do not use uv to install a private Python runtime.
   --core-release-tag TAG        Legacy alias for --version.
@@ -1120,6 +1128,87 @@ function blueprint_support_skill_git_url() {
     else
         printf 'https://github.com/%s.git' "$SKILLS_REPO"
     fi
+}
+
+function agents_git_url() {
+    if [ -n "$MN_AGENTS_GIT_URL" ]; then
+        printf '%s' "$MN_AGENTS_GIT_URL"
+    else
+        printf 'https://github.com/%s.git' "$AGENTS_REPO"
+    fi
+}
+
+function validate_agents_root() {
+    local root="$1"
+    if [ ! -f "${root}/index.json" ]; then
+        print_error "mn-agents index was not found at ${root}/index.json."
+        print_error "Set MN_AGENTS_ROOT to a valid mn-agents checkout or fix the catalog install."
+        exit 1
+    fi
+}
+
+function safe_agents_ref_path() {
+    printf '%s' "$1" | tr '/: ' '___'
+}
+
+function resolve_agents_ref() {
+    local default_branch
+    if [ -n "${MN_AGENTS_REF:-}" ]; then
+        printf '%s' "$MN_AGENTS_REF"
+        return 0
+    fi
+    if [ -n "${INSTALL_VERSION:-}" ]; then
+        printf '%s' "$INSTALL_VERSION"
+        return 0
+    fi
+    default_branch="$(git ls-remote --symref "$(agents_git_url)" HEAD 2>/dev/null | sed -n 's#^ref: refs/heads/\([^[:space:]]*\)[[:space:]]*HEAD$#\1#p' | head -n 1)"
+    if [ -z "$default_branch" ]; then
+        print_error "Could not resolve the default branch for $(agents_git_url)."
+        print_error "Set MN_AGENTS_REF explicitly and rerun."
+        exit 1
+    fi
+    printf '%s' "$default_branch"
+}
+
+function ensure_agent_catalog_root() {
+    local ref safe_ref root url
+    if [ -n "${MN_AGENTS_ROOT:-}" ]; then
+        validate_agents_root "$MN_AGENTS_ROOT"
+        (cd "$MN_AGENTS_ROOT" && pwd)
+        return 0
+    fi
+
+    ref="$(resolve_agents_ref)"
+    safe_ref="$(safe_agents_ref_path "$ref")"
+    root="${INSTALL_DIR}/agent-catalogs/mn-agents/${safe_ref}"
+    url="$(agents_git_url)"
+    mkdir -p "$(dirname "$root")"
+
+    if [ -e "$root" ] && [ ! -d "${root}/.git" ]; then
+        print_error "Expected cached mn-agents catalog to be a git checkout: ${root}"
+        print_error "Move or remove that path, or set MN_AGENTS_ROOT to a valid catalog."
+        exit 1
+    fi
+
+    if [ ! -d "${root}/.git" ]; then
+        run_quiet "clone-mn-agents-${safe_ref}" git clone --branch "$ref" --depth 1 "$url" "$root"
+    else
+        (
+            cd "$root"
+            git remote set-url origin "$url" >/dev/null 2>&1 || true
+            git fetch --tags origin "$ref" >/dev/null 2>&1
+            git checkout --force "$ref" >/dev/null 2>&1
+            if git show-ref --verify --quiet "refs/remotes/origin/${ref}"; then
+                git pull --ff-only origin "$ref" >/dev/null 2>&1
+            fi
+        ) || {
+            print_error "Could not update cached mn-agents catalog at ${root}."
+            exit 1
+        }
+    fi
+
+    validate_agents_root "$root"
+    printf '%s\n' "$root"
 }
 
 function context_engine_source_dir() {
@@ -1561,7 +1650,7 @@ function prepare_litellm_gateway_config() {
 }
 
 function write_runtime_compose_files() {
-    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image litellm_gateway_bind_host
+    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_agents_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image litellm_gateway_bind_host
     if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
         context_engine_source_dir >/dev/null
     fi
@@ -1580,6 +1669,7 @@ function write_runtime_compose_files() {
     printf '%s\n' "mirror_neuron_password_admin" > "${INSTALL_DIR}/grpc_admin.token"
     chmod 600 "${INSTALL_DIR}/grpc_auth.token" "${INSTALL_DIR}/grpc_admin.token" 2>/dev/null || true
     runtime_skills_root="${MN_SKILLS_ROOT:-${MN_HOST_HOME_DIR}/skills}"
+    runtime_agents_root="$(ensure_agent_catalog_root)"
     runtime_package_index="${MN_PACKAGE_INDEX_FILE:-}"
     membrane_engine_tag="${MN_MEMBRANE_ENGINE_IMAGE_TAG:-${INSTALL_VERSION:-v${MN_PACKAGE_VERSION:-1.2.18}}}"
     if [[ "$membrane_engine_tag" != v* ]]; then
@@ -1658,6 +1748,7 @@ MN_BLUEPRINT_SOURCE=${MN_BLUEPRINT_SOURCE:-github}
 MN_BLUEPRINT_REPO=${MN_BLUEPRINT_REPO:-https://github.com/MirrorNeuronLab/mn-blueprints.git}
 MN_BLUEPRINT_LOCAL=${MN_BLUEPRINT_LOCAL:-}
 MN_WORKSPACE_ROOT=${MN_WORKSPACE_ROOT:-}
+MN_AGENTS_ROOT=${runtime_agents_root}
 MN_SKILLS_ROOT=${runtime_skills_root}
 MN_PACKAGE_INDEX_FILE=${runtime_package_index}
 MN_PIP_INDEX_URL=${MN_PIP_INDEX_URL:-${MN_PYTHON_INDEX_URL:-}}
@@ -2166,12 +2257,14 @@ API_DIR="${WORKSPACE_DIR}/mn-api"
 PY_SDK_DIR="${WORKSPACE_DIR}/mn-python-sdk"
 WEB_UI_DIR="${WORKSPACE_DIR}/mn-web-ui"
 SKILLS_DIR="${WORKSPACE_DIR}/mn-skills"
+AGENTS_DIR="${WORKSPACE_DIR}/mn-agents"
 BLUEPRINT_SUPPORT_SKILL_DIR="${SKILLS_DIR}/blueprint_support_skill"
 BLUEPRINTS_DIR="${WORKSPACE_DIR}/mn-blueprints"
 DOCS_DIR="${WORKSPACE_DIR}/mn-docs"
 SYSTEM_TESTS_DIR="${WORKSPACE_DIR}/mn-system-tests"
 MEMBRANE_DIR="${WORKSPACE_DIR}/Membrane"
 MN_HOST_HOME_DIR="${MN_HOST_HOME_DIR:-${MN_HOST_MN_DIR:-${INSTALL_DIR}}}"
+MN_AGENTS_ROOT="${MN_AGENTS_ROOT:-}"
 MN_HOST_ARTIFACTS_DIR="${MN_HOST_ARTIFACTS_DIR:-${MN_HOST_HOME_DIR}/runs}"
 MN_HOST_BLOB_STORE_DIR="${MN_HOST_BLOB_STORE_DIR:-${MN_HOST_HOME_DIR}/blobs}"
 MN_HOST_SHARED_STORAGE_ROOT="${MN_HOST_SHARED_STORAGE_ROOT:-${MN_HOST_SHARED_ARTIFACT_ROOT:-${MN_HOST_HOME_DIR}/shared}}"
@@ -2481,6 +2574,7 @@ Options:
   --no-managed-python   Do not use uv to install a private Python runtime.
   MN_PYTHON=/path       Use a specific Python 3.11.x interpreter.
   MN_HOME=/path         Override the runtime state directory. Defaults to ${HOME}/.mn.
+  MN_AGENTS_ROOT=/path  Override the local agent template catalog. Defaults to ${WORKSPACE_DIR}/mn-agents.
   MN_MANAGED_PYTHON=0   Disable uv-managed private Python fallback.
   -h, --help            Show this help.
 EOF
@@ -2606,6 +2700,21 @@ function require_file() {
         print_error "Missing ${name}: ${path}"
         exit 1
     fi
+}
+
+function validate_agents_root() {
+    local root="$1"
+    if [ ! -f "${root}/index.json" ]; then
+        print_error "mn-agents index was not found at ${root}/index.json."
+        print_error "Set MN_AGENTS_ROOT to a valid mn-agents checkout or run from a complete mirror-neuron-set workspace."
+        exit 1
+    fi
+}
+
+function ensure_agent_catalog_root() {
+    local root="${MN_AGENTS_ROOT:-$AGENTS_DIR}"
+    validate_agents_root "$root"
+    (cd "$root" && pwd)
 }
 
 function mix_project_file_valid() {
@@ -3279,7 +3388,7 @@ function prepare_litellm_gateway_config() {
 }
 
 function write_runtime_compose_files() {
-    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image litellm_gateway_bind_host
+    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_agents_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image litellm_gateway_bind_host
     model_runner_model="${MN_CONTEXT_MODEL_RUNNER_MODEL:-hf.co/homerquan/mn-context-engine-model-v-Q4_K_M}"
     profiles="$(compose_profiles)"
     litellm_gateway_bind_host="${MN_LITELLM_GATEWAY_BIND_HOST:-127.0.0.1}"
@@ -3295,6 +3404,7 @@ function write_runtime_compose_files() {
     printf '%s\n' "mirror_neuron_password_admin" > "${INSTALL_DIR}/grpc_admin.token"
     chmod 600 "${INSTALL_DIR}/grpc_auth.token" "${INSTALL_DIR}/grpc_admin.token" 2>/dev/null || true
     runtime_skills_root="${MN_SKILLS_ROOT:-${MN_HOST_HOME_DIR}/skills}"
+    runtime_agents_root="$(ensure_agent_catalog_root)"
     runtime_package_index="${MN_PACKAGE_INDEX_FILE:-}"
     membrane_engine_tag="${MN_MEMBRANE_ENGINE_IMAGE_TAG:-${INSTALL_VERSION:-v${MN_PACKAGE_VERSION:-1.2.18}}}"
     if [[ "$membrane_engine_tag" != v* ]]; then
@@ -3373,6 +3483,7 @@ MN_BLUEPRINT_SOURCE=${MN_BLUEPRINT_SOURCE:-github}
 MN_BLUEPRINT_REPO=${MN_BLUEPRINT_REPO:-https://github.com/MirrorNeuronLab/mn-blueprints.git}
 MN_BLUEPRINT_LOCAL=${MN_BLUEPRINT_LOCAL:-}
 MN_WORKSPACE_ROOT=${MN_WORKSPACE_ROOT:-}
+MN_AGENTS_ROOT=${runtime_agents_root}
 MN_SKILLS_ROOT=${runtime_skills_root}
 MN_PACKAGE_INDEX_FILE=${runtime_package_index}
 MN_PIP_INDEX_URL=${MN_PIP_INDEX_URL:-${MN_PYTHON_INDEX_URL:-}}
@@ -3884,6 +3995,10 @@ SKILLS_REPO="${MN_SKILLS_REPO:-MirrorNeuronLab/mn-skills}"
 MEMBRANE_REPO="${MN_MEMBRANE_REPO:-MirrorNeuronLab/Membrane}"
 MEMBRANE_GIT_URL="${MN_MEMBRANE_GIT_URL:-}"
 MEMBRANE_DIR="${MN_MEMBRANE_DIR:-${INSTALL_DIR}/Membrane}"
+AGENTS_REPO="${MN_AGENTS_REPO:-MirrorNeuronLab/mn-agents}"
+MN_AGENTS_GIT_URL="${MN_AGENTS_GIT_URL:-}"
+MN_AGENTS_ROOT="${MN_AGENTS_ROOT:-}"
+MN_AGENTS_REF="${MN_AGENTS_REF:-}"
 PACKAGE_INDEX_FILE="${MN_PACKAGE_INDEX_FILE:-}"
 MN_GAR_PROJECT="${MN_GAR_PROJECT:-}"
 MN_GAR_LOCATION="${MN_GAR_LOCATION:-us-central1}"
@@ -3995,6 +4110,10 @@ Release/source options:
   --skills-git-url URL          Same as MN_SKILLS_GIT_URL.
   --membrane-repo OWNER/REPO    Same as MN_MEMBRANE_REPO.
   --membrane-git-url URL        Same as MN_MEMBRANE_GIT_URL.
+  MN_AGENTS_ROOT=/path          Override the local agent template catalog.
+  MN_AGENTS_REPO=OWNER/REPO     Agent template catalog repo. Default: MirrorNeuronLab/mn-agents.
+  MN_AGENTS_GIT_URL=URL         Full agent template catalog Git URL override.
+  MN_AGENTS_REF=REF             Agent template catalog ref. Default: --version or repo default branch.
   -h, --help                    Show this help.
 
 Examples:
@@ -4921,6 +5040,87 @@ function context_engine_git_url() {
     fi
 }
 
+function agents_git_url() {
+    if [ -n "$MN_AGENTS_GIT_URL" ]; then
+        printf '%s' "$MN_AGENTS_GIT_URL"
+    else
+        printf 'https://github.com/%s.git' "$AGENTS_REPO"
+    fi
+}
+
+function validate_agents_root() {
+    local root="$1"
+    if [ ! -f "${root}/index.json" ]; then
+        print_error "mn-agents index was not found at ${root}/index.json."
+        print_error "Set MN_AGENTS_ROOT to a valid mn-agents checkout or fix the catalog install."
+        exit 1
+    fi
+}
+
+function safe_agents_ref_path() {
+    printf '%s' "$1" | tr '/: ' '___'
+}
+
+function resolve_agents_ref() {
+    local default_branch
+    if [ -n "${MN_AGENTS_REF:-}" ]; then
+        printf '%s' "$MN_AGENTS_REF"
+        return 0
+    fi
+    if [ -n "${INSTALL_VERSION:-}" ]; then
+        printf '%s' "$INSTALL_VERSION"
+        return 0
+    fi
+    default_branch="$(git ls-remote --symref "$(agents_git_url)" HEAD 2>/dev/null | sed -n 's#^ref: refs/heads/\([^[:space:]]*\)[[:space:]]*HEAD$#\1#p' | head -n 1)"
+    if [ -z "$default_branch" ]; then
+        print_error "Could not resolve the default branch for $(agents_git_url)."
+        print_error "Set MN_AGENTS_REF explicitly and rerun."
+        exit 1
+    fi
+    printf '%s' "$default_branch"
+}
+
+function ensure_agent_catalog_root() {
+    local ref safe_ref root url
+    if [ -n "${MN_AGENTS_ROOT:-}" ]; then
+        validate_agents_root "$MN_AGENTS_ROOT"
+        (cd "$MN_AGENTS_ROOT" && pwd)
+        return 0
+    fi
+
+    ref="$(resolve_agents_ref)"
+    safe_ref="$(safe_agents_ref_path "$ref")"
+    root="${INSTALL_DIR}/agent-catalogs/mn-agents/${safe_ref}"
+    url="$(agents_git_url)"
+    mkdir -p "$(dirname "$root")"
+
+    if [ -e "$root" ] && [ ! -d "${root}/.git" ]; then
+        print_error "Expected cached mn-agents catalog to be a git checkout: ${root}"
+        print_error "Move or remove that path, or set MN_AGENTS_ROOT to a valid catalog."
+        exit 1
+    fi
+
+    if [ ! -d "${root}/.git" ]; then
+        run_quiet "clone-mn-agents-${safe_ref}" git clone --branch "$ref" --depth 1 "$url" "$root"
+    else
+        (
+            cd "$root"
+            git remote set-url origin "$url" >/dev/null 2>&1 || true
+            git fetch --tags origin "$ref" >/dev/null 2>&1
+            git checkout --force "$ref" >/dev/null 2>&1
+            if git show-ref --verify --quiet "refs/remotes/origin/${ref}"; then
+                git pull --ff-only origin "$ref" >/dev/null 2>&1
+            fi
+        ) || {
+            print_error "Could not update cached mn-agents catalog at ${root}."
+            exit 1
+        }
+    fi
+
+    validate_agents_root "$root"
+    printf '%s\n' "$root"
+}
+
 function local_context_engine_dir() {
     if [ -z "${INSTALL_VERSION:-}" ] && [ -n "${MN_MEMBRANE_DIR:-}" ] && [ -f "$MN_MEMBRANE_DIR/Dockerfile" ]; then
         (cd "$MN_MEMBRANE_DIR" && pwd)
@@ -5380,7 +5580,7 @@ function prepare_litellm_gateway_config() {
 }
 
 function write_runtime_compose_files() {
-    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image litellm_gateway_bind_host
+    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_agents_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image litellm_gateway_bind_host
     model_runner_model="${MN_CONTEXT_MODEL_RUNNER_MODEL:-hf.co/homerquan/mn-context-engine-model-v-Q4_K_M}"
     profiles="$(compose_profiles)"
     litellm_gateway_bind_host="${MN_LITELLM_GATEWAY_BIND_HOST:-127.0.0.1}"
@@ -5396,6 +5596,7 @@ function write_runtime_compose_files() {
     printf '%s\n' "mirror_neuron_password_admin" > "${INSTALL_DIR}/grpc_admin.token"
     chmod 600 "${INSTALL_DIR}/grpc_auth.token" "${INSTALL_DIR}/grpc_admin.token" 2>/dev/null || true
     runtime_skills_root="${MN_SKILLS_ROOT:-${MN_HOST_HOME_DIR}/skills}"
+    runtime_agents_root="$(ensure_agent_catalog_root)"
     runtime_package_index="${MN_PACKAGE_INDEX_FILE:-}"
     membrane_engine_tag="${MN_MEMBRANE_ENGINE_IMAGE_TAG:-${INSTALL_VERSION:-v${MN_PACKAGE_VERSION:-1.2.18}}}"
     if [[ "$membrane_engine_tag" != v* ]]; then
@@ -5474,6 +5675,7 @@ MN_BLUEPRINT_SOURCE=${MN_BLUEPRINT_SOURCE:-github}
 MN_BLUEPRINT_REPO=${MN_BLUEPRINT_REPO:-https://github.com/MirrorNeuronLab/mn-blueprints.git}
 MN_BLUEPRINT_LOCAL=${MN_BLUEPRINT_LOCAL:-}
 MN_WORKSPACE_ROOT=${MN_WORKSPACE_ROOT:-}
+MN_AGENTS_ROOT=${runtime_agents_root}
 MN_SKILLS_ROOT=${runtime_skills_root}
 MN_PACKAGE_INDEX_FILE=${runtime_package_index}
 MN_PIP_INDEX_URL=${MN_PIP_INDEX_URL:-${MN_PYTHON_INDEX_URL:-}}
@@ -5776,7 +5978,7 @@ if should_install_python_packages; then
     resolve_python_runtime
     ensure_pip
 fi
-if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
+if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] || [ -z "${MN_AGENTS_ROOT:-}" ]; then
     require_cmd git
 fi
 
