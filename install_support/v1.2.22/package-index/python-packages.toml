@@ -70,7 +70,7 @@ binary_default = false
 name = "mirrorneuron-blueprint-support-skill"
 path = "mn-skills/blueprint_support_skill"
 publish_group = "skill"
-version = "'1.2.22'"
+version = "1.2.22"
 installer_groups = ["skill", "blueprint-support"]
 default_extras = ["webui"]
 binary_default = true
@@ -79,7 +79,7 @@ binary_default = true
 name = "mirrorneuron-client-report-skill"
 path = "mn-skills/client_report_skill"
 publish_group = "skill"
-version = "1.2.15"
+version = "1.2.22"
 installer_groups = ["skill"]
 binary_default = false
 
@@ -87,7 +87,7 @@ binary_default = false
 name = "mirrorneuron-code-generation-skill"
 path = "mn-skills/code_generation_skill"
 publish_group = "skill"
-version = "1.2.15"
+version = "1.2.22"
 installer_groups = ["skill"]
 binary_default = false
 
@@ -95,7 +95,7 @@ binary_default = false
 name = "mirrorneuron-document-reading-skill"
 path = "mn-skills/document_reading_skill"
 publish_group = "skill"
-version = "1.2.15"
+version = "1.2.22"
 installer_groups = ["skill"]
 binary_default = false
 
@@ -103,7 +103,7 @@ binary_default = false
 name = "mirrorneuron-email-delivery-skill"
 path = "mn-skills/email_delivery_skill"
 publish_group = "skill"
-version = "1.2.15"
+version = "1.2.22"
 installer_groups = ["skill"]
 binary_default = false
 
@@ -111,7 +111,7 @@ binary_default = false
 name = "mirrorneuron-email-receive-agentmail-skill"
 path = "mn-skills/email_receive_agentmail_skill"
 publish_group = "skill"
-version = "1.2.15"
+version = "1.2.22"
 installer_groups = ["skill"]
 binary_default = false
 
@@ -119,7 +119,7 @@ binary_default = false
 name = "mirrorneuron-email-send-resend-skill"
 path = "mn-skills/email_send_resend_skill"
 publish_group = "skill"
-version = "1.2.15"
+version = "1.2.22"
 installer_groups = ["skill"]
 binary_default = false
 
@@ -127,7 +127,7 @@ binary_default = false
 name = "mirrorneuron-external-rate-limit-skill"
 path = "mn-skills/external_rate_limit_skill"
 publish_group = "skill"
-version = "1.2.15"
+version = "1.2.22"
 installer_groups = ["skill"]
 binary_default = false
 
@@ -135,7 +135,7 @@ binary_default = false
 name = "mirrorneuron-first-draft-slides-skill"
 path = "mn-skills/first_draft_slides_skill"
 publish_group = "skill"
-version = "1.2.15"
+version = "1.2.22"
 installer_groups = ["skill"]
 binary_default = false
 
@@ -143,7 +143,7 @@ binary_default = false
 name = "mirrorneuron-generate-fake-data-skill"
 path = "mn-skills/generate_fake_data_skill"
 publish_group = "skill"
-version = "1.2.15"
+version = "1.2.22"
 installer_groups = ["skill"]
 binary_default = false
 
@@ -151,7 +151,7 @@ binary_default = false
 name = "mirrorneuron-implementation-plan-skill"
 path = "mn-skills/implementation_plan_skill"
 publish_group = "skill"
-version = "1.2.15"
+version = "1.2.22"
 installer_groups = ["skill"]
 binary_default = false
 
@@ -159,7 +159,7 @@ binary_default = false
 name = "mirrorneuron-litellm-communicate-skill"
 path = "mn-skills/litellm_communicate_skill"
 publish_group = "skill"
-version = "1.2.15"
+version = "1.2.22"
 installer_groups = ["skill"]
 binary_default = false
 
@@ -167,7 +167,7 @@ binary_default = false
 name = "mirrorneuron-llm-ocr-skill"
 path = "mn-skills/llm_ocr_skill"
 publish_group = "skill"
-version = "1.2.15"
+version = "1.2.22"
 installer_groups = ["skill"]
 binary_default = false
 
@@ -175,7 +175,7 @@ binary_default = false
 name = "mirrorneuron-market-research-skill"
 path = "mn-skills/market_research_skill"
 publish_group = "skill"
-version = "1.2.15"
+version = "1.2.22"
 installer_groups = ["skill"]
 binary_default = false
 
@@ -183,7 +183,7 @@ binary_default = false
 name = "mirrorneuron-marketing-email-skill"
 path = "mn-skills/marketing_email_skill"
 publish_group = "skill"
-version = "1.2.15"
+version = "1.2.22"
 installer_groups = ["skill"]
 binary_default = false
 
@@ -191,7 +191,7 @@ binary_default = false
 name = "mirrorneuron-mcp-client-skill"
 path = "mn-skills/mcp_client_skill"
 publish_group = "skill"
-version = "1.2.15"
+version = "1.2.22"
 installer_groups = ["skill"]
 binary_default = false
 
@@ -199,7 +199,7 @@ binary_default = false
 name = "mirrorneuron-meeting-summary-skill"
 path = "mn-skills/meeting_summary_skill"
 publish_group = "skill"
-version = "1.2.15"
+version = "1.2.22"
 installer_groups = ["skill"]
 binary_default = false
 
@@ -207,7 +207,7 @@ binary_default = false
 name = "mirrorneuron-pdf-extract-skill"
 path = "mn-skills/pdf_extract_skill"
 publish_group = "skill"
-version = "1.2.15"
+version = "1.2.22"
 installer_groups = ["skill"]
 binary_default = false
 
@@ -215,7 +215,7 @@ binary_default = false
 name = "mirrorneuron-process-map-skill"
 path = "mn-skills/process_map_skill"
 publish_group = "skill"
-version = "1.2.15"
+version = "1.2.22"
 installer_groups = ["skill"]
 binary_default = false
 
@@ -223,7 +223,7 @@ binary_default = false
 name = "mirrorneuron-rag-skill"
 path = "mn-skills/rag_skill"
 publish_group = "skill"
-version = "1.2.15"
+version = "1.2.22"
 installer_groups = ["skill"]
 binary_default = false
 
@@ -231,7 +231,7 @@ binary_default = false
 name = "mirrorneuron-slack-communicate-skill"
 path = "mn-skills/slack_communicate_skill"
 publish_group = "skill"
-version = "1.2.15"
+version = "1.2.22"
 installer_groups = ["skill"]
 binary_default = false
 
@@ -239,7 +239,7 @@ binary_default = false
 name = "mirrorneuron-spreadsheet-analysis-skill"
 path = "mn-skills/spreadsheet_analysis_skill"
 publish_group = "skill"
-version = "1.2.15"
+version = "1.2.22"
 installer_groups = ["skill"]
 binary_default = false
 
@@ -247,7 +247,7 @@ binary_default = false
 name = "mirrorneuron-text-analysis-skill"
 path = "mn-skills/text_analysis_skill"
 publish_group = "skill"
-version = "1.2.15"
+version = "1.2.22"
 installer_groups = ["skill"]
 binary_default = false
 
@@ -255,7 +255,7 @@ binary_default = false
 name = "mirrorneuron-vendor-comparison-skill"
 path = "mn-skills/vendor_comparison_skill"
 publish_group = "skill"
-version = "1.2.15"
+version = "1.2.22"
 installer_groups = ["skill"]
 binary_default = false
 
@@ -263,7 +263,7 @@ binary_default = false
 name = "mirrorneuron-w3m-browser-skill"
 path = "mn-skills/w3m_browser_skill"
 publish_group = "skill"
-version = "1.2.15"
+version = "1.2.22"
 installer_groups = ["skill"]
 binary_default = false
 
@@ -271,7 +271,7 @@ binary_default = false
 name = "mirrorneuron-web-browser-skill"
 path = "mn-skills/web_browser_skill"
 publish_group = "skill"
-version = "1.2.15"
+version = "1.2.22"
 installer_groups = ["skill"]
 binary_default = false
 
@@ -279,6 +279,6 @@ binary_default = false
 name = "mirrorneuron-websocket-stream-skill"
 path = "mn-skills/websocket_stream_skill"
 publish_group = "skill"
-version = "1.2.15"
+version = "1.2.22"
 installer_groups = ["skill"]
 binary_default = false

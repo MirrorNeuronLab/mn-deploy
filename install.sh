@@ -4840,7 +4840,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ncurses-bin \
     openssl \
     procps \
+    python3 \
+    python3-pip \
+    python3-venv \
     && rm -rf /var/lib/apt/lists/*
+
+RUN python3 --version && \
+    python3 -m pip install --no-cache-dir --break-system-packages "litellm[proxy]>=1.72.0"
 
 ARG OPENSHELL_VERSION=v0.0.47
 RUN set -eux; \
