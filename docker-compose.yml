@@ -55,8 +55,8 @@ services:
     profiles:
       - openshell
     restart: unless-stopped
-    expose:
-      - "${OPENSHELL_GATEWAY_PORT:-58080}"
+    ports:
+      - "${OPENSHELL_GATEWAY_BIND_HOST:-127.0.0.1}:${OPENSHELL_GATEWAY_PORT:-58080}:${OPENSHELL_GATEWAY_PORT:-58080}"
     environment:
       HOME: ${MN_HOST_OPENSHELL_STATE_DIR:-./openshell-state}
       XDG_DATA_HOME: ${MN_HOST_OPENSHELL_STATE_DIR:-./openshell-state}/.local/share

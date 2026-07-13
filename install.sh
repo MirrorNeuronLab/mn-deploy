@@ -1645,6 +1645,48 @@ function resolve_docker_network_external() {
     fi
 }
 
+function resolve_openshell_gateway_bind_host() {
+    local network_name="$1"
+    local docker_os gateway
+
+    if [ -n "${OPENSHELL_GATEWAY_BIND_HOST:-}" ]; then
+        printf '%s\n' "$OPENSHELL_GATEWAY_BIND_HOST"
+        return 0
+    fi
+
+    docker_os="$(docker info --format '{{.OperatingSystem}}' 2>/dev/null | tr '[:upper:]' '[:lower:]' || true)"
+    if [ "$(uname -s)" = "Darwin" ] || [[ "$docker_os" == *"docker desktop"* ]]; then
+        printf '127.0.0.1\n'
+        return 0
+    fi
+
+    gateway="$(docker network inspect -f '{{ (index .IPAM.Config 0).Gateway }}' "$network_name" 2>/dev/null || true)"
+    printf '%s\n' "${gateway:-127.0.0.1}"
+}
+
+function reconcile_openshell_gateway_bind_host() {
+    local network_name="$1"
+    local desired current tmp_env
+    desired="$(resolve_openshell_gateway_bind_host "$network_name")"
+    current="$(sed -n 's/^OPENSHELL_GATEWAY_BIND_HOST=//p' "$RUNTIME_COMPOSE_ENV" | tail -1)"
+    [ "$current" = "$desired" ] && return 0
+
+    tmp_env="${RUNTIME_COMPOSE_ENV}.tmp"
+    awk -v value="$desired" '
+        BEGIN { replaced = 0 }
+        /^OPENSHELL_GATEWAY_BIND_HOST=/ {
+            if (!replaced) print "OPENSHELL_GATEWAY_BIND_HOST=" value
+            replaced = 1
+            next
+        }
+        { print }
+        END { if (!replaced) print "OPENSHELL_GATEWAY_BIND_HOST=" value }
+    ' "$RUNTIME_COMPOSE_ENV" > "$tmp_env"
+    mv "$tmp_env" "$RUNTIME_COMPOSE_ENV"
+    chmod 600 "$RUNTIME_COMPOSE_ENV" 2>/dev/null || true
+    runtime_compose up -d --force-recreate openshell >/dev/null
+}
+
 function ensure_runtime_host_directory() {
     local path="$1"
     local description="$2"
@@ -1679,7 +1721,7 @@ function prepare_litellm_gateway_config() {
 }
 
 function write_runtime_compose_files() {
-    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_agents_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image litellm_gateway_bind_host
+    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_agents_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image litellm_gateway_bind_host openshell_gateway_bind_host
     if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
         context_engine_source_dir >/dev/null
     fi
@@ -1690,6 +1732,7 @@ function write_runtime_compose_files() {
         litellm_gateway_bind_host="0.0.0.0"
     fi
     network_name="${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
+    openshell_gateway_bind_host="$(resolve_openshell_gateway_bind_host "$network_name")"
     network_external="$(resolve_docker_network_external "$network_name")"
     network_token="$(resolve_network_token)"
     redis_password="$(resolve_redis_password "mirror_neuron_password_admin")"
@@ -1817,6 +1860,7 @@ ERL_EPMD_ADDRESS=${ERL_EPMD_ADDRESS:-0.0.0.0}
 ERL_AFLAGS=${ERL_AFLAGS:--kernel inet_dist_listen_min ${MN_DIST_PORT:-54370} inet_dist_listen_max ${MN_DIST_PORT:-54370}}
 OPENSHELL_GATEWAY_PORT=${OPENSHELL_GATEWAY_PORT:-58080}
 OPENSHELL_GATEWAY_ENDPOINT=${OPENSHELL_GATEWAY_ENDPOINT:-http://127.0.0.1:${OPENSHELL_GATEWAY_PORT:-58080}}
+OPENSHELL_GATEWAY_BIND_HOST=${openshell_gateway_bind_host}
 OPENSHELL_GATEWAY_USER=${OPENSHELL_GATEWAY_USER}
 OPENSHELL_GATEWAY_DOCKER_GROUP=${OPENSHELL_GATEWAY_DOCKER_GROUP}
 DOCKER_HOST_SOCKET=${DOCKER_HOST_SOCKET}
@@ -1947,6 +1991,9 @@ function start_runtime_compose_sidecars() {
             runtime_compose build membrane-context-engine
         fi
         runtime_compose up -d "${services[@]}" >/dev/null
+        if [ "$INSTALL_OPENSHELL" = "Y" ]; then
+            reconcile_openshell_gateway_bind_host "${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
+        fi
     fi
 }
 
@@ -3414,6 +3461,48 @@ function resolve_docker_network_external() {
     fi
 }
 
+function resolve_openshell_gateway_bind_host() {
+    local network_name="$1"
+    local docker_os gateway
+
+    if [ -n "${OPENSHELL_GATEWAY_BIND_HOST:-}" ]; then
+        printf '%s\n' "$OPENSHELL_GATEWAY_BIND_HOST"
+        return 0
+    fi
+
+    docker_os="$(docker info --format '{{.OperatingSystem}}' 2>/dev/null | tr '[:upper:]' '[:lower:]' || true)"
+    if [ "$(uname -s)" = "Darwin" ] || [[ "$docker_os" == *"docker desktop"* ]]; then
+        printf '127.0.0.1\n'
+        return 0
+    fi
+
+    gateway="$(docker network inspect -f '{{ (index .IPAM.Config 0).Gateway }}' "$network_name" 2>/dev/null || true)"
+    printf '%s\n' "${gateway:-127.0.0.1}"
+}
+
+function reconcile_openshell_gateway_bind_host() {
+    local network_name="$1"
+    local desired current tmp_env
+    desired="$(resolve_openshell_gateway_bind_host "$network_name")"
+    current="$(sed -n 's/^OPENSHELL_GATEWAY_BIND_HOST=//p' "$RUNTIME_COMPOSE_ENV" | tail -1)"
+    [ "$current" = "$desired" ] && return 0
+
+    tmp_env="${RUNTIME_COMPOSE_ENV}.tmp"
+    awk -v value="$desired" '
+        BEGIN { replaced = 0 }
+        /^OPENSHELL_GATEWAY_BIND_HOST=/ {
+            if (!replaced) print "OPENSHELL_GATEWAY_BIND_HOST=" value
+            replaced = 1
+            next
+        }
+        { print }
+        END { if (!replaced) print "OPENSHELL_GATEWAY_BIND_HOST=" value }
+    ' "$RUNTIME_COMPOSE_ENV" > "$tmp_env"
+    mv "$tmp_env" "$RUNTIME_COMPOSE_ENV"
+    chmod 600 "$RUNTIME_COMPOSE_ENV" 2>/dev/null || true
+    runtime_compose up -d --force-recreate openshell >/dev/null
+}
+
 function ensure_runtime_host_directory() {
     local path="$1"
     local description="$2"
@@ -3448,7 +3537,7 @@ function prepare_litellm_gateway_config() {
 }
 
 function write_runtime_compose_files() {
-    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_agents_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image litellm_gateway_bind_host
+    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_agents_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image litellm_gateway_bind_host openshell_gateway_bind_host
     model_runner_model="${MN_CONTEXT_MODEL_RUNNER_MODEL:-hf.co/homerquan/mn-context-engine-model-v-Q4_K_M}"
     profiles="$(compose_profiles)"
     litellm_gateway_bind_host="${MN_LITELLM_GATEWAY_BIND_HOST:-127.0.0.1}"
@@ -3456,6 +3545,7 @@ function write_runtime_compose_files() {
         litellm_gateway_bind_host="0.0.0.0"
     fi
     network_name="${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
+    openshell_gateway_bind_host="$(resolve_openshell_gateway_bind_host "$network_name")"
     network_external="$(resolve_docker_network_external "$network_name")"
     network_token="$(resolve_network_token)"
     redis_password="$(resolve_redis_password "mirror_neuron_password_admin")"
@@ -3583,6 +3673,7 @@ ERL_EPMD_ADDRESS=${ERL_EPMD_ADDRESS:-0.0.0.0}
 ERL_AFLAGS=${ERL_AFLAGS:--kernel inet_dist_listen_min ${MN_DIST_PORT:-54370} inet_dist_listen_max ${MN_DIST_PORT:-54370}}
 OPENSHELL_GATEWAY_PORT=${OPENSHELL_GATEWAY_PORT:-58080}
 OPENSHELL_GATEWAY_ENDPOINT=${OPENSHELL_GATEWAY_ENDPOINT:-http://127.0.0.1:${OPENSHELL_GATEWAY_PORT:-58080}}
+OPENSHELL_GATEWAY_BIND_HOST=${openshell_gateway_bind_host}
 OPENSHELL_GATEWAY_USER=${OPENSHELL_GATEWAY_USER}
 OPENSHELL_GATEWAY_DOCKER_GROUP=${OPENSHELL_GATEWAY_DOCKER_GROUP}
 DOCKER_HOST_SOCKET=${DOCKER_HOST_SOCKET}
@@ -3713,6 +3804,9 @@ function start_runtime_compose_sidecars() {
             runtime_compose build membrane-context-engine
         fi
         runtime_compose up -d "${services[@]}"
+        if [ "$INSTALL_OPENSHELL" = "Y" ]; then
+            reconcile_openshell_gateway_bind_host "${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
+        fi
     fi
 }
 
@@ -5642,6 +5736,48 @@ function resolve_docker_network_external() {
     fi
 }
 
+function resolve_openshell_gateway_bind_host() {
+    local network_name="$1"
+    local docker_os gateway
+
+    if [ -n "${OPENSHELL_GATEWAY_BIND_HOST:-}" ]; then
+        printf '%s\n' "$OPENSHELL_GATEWAY_BIND_HOST"
+        return 0
+    fi
+
+    docker_os="$(docker info --format '{{.OperatingSystem}}' 2>/dev/null | tr '[:upper:]' '[:lower:]' || true)"
+    if [ "$(uname -s)" = "Darwin" ] || [[ "$docker_os" == *"docker desktop"* ]]; then
+        printf '127.0.0.1\n'
+        return 0
+    fi
+
+    gateway="$(docker network inspect -f '{{ (index .IPAM.Config 0).Gateway }}' "$network_name" 2>/dev/null || true)"
+    printf '%s\n' "${gateway:-127.0.0.1}"
+}
+
+function reconcile_openshell_gateway_bind_host() {
+    local network_name="$1"
+    local desired current tmp_env
+    desired="$(resolve_openshell_gateway_bind_host "$network_name")"
+    current="$(sed -n 's/^OPENSHELL_GATEWAY_BIND_HOST=//p' "$RUNTIME_COMPOSE_ENV" | tail -1)"
+    [ "$current" = "$desired" ] && return 0
+
+    tmp_env="${RUNTIME_COMPOSE_ENV}.tmp"
+    awk -v value="$desired" '
+        BEGIN { replaced = 0 }
+        /^OPENSHELL_GATEWAY_BIND_HOST=/ {
+            if (!replaced) print "OPENSHELL_GATEWAY_BIND_HOST=" value
+            replaced = 1
+            next
+        }
+        { print }
+        END { if (!replaced) print "OPENSHELL_GATEWAY_BIND_HOST=" value }
+    ' "$RUNTIME_COMPOSE_ENV" > "$tmp_env"
+    mv "$tmp_env" "$RUNTIME_COMPOSE_ENV"
+    chmod 600 "$RUNTIME_COMPOSE_ENV" 2>/dev/null || true
+    runtime_compose up -d --force-recreate openshell >/dev/null
+}
+
 function ensure_runtime_host_directory() {
     local path="$1"
     local description="$2"
@@ -5676,7 +5812,7 @@ function prepare_litellm_gateway_config() {
 }
 
 function write_runtime_compose_files() {
-    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_agents_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image litellm_gateway_bind_host
+    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_agents_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image litellm_gateway_bind_host openshell_gateway_bind_host
     model_runner_model="${MN_CONTEXT_MODEL_RUNNER_MODEL:-hf.co/homerquan/mn-context-engine-model-v-Q4_K_M}"
     profiles="$(compose_profiles)"
     litellm_gateway_bind_host="${MN_LITELLM_GATEWAY_BIND_HOST:-127.0.0.1}"
@@ -5684,6 +5820,7 @@ function write_runtime_compose_files() {
         litellm_gateway_bind_host="0.0.0.0"
     fi
     network_name="${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
+    openshell_gateway_bind_host="$(resolve_openshell_gateway_bind_host "$network_name")"
     network_external="$(resolve_docker_network_external "$network_name")"
     network_token="$(resolve_network_token)"
     redis_password="$(resolve_redis_password "mirror_neuron_password_admin")"
@@ -5811,6 +5948,7 @@ ERL_EPMD_ADDRESS=${ERL_EPMD_ADDRESS:-0.0.0.0}
 ERL_AFLAGS=${ERL_AFLAGS:--kernel inet_dist_listen_min ${MN_DIST_PORT:-54370} inet_dist_listen_max ${MN_DIST_PORT:-54370}}
 OPENSHELL_GATEWAY_PORT=${OPENSHELL_GATEWAY_PORT:-58080}
 OPENSHELL_GATEWAY_ENDPOINT=${OPENSHELL_GATEWAY_ENDPOINT:-http://127.0.0.1:${OPENSHELL_GATEWAY_PORT:-58080}}
+OPENSHELL_GATEWAY_BIND_HOST=${openshell_gateway_bind_host}
 OPENSHELL_GATEWAY_USER=${OPENSHELL_GATEWAY_USER}
 OPENSHELL_GATEWAY_DOCKER_GROUP=${OPENSHELL_GATEWAY_DOCKER_GROUP}
 DOCKER_HOST_SOCKET=${DOCKER_HOST_SOCKET}
@@ -5938,6 +6076,9 @@ function start_runtime_compose_sidecars() {
         remove_stale_runtime_containers_for_services context-engine-model "${services[@]}"
         ensure_docker_model_runner
         runtime_compose up -d "${services[@]}" >/dev/null
+        if [ "$INSTALL_OPENSHELL" = "Y" ]; then
+            reconcile_openshell_gateway_bind_host "${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
+        fi
     fi
 }
 
