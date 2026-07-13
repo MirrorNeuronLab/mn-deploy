@@ -138,6 +138,7 @@ services:
             upstream = None
             try:
                 upstream = socket.create_connection((target_host, target_port), timeout=10)
+                upstream.settimeout(None)
                 thread = threading.Thread(target=relay, args=(client, upstream), daemon=True)
                 thread.start()
                 relay(upstream, client)
