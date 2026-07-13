@@ -1398,8 +1398,8 @@ allow_unauthenticated_users = true
 default_image = "ghcr.io/nvidia/openshell/sandbox:latest"
 image_pull_policy = "IfNotPresent"
 sandbox_namespace = "mirror-neuron"
-grpc_endpoint = "http://host.openshell.internal:${OPENSHELL_GATEWAY_PORT:-58080}"
-network_name = "openshell-docker"
+grpc_endpoint = "http://openshell:${OPENSHELL_GATEWAY_PORT:-58080}"
+network_name = "${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
 EOF
 }
 
@@ -3374,8 +3374,8 @@ allow_unauthenticated_users = true
 default_image = "ghcr.io/nvidia/openshell/sandbox:latest"
 image_pull_policy = "IfNotPresent"
 sandbox_namespace = "mirror-neuron"
-grpc_endpoint = "http://host.openshell.internal:${OPENSHELL_GATEWAY_PORT:-58080}"
-network_name = "openshell-docker"
+grpc_endpoint = "http://openshell:${OPENSHELL_GATEWAY_PORT:-58080}"
+network_name = "${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
 EOF
 }
 
@@ -5395,8 +5395,8 @@ allow_unauthenticated_users = true
 default_image = "ghcr.io/nvidia/openshell/sandbox:latest"
 image_pull_policy = "IfNotPresent"
 sandbox_namespace = "mirror-neuron"
-grpc_endpoint = "http://host.openshell.internal:${OPENSHELL_GATEWAY_PORT:-58080}"
-network_name = "openshell-docker"
+grpc_endpoint = "http://openshell:${OPENSHELL_GATEWAY_PORT:-58080}"
+network_name = "${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
 EOF
 }
 
