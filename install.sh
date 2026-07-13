@@ -93,6 +93,35 @@ function mn_install_support_asset_path() {
     fi
 }
 
+function mn_is_linux_nvidia_host() {
+    [ "$(uname -s)" = "Linux" ] || return 1
+    command -v nvidia-smi >/dev/null 2>&1 || return 1
+
+    local gpu_list
+    gpu_list="$(nvidia-smi -L 2>/dev/null || true)"
+    [ -n "$gpu_list" ]
+}
+
+function mn_docker_model_runner_endpoint_ready() {
+    command -v curl >/dev/null 2>&1 || return 1
+    curl --fail --silent --show-error --max-time 5 \
+        "http://127.0.0.1:12434/engines/v1/models" >/dev/null 2>&1 || \
+        curl --fail --silent --show-error --max-time 5 \
+            "http://127.0.0.1:12434/v1/models" >/dev/null 2>&1
+}
+
+function mn_wait_for_docker_model_runner() {
+    local attempts="${MN_DOCKER_MODEL_RUNNER_START_ATTEMPTS:-30}"
+    while [ "$attempts" -gt 0 ]; do
+        if mn_docker_model_runner_endpoint_ready; then
+            return 0
+        fi
+        sleep 1
+        attempts=$((attempts - 1))
+    done
+    return 1
+}
+
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --mode)
@@ -1842,7 +1871,12 @@ function remove_stale_runtime_containers_for_services() {
 }
 
 function ensure_docker_model_runner() {
-    if [ "$INSTALL_CONTEXT_ENGINE" != "Y" ] && [ "${INSTALL_DOCKER_MODEL_RUNNER:-N}" != "Y" ] && [ "${MN_ENABLE_DOCKER_MODEL_RUNNER:-N}" != "Y" ]; then
+    local linux_nvidia="N"
+    if mn_is_linux_nvidia_host; then
+        linux_nvidia="Y"
+    fi
+
+    if [ "$linux_nvidia" != "Y" ] && [ "$INSTALL_CONTEXT_ENGINE" != "Y" ] && [ "${INSTALL_DOCKER_MODEL_RUNNER:-N}" != "Y" ] && [ "${MN_ENABLE_DOCKER_MODEL_RUNNER:-N}" != "Y" ]; then
         return 0
     fi
 
@@ -1851,20 +1885,42 @@ function ensure_docker_model_runner() {
         exit 1
     fi
 
-    if docker model status >/dev/null 2>&1; then
-        return 0
-    fi
+    if [ "$linux_nvidia" = "Y" ]; then
+        if mn_docker_model_runner_endpoint_ready; then
+            return 0
+        fi
 
-    print_warning "Docker Model Runner is not running; attempting to enable it."
-    if docker desktop enable model-runner >/dev/null 2>&1 && docker model status >/dev/null 2>&1; then
-        return 0
-    fi
+        print_warning "NVIDIA hardware detected on Linux; ensuring Docker Model Runner is installed with GPU support."
+        if docker model start-runner >/dev/null 2>&1 && mn_wait_for_docker_model_runner; then
+            return 0
+        fi
 
-    if docker model install-runner --help >/dev/null 2>&1; then
-        docker model install-runner >/dev/null 2>&1 || true
-        docker model start-runner >/dev/null 2>&1 || true
+        if docker model install-runner --help >/dev/null 2>&1; then
+            print_step "Installing Docker Model Runner (llama.cpp with automatic NVIDIA GPU support)"
+            docker model install-runner \
+                --backend "${MN_DOCKER_MODEL_RUNNER_BACKEND:-llama.cpp}" \
+                --gpu "${MN_DOCKER_MODEL_RUNNER_GPU:-auto}" >/dev/null 2>&1 || true
+            docker model start-runner >/dev/null 2>&1 || true
+            if mn_wait_for_docker_model_runner; then
+                return 0
+            fi
+        fi
+    else
         if docker model status >/dev/null 2>&1; then
             return 0
+        fi
+
+        print_warning "Docker Model Runner is not running; attempting to enable it."
+        if docker desktop enable model-runner >/dev/null 2>&1 && docker model status >/dev/null 2>&1; then
+            return 0
+        fi
+
+        if docker model install-runner --help >/dev/null 2>&1; then
+            docker model install-runner >/dev/null 2>&1 || true
+            docker model start-runner >/dev/null 2>&1 || true
+            if docker model status >/dev/null 2>&1; then
+                return 0
+            fi
         fi
     fi
 
@@ -1880,6 +1936,9 @@ function start_runtime_compose_sidecars() {
     [ "$INSTALL_OPENSHELL" = "Y" ] && services+=("openshell")
     if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
         services+=("membrane-context-engine")
+    fi
+    if mn_is_linux_nvidia_host; then
+        ensure_docker_model_runner
     fi
     if [ "${#services[@]}" -gt 0 ]; then
         remove_stale_runtime_containers_for_services context-engine-model "${services[@]}"
@@ -3577,7 +3636,12 @@ function remove_stale_runtime_containers_for_services() {
 }
 
 function ensure_docker_model_runner() {
-    if [ "$INSTALL_CONTEXT_ENGINE" != "Y" ] && [ "${INSTALL_DOCKER_MODEL_RUNNER:-N}" != "Y" ] && [ "${MN_ENABLE_DOCKER_MODEL_RUNNER:-N}" != "Y" ]; then
+    local linux_nvidia="N"
+    if mn_is_linux_nvidia_host; then
+        linux_nvidia="Y"
+    fi
+
+    if [ "$linux_nvidia" != "Y" ] && [ "$INSTALL_CONTEXT_ENGINE" != "Y" ] && [ "${INSTALL_DOCKER_MODEL_RUNNER:-N}" != "Y" ] && [ "${MN_ENABLE_DOCKER_MODEL_RUNNER:-N}" != "Y" ]; then
         return 0
     fi
 
@@ -3586,20 +3650,42 @@ function ensure_docker_model_runner() {
         exit 1
     fi
 
-    if docker model status >/dev/null 2>&1; then
-        return 0
-    fi
+    if [ "$linux_nvidia" = "Y" ]; then
+        if mn_docker_model_runner_endpoint_ready; then
+            return 0
+        fi
 
-    print_warning "Docker Model Runner is not running; attempting to enable it."
-    if docker desktop enable model-runner >/dev/null 2>&1 && docker model status >/dev/null 2>&1; then
-        return 0
-    fi
+        print_warning "NVIDIA hardware detected on Linux; ensuring Docker Model Runner is installed with GPU support."
+        if docker model start-runner >/dev/null 2>&1 && mn_wait_for_docker_model_runner; then
+            return 0
+        fi
 
-    if docker model install-runner --help >/dev/null 2>&1; then
-        docker model install-runner >/dev/null 2>&1 || true
-        docker model start-runner >/dev/null 2>&1 || true
+        if docker model install-runner --help >/dev/null 2>&1; then
+            print_step "Installing Docker Model Runner (llama.cpp with automatic NVIDIA GPU support)"
+            docker model install-runner \
+                --backend "${MN_DOCKER_MODEL_RUNNER_BACKEND:-llama.cpp}" \
+                --gpu "${MN_DOCKER_MODEL_RUNNER_GPU:-auto}" >/dev/null 2>&1 || true
+            docker model start-runner >/dev/null 2>&1 || true
+            if mn_wait_for_docker_model_runner; then
+                return 0
+            fi
+        fi
+    else
         if docker model status >/dev/null 2>&1; then
             return 0
+        fi
+
+        print_warning "Docker Model Runner is not running; attempting to enable it."
+        if docker desktop enable model-runner >/dev/null 2>&1 && docker model status >/dev/null 2>&1; then
+            return 0
+        fi
+
+        if docker model install-runner --help >/dev/null 2>&1; then
+            docker model install-runner >/dev/null 2>&1 || true
+            docker model start-runner >/dev/null 2>&1 || true
+            if docker model status >/dev/null 2>&1; then
+                return 0
+            fi
         fi
     fi
 
@@ -3615,6 +3701,9 @@ function start_runtime_compose_sidecars() {
     [ "$INSTALL_OPENSHELL" = "Y" ] && services+=("openshell")
     if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
         services+=("membrane-context-engine")
+    fi
+    if mn_is_linux_nvidia_host; then
+        ensure_docker_model_runner
     fi
     if [ "${#services[@]}" -gt 0 ]; then
         remove_stale_runtime_containers_for_services context-engine-model "${services[@]}"
@@ -5775,7 +5864,12 @@ function remove_stale_runtime_containers_for_services() {
 }
 
 function ensure_docker_model_runner() {
-    if [ "$INSTALL_CONTEXT_ENGINE" != "Y" ] && [ "${INSTALL_DOCKER_MODEL_RUNNER:-N}" != "Y" ] && [ "${MN_ENABLE_DOCKER_MODEL_RUNNER:-N}" != "Y" ]; then
+    local linux_nvidia="N"
+    if mn_is_linux_nvidia_host; then
+        linux_nvidia="Y"
+    fi
+
+    if [ "$linux_nvidia" != "Y" ] && [ "$INSTALL_CONTEXT_ENGINE" != "Y" ] && [ "${INSTALL_DOCKER_MODEL_RUNNER:-N}" != "Y" ] && [ "${MN_ENABLE_DOCKER_MODEL_RUNNER:-N}" != "Y" ]; then
         return 0
     fi
 
@@ -5784,20 +5878,42 @@ function ensure_docker_model_runner() {
         exit 1
     fi
 
-    if docker model status >/dev/null 2>&1; then
-        return 0
-    fi
+    if [ "$linux_nvidia" = "Y" ]; then
+        if mn_docker_model_runner_endpoint_ready; then
+            return 0
+        fi
 
-    print_warning "Docker Model Runner is not running; attempting to enable it."
-    if docker desktop enable model-runner >/dev/null 2>&1 && docker model status >/dev/null 2>&1; then
-        return 0
-    fi
+        print_warning "NVIDIA hardware detected on Linux; ensuring Docker Model Runner is installed with GPU support."
+        if docker model start-runner >/dev/null 2>&1 && mn_wait_for_docker_model_runner; then
+            return 0
+        fi
 
-    if docker model install-runner --help >/dev/null 2>&1; then
-        docker model install-runner >/dev/null 2>&1 || true
-        docker model start-runner >/dev/null 2>&1 || true
+        if docker model install-runner --help >/dev/null 2>&1; then
+            print_step "Installing Docker Model Runner (llama.cpp with automatic NVIDIA GPU support)"
+            docker model install-runner \
+                --backend "${MN_DOCKER_MODEL_RUNNER_BACKEND:-llama.cpp}" \
+                --gpu "${MN_DOCKER_MODEL_RUNNER_GPU:-auto}" >/dev/null 2>&1 || true
+            docker model start-runner >/dev/null 2>&1 || true
+            if mn_wait_for_docker_model_runner; then
+                return 0
+            fi
+        fi
+    else
         if docker model status >/dev/null 2>&1; then
             return 0
+        fi
+
+        print_warning "Docker Model Runner is not running; attempting to enable it."
+        if docker desktop enable model-runner >/dev/null 2>&1 && docker model status >/dev/null 2>&1; then
+            return 0
+        fi
+
+        if docker model install-runner --help >/dev/null 2>&1; then
+            docker model install-runner >/dev/null 2>&1 || true
+            docker model start-runner >/dev/null 2>&1 || true
+            if docker model status >/dev/null 2>&1; then
+                return 0
+            fi
         fi
     fi
 
@@ -5813,6 +5929,9 @@ function start_runtime_compose_sidecars() {
     [ "$INSTALL_OPENSHELL" = "Y" ] && services+=("openshell")
     if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
         services+=("membrane-context-engine")
+    fi
+    if mn_is_linux_nvidia_host; then
+        ensure_docker_model_runner
     fi
     if [ "${#services[@]}" -gt 0 ]; then
         remove_stale_runtime_containers_for_services context-engine-model "${services[@]}"
