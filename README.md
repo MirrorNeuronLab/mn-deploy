@@ -84,7 +84,10 @@ Clear runtime Redis state:
   Use `--version v1.2.8` only when you want to pin GitHub installs to matching
   release tags.
 - Use `--version v1.2.8` to install a matching released set of core, CLI, SDK,
-  API, Web UI, package metadata, and runtime support files.
+  API, Web UI, package metadata, and runtime support files. In binary mode,
+  `--core-version`, `--python-sdk-version`, `--cli-version`, and
+  `--api-version` can override those components independently; for example,
+  `./install.sh --core-version v1.2.22 --python-sdk-version v1.2.23 --cli-version v1.2.23 --api-version v1.2.23`.
 - Versioned installer support files live under `install_support/<version>/`.
   Create a release snapshot with:
 

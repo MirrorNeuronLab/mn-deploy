@@ -41,6 +41,10 @@ Common options:
   --python PATH                 Same as MN_PYTHON. Must be Python 3.11.x.
   --no-managed-python           Do not use uv to install a private Python runtime.
   --python-components LIST      Install only these Python components where supported.
+  --core-version TAG            Binary mode: pin the MirrorNeuron core release.
+  --python-sdk-version TAG      Binary mode: pin mirrorneuron-python-sdk.
+  --cli-version TAG             Binary mode: pin mirrorneuron-cli.
+  --api-version TAG             Binary mode: pin mirrorneuron-api.
   --core-release-tag TAG        Legacy alias for --version in binary mode.
   --core-asset-url URL          Binary mode release asset URL.
   --gar-project PROJECT         Binary mode Google Artifact Registry project override.
@@ -57,6 +61,7 @@ Examples:
   ./$MN_INSTALL_SCRIPT_NAME --mode local --no-web-ui --no-skills
   ./$MN_INSTALL_SCRIPT_NAME --version v1.2.22
   ./$MN_INSTALL_SCRIPT_NAME --mode github --version v1.2.22
+  ./$MN_INSTALL_SCRIPT_NAME --core-version v1.2.22 --python-sdk-version v1.2.23 --cli-version v1.2.23 --api-version v1.2.23
 EOF
 }
 
@@ -4172,8 +4177,15 @@ INSTALL_VERSION="${MN_INSTALL_VERSION:-}"
 INSTALL_VERSION_EXPLICIT="N"
 [ -n "$INSTALL_VERSION" ] && INSTALL_VERSION_EXPLICIT="Y"
 CORE_RELEASE_TAG="${MN_CORE_RELEASE_TAG:-}"
+CORE_INSTALL_VERSION="${MN_CORE_VERSION:-}"
+PYTHON_SDK_INSTALL_VERSION="${MN_PYTHON_SDK_VERSION:-}"
+CLI_INSTALL_VERSION="${MN_CLI_VERSION:-}"
+API_INSTALL_VERSION="${MN_API_VERSION:-}"
 CORE_ASSET_URL="${MN_CORE_ASSET_URL:-}"
 MN_PACKAGE_VERSION=""
+MN_PYTHON_SDK_PACKAGE_VERSION=""
+MN_CLI_PACKAGE_VERSION=""
+MN_API_PACKAGE_VERSION=""
 MN_NPM_PACKAGE_VERSION=""
 SKILLS_REPO="${MN_SKILLS_REPO:-MirrorNeuronLab/mn-skills}"
 MEMBRANE_REPO="${MN_MEMBRANE_REPO:-MirrorNeuronLab/Membrane}"
@@ -4239,7 +4251,8 @@ REINSTALL="Y"
 NON_INTERACTIVE="Y"
 
 function print_header() {
-    echo -e "${BLUE}${BOLD}Installing MirrorNeuron ${INSTALL_VERSION}${RESET}" >&3
+    echo -e "${BLUE}${BOLD}Installing MirrorNeuron core ${CORE_INSTALL_VERSION}${RESET}" >&3
+    echo -e "${CYAN}SDK ${PYTHON_SDK_INSTALL_VERSION} · CLI ${CLI_INSTALL_VERSION} · API ${API_INSTALL_VERSION}${RESET}" >&3
     echo -e "${CYAN}Released package install${RESET}\n" >&3
 }
 
@@ -4280,6 +4293,11 @@ Python component options:
   --api / --no-api
 
 Release/source options:
+  --version TAG                 Set the common default release for all components.
+  --core-version TAG            Pin MirrorNeuron core. Env: MN_CORE_VERSION.
+  --python-sdk-version TAG      Pin mirrorneuron-python-sdk. Env: MN_PYTHON_SDK_VERSION.
+  --cli-version TAG             Pin mirrorneuron-cli. Env: MN_CLI_VERSION.
+  --api-version TAG             Pin mirrorneuron-api. Env: MN_API_VERSION.
   --core-release-tag TAG        Legacy alias for --version.
   --core-asset-url URL          Same as MN_CORE_ASSET_URL.
   --gar-project PROJECT         Same as MN_GAR_PROJECT. Overrides the default public package index.
@@ -4309,6 +4327,7 @@ Examples:
   ./$script_name --python-index-url https://us-central1-python.pkg.dev/my-gcp-project/mirrorneuron-python/simple/
   MN_PYTHON=/opt/homebrew/bin/python3.11 ./$script_name
   ./$script_name --version v1.2.22 --no-web-ui
+  ./$script_name --core-version v1.2.22 --python-sdk-version v1.2.23 --cli-version v1.2.23 --api-version v1.2.23
 EOF
 }
 
@@ -4402,6 +4421,54 @@ while [ "$#" -gt 0 ]; do
         --version=*)
             INSTALL_VERSION="${1#*=}"
             INSTALL_VERSION_EXPLICIT="Y"
+            ;;
+        --core-version)
+            shift
+            if [ "$#" -eq 0 ]; then
+                print_error "--core-version requires a release tag such as v1.2.22."
+                usage
+                exit 1
+            fi
+            CORE_INSTALL_VERSION="$1"
+            ;;
+        --core-version=*)
+            CORE_INSTALL_VERSION="${1#*=}"
+            ;;
+        --python-sdk-version)
+            shift
+            if [ "$#" -eq 0 ]; then
+                print_error "--python-sdk-version requires a release tag such as v1.2.23."
+                usage
+                exit 1
+            fi
+            PYTHON_SDK_INSTALL_VERSION="$1"
+            ;;
+        --python-sdk-version=*)
+            PYTHON_SDK_INSTALL_VERSION="${1#*=}"
+            ;;
+        --cli-version)
+            shift
+            if [ "$#" -eq 0 ]; then
+                print_error "--cli-version requires a release tag such as v1.2.23."
+                usage
+                exit 1
+            fi
+            CLI_INSTALL_VERSION="$1"
+            ;;
+        --cli-version=*)
+            CLI_INSTALL_VERSION="${1#*=}"
+            ;;
+        --api-version)
+            shift
+            if [ "$#" -eq 0 ]; then
+                print_error "--api-version requires a release tag such as v1.2.23."
+                usage
+                exit 1
+            fi
+            API_INSTALL_VERSION="$1"
+            ;;
+        --api-version=*)
+            API_INSTALL_VERSION="${1#*=}"
             ;;
         --python-components)
             shift
@@ -4583,11 +4650,25 @@ function finalize_binary_install_version() {
         fi
         INSTALL_VERSION="$CORE_RELEASE_TAG"
     fi
+    if [ -z "$INSTALL_VERSION" ] && [ -n "$CORE_INSTALL_VERSION" ]; then
+        INSTALL_VERSION="$CORE_INSTALL_VERSION"
+    fi
     INSTALL_VERSION="${INSTALL_VERSION:-$MN_DEFAULT_INSTALL_VERSION}"
     mn_validate_version_tag_or_exit "$INSTALL_VERSION"
+    CORE_INSTALL_VERSION="${CORE_INSTALL_VERSION:-$INSTALL_VERSION}"
+    PYTHON_SDK_INSTALL_VERSION="${PYTHON_SDK_INSTALL_VERSION:-$INSTALL_VERSION}"
+    CLI_INSTALL_VERSION="${CLI_INSTALL_VERSION:-$INSTALL_VERSION}"
+    API_INSTALL_VERSION="${API_INSTALL_VERSION:-$INSTALL_VERSION}"
+    mn_validate_version_tag_or_exit "$CORE_INSTALL_VERSION"
+    mn_validate_version_tag_or_exit "$PYTHON_SDK_INSTALL_VERSION"
+    mn_validate_version_tag_or_exit "$CLI_INSTALL_VERSION"
+    mn_validate_version_tag_or_exit "$API_INSTALL_VERSION"
     MN_INSTALL_VERSION="$INSTALL_VERSION"
-    CORE_RELEASE_TAG="$INSTALL_VERSION"
-    MN_PACKAGE_VERSION="$(mn_package_version_from_tag "$INSTALL_VERSION")"
+    CORE_RELEASE_TAG="$CORE_INSTALL_VERSION"
+    MN_PYTHON_SDK_PACKAGE_VERSION="$(mn_package_version_from_tag "$PYTHON_SDK_INSTALL_VERSION")"
+    MN_CLI_PACKAGE_VERSION="$(mn_package_version_from_tag "$CLI_INSTALL_VERSION")"
+    MN_API_PACKAGE_VERSION="$(mn_package_version_from_tag "$API_INSTALL_VERSION")"
+    MN_PACKAGE_VERSION="$MN_PYTHON_SDK_PACKAGE_VERSION"
     MN_NPM_PACKAGE_VERSION="$(mn_npm_version_from_tag "$INSTALL_VERSION")"
     RUNTIME_COMPOSE_TEMPLATE="${RUNTIME_COMPOSE_TEMPLATE:-${SCRIPT_DIR}/install_support/${INSTALL_VERSION}/docker-compose.yml}"
     PACKAGE_INDEX_FILE="${PACKAGE_INDEX_FILE:-${SCRIPT_DIR}/install_support/${INSTALL_VERSION}/package-index/python-packages.toml}"
@@ -5177,13 +5258,24 @@ PY
 
 function install_indexed_group() {
     local group="$1"
-    local requirement pinned_requirement label bundled_wheel installed="N"
+    local requirement package_name package_version pinned_requirement label bundled_wheel installed="N"
     while IFS= read -r requirement; do
         [ -n "$requirement" ] || continue
-        case "$requirement" in
-            *"=="*|*">="*|*"<="*|*"~="*|*"!="*|*">"*|*"<"*) pinned_requirement="$requirement" ;;
-            *) pinned_requirement="${requirement}==${MN_PACKAGE_VERSION}" ;;
+        package_name="$(printf '%s' "$requirement" | sed -E 's/\[.*$//; s/[<>=!~].*$//')"
+        package_version=""
+        case "$package_name" in
+            mirrorneuron-python-sdk) package_version="$MN_PYTHON_SDK_PACKAGE_VERSION" ;;
+            mirrorneuron-cli) package_version="$MN_CLI_PACKAGE_VERSION" ;;
+            mirrorneuron-api) package_version="$MN_API_PACKAGE_VERSION" ;;
         esac
+        if [ -n "$package_version" ]; then
+            pinned_requirement="${requirement%%[<>=!~]*}==${package_version}"
+        else
+            case "$requirement" in
+                *"=="*|*">="*|*"<="*|*"~="*|*"!="*|*">"*|*"<"*) pinned_requirement="$requirement" ;;
+                *) pinned_requirement="${requirement}==${MN_PACKAGE_VERSION}" ;;
+            esac
+        fi
         label="$(printf '%s' "$pinned_requirement" | tr -c 'A-Za-z0-9_.-' '_')"
         if bundled_wheel="$(bundled_wheel_for_requirement "$pinned_requirement")"; then
             run_quiet "install-${label}" "$VENV_DIR/bin/pip" install --upgrade "$bundled_wheel"
@@ -6333,7 +6425,7 @@ if [ "$START_NOW" = "Y" ]; then
 fi
 
 echo "" >&3
-print_success "MirrorNeuron ${INSTALL_VERSION} installed." >&3
+print_success "MirrorNeuron core ${CORE_INSTALL_VERSION} installed (SDK ${PYTHON_SDK_INSTALL_VERSION}, CLI ${CLI_INSTALL_VERSION}, API ${API_INSTALL_VERSION})." >&3
 if [ "$INSTALL_CLI" = "Y" ]; then
     echo -e "CLI: ${YELLOW}mn${RESET}" >&3
 fi
