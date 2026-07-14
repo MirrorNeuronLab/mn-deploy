@@ -45,6 +45,7 @@ Common options:
   --python-sdk-version TAG      Binary mode: pin mirrorneuron-python-sdk.
   --cli-version TAG             Binary mode: pin mirrorneuron-cli.
   --api-version TAG             Binary mode: pin mirrorneuron-api.
+  --web-ui-version TAG          Binary mode: pin mirrorneuron-web-ui.
   --core-release-tag TAG        Legacy alias for --version in binary mode.
   --core-asset-url URL          Binary mode release asset URL.
   --gar-project PROJECT         Binary mode Google Artifact Registry project override.
@@ -61,7 +62,7 @@ Examples:
   ./$MN_INSTALL_SCRIPT_NAME --mode local --no-web-ui --no-skills
   ./$MN_INSTALL_SCRIPT_NAME --version v1.2.22
   ./$MN_INSTALL_SCRIPT_NAME --mode github --version v1.2.22
-  ./$MN_INSTALL_SCRIPT_NAME --core-version v1.2.22 --python-sdk-version v1.2.23 --cli-version v1.2.23 --api-version v1.2.23
+  ./$MN_INSTALL_SCRIPT_NAME --core-version v1.2.22 --python-sdk-version v1.2.23 --cli-version v1.2.23 --api-version v1.2.23 --web-ui-version v1.2.23
 EOF
 }
 
@@ -4181,12 +4182,13 @@ CORE_INSTALL_VERSION="${MN_CORE_VERSION:-}"
 PYTHON_SDK_INSTALL_VERSION="${MN_PYTHON_SDK_VERSION:-}"
 CLI_INSTALL_VERSION="${MN_CLI_VERSION:-}"
 API_INSTALL_VERSION="${MN_API_VERSION:-}"
+WEB_UI_INSTALL_VERSION="${MN_WEB_UI_VERSION:-}"
 CORE_ASSET_URL="${MN_CORE_ASSET_URL:-}"
 MN_PACKAGE_VERSION=""
 MN_PYTHON_SDK_PACKAGE_VERSION=""
 MN_CLI_PACKAGE_VERSION=""
 MN_API_PACKAGE_VERSION=""
-MN_NPM_PACKAGE_VERSION=""
+MN_WEB_UI_NPM_PACKAGE_VERSION=""
 SKILLS_REPO="${MN_SKILLS_REPO:-MirrorNeuronLab/mn-skills}"
 MEMBRANE_REPO="${MN_MEMBRANE_REPO:-MirrorNeuronLab/Membrane}"
 MEMBRANE_GIT_URL="${MN_MEMBRANE_GIT_URL:-}"
@@ -4252,7 +4254,7 @@ NON_INTERACTIVE="Y"
 
 function print_header() {
     echo -e "${BLUE}${BOLD}Installing MirrorNeuron core ${CORE_INSTALL_VERSION}${RESET}" >&3
-    echo -e "${CYAN}SDK ${PYTHON_SDK_INSTALL_VERSION} · CLI ${CLI_INSTALL_VERSION} · API ${API_INSTALL_VERSION}${RESET}" >&3
+    echo -e "${CYAN}SDK ${PYTHON_SDK_INSTALL_VERSION} · CLI ${CLI_INSTALL_VERSION} · API ${API_INSTALL_VERSION} · Web UI ${WEB_UI_INSTALL_VERSION}${RESET}" >&3
     echo -e "${CYAN}Released package install${RESET}\n" >&3
 }
 
@@ -4298,6 +4300,7 @@ Release/source options:
   --python-sdk-version TAG      Pin mirrorneuron-python-sdk. Env: MN_PYTHON_SDK_VERSION.
   --cli-version TAG             Pin mirrorneuron-cli. Env: MN_CLI_VERSION.
   --api-version TAG             Pin mirrorneuron-api. Env: MN_API_VERSION.
+  --web-ui-version TAG          Pin mirrorneuron-web-ui. Env: MN_WEB_UI_VERSION.
   --core-release-tag TAG        Legacy alias for --version.
   --core-asset-url URL          Same as MN_CORE_ASSET_URL.
   --gar-project PROJECT         Same as MN_GAR_PROJECT. Overrides the default public package index.
@@ -4327,7 +4330,7 @@ Examples:
   ./$script_name --python-index-url https://us-central1-python.pkg.dev/my-gcp-project/mirrorneuron-python/simple/
   MN_PYTHON=/opt/homebrew/bin/python3.11 ./$script_name
   ./$script_name --version v1.2.22 --no-web-ui
-  ./$script_name --core-version v1.2.22 --python-sdk-version v1.2.23 --cli-version v1.2.23 --api-version v1.2.23
+  ./$script_name --core-version v1.2.22 --python-sdk-version v1.2.23 --cli-version v1.2.23 --api-version v1.2.23 --web-ui-version v1.2.23
 EOF
 }
 
@@ -4469,6 +4472,18 @@ while [ "$#" -gt 0 ]; do
             ;;
         --api-version=*)
             API_INSTALL_VERSION="${1#*=}"
+            ;;
+        --web-ui-version)
+            shift
+            if [ "$#" -eq 0 ]; then
+                print_error "--web-ui-version requires a release tag such as v1.2.23."
+                usage
+                exit 1
+            fi
+            WEB_UI_INSTALL_VERSION="$1"
+            ;;
+        --web-ui-version=*)
+            WEB_UI_INSTALL_VERSION="${1#*=}"
             ;;
         --python-components)
             shift
@@ -4659,17 +4674,19 @@ function finalize_binary_install_version() {
     PYTHON_SDK_INSTALL_VERSION="${PYTHON_SDK_INSTALL_VERSION:-$INSTALL_VERSION}"
     CLI_INSTALL_VERSION="${CLI_INSTALL_VERSION:-$INSTALL_VERSION}"
     API_INSTALL_VERSION="${API_INSTALL_VERSION:-$INSTALL_VERSION}"
+    WEB_UI_INSTALL_VERSION="${WEB_UI_INSTALL_VERSION:-$INSTALL_VERSION}"
     mn_validate_version_tag_or_exit "$CORE_INSTALL_VERSION"
     mn_validate_version_tag_or_exit "$PYTHON_SDK_INSTALL_VERSION"
     mn_validate_version_tag_or_exit "$CLI_INSTALL_VERSION"
     mn_validate_version_tag_or_exit "$API_INSTALL_VERSION"
+    mn_validate_version_tag_or_exit "$WEB_UI_INSTALL_VERSION"
     MN_INSTALL_VERSION="$INSTALL_VERSION"
     CORE_RELEASE_TAG="$CORE_INSTALL_VERSION"
     MN_PYTHON_SDK_PACKAGE_VERSION="$(mn_package_version_from_tag "$PYTHON_SDK_INSTALL_VERSION")"
     MN_CLI_PACKAGE_VERSION="$(mn_package_version_from_tag "$CLI_INSTALL_VERSION")"
     MN_API_PACKAGE_VERSION="$(mn_package_version_from_tag "$API_INSTALL_VERSION")"
     MN_PACKAGE_VERSION="$MN_PYTHON_SDK_PACKAGE_VERSION"
-    MN_NPM_PACKAGE_VERSION="$(mn_npm_version_from_tag "$INSTALL_VERSION")"
+    MN_WEB_UI_NPM_PACKAGE_VERSION="$(mn_npm_version_from_tag "$WEB_UI_INSTALL_VERSION")"
     RUNTIME_COMPOSE_TEMPLATE="${RUNTIME_COMPOSE_TEMPLATE:-${SCRIPT_DIR}/install_support/${INSTALL_VERSION}/docker-compose.yml}"
     PACKAGE_INDEX_FILE="${PACKAGE_INDEX_FILE:-${SCRIPT_DIR}/install_support/${INSTALL_VERSION}/package-index/python-packages.toml}"
     export MN_INSTALL_VERSION
@@ -6190,7 +6207,7 @@ function install_web_ui_package() {
   "dependencies": {
     "@vitejs/plugin-react": "^6.0.1",
     "vite": "^8.0.4",
-    "mirrorneuron-web-ui": "${MN_NPM_PACKAGE_VERSION}"
+    "mirrorneuron-web-ui": "${MN_WEB_UI_NPM_PACKAGE_VERSION}"
   },
   "devDependencies": {}
 }
@@ -6425,7 +6442,7 @@ if [ "$START_NOW" = "Y" ]; then
 fi
 
 echo "" >&3
-print_success "MirrorNeuron core ${CORE_INSTALL_VERSION} installed (SDK ${PYTHON_SDK_INSTALL_VERSION}, CLI ${CLI_INSTALL_VERSION}, API ${API_INSTALL_VERSION})." >&3
+print_success "MirrorNeuron core ${CORE_INSTALL_VERSION} installed (SDK ${PYTHON_SDK_INSTALL_VERSION}, CLI ${CLI_INSTALL_VERSION}, API ${API_INSTALL_VERSION}, Web UI ${WEB_UI_INSTALL_VERSION})." >&3
 if [ "$INSTALL_CLI" = "Y" ]; then
     echo -e "CLI: ${YELLOW}mn${RESET}" >&3
 fi
