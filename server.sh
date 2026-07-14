@@ -247,7 +247,7 @@ start_services() {
             -e "MN_COOKIE=${mn_cookie}"
             -e "MN_GRPC_AUTH_TOKEN=mirror_neuron_password"
             -e "MN_GRPC_ADMIN_TOKEN=mirror_neuron_password_admin"
-            -e "MN_CORE_ALLOW_NATIVE_SANDBOX_PREP=${MN_CORE_ALLOW_NATIVE_SANDBOX_PREP:-1}"
+            -e "MN_CORE_ALLOW_NATIVE_SANDBOX_PREP=${MN_CORE_ALLOW_NATIVE_SANDBOX_PREP:-0}"
             -e "MN_CORE_HOST=${MN_CORE_HOST:-localhost}"
             -e "MN_REDIS_HOST=${MN_REDIS_HOST:-localhost}"
             -e "ERL_EPMD_ADDRESS=${MN_EPMD_HOST:-localhost}"
