@@ -89,6 +89,8 @@ Clear runtime Redis state:
   and `--web-ui-version` can override those components independently; for
   example, `./install.sh --core-version v1.2.22 --python-sdk-version v1.2.23
   --cli-version v1.2.23 --api-version v1.2.23 --web-ui-version v1.2.23`.
+  With no version flags, binary installs use core `v1.2.22` and SDK, CLI, API,
+  and Web UI `v1.2.23`.
 - Versioned installer support files live under `install_support/<version>/`.
   Create a release snapshot with:
 
