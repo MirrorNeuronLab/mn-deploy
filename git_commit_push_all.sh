@@ -4,7 +4,41 @@
 set -e
 
 # Commit message (default if not provided)
-COMMIT_MSG=${1:-"auto: update all repos"}
+COMMIT_MSG="auto: update all repos"
+
+usage() {
+    echo "Usage: $0 [-m \"commit message\"]"
+}
+
+while getopts ":m:h" opt; do
+    case "$opt" in
+        m)
+            COMMIT_MSG="$OPTARG"
+            ;;
+        h)
+            usage
+            exit 0
+            ;;
+        :)
+            echo "Error: option -$OPTARG requires a commit message." >&2
+            usage >&2
+            exit 2
+            ;;
+        \?)
+            echo "Error: invalid option -$OPTARG." >&2
+            usage >&2
+            exit 2
+            ;;
+    esac
+done
+
+shift $((OPTIND - 1))
+
+if [ "$#" -gt 0 ]; then
+    echo "Error: unexpected argument: $1" >&2
+    usage >&2
+    exit 2
+fi
 
 echo "Starting bulk git commit & push..."
 
