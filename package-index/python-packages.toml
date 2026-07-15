@@ -282,3 +282,124 @@ publish_group = "skill"
 version = "1.2.15"
 installer_groups = ["skill"]
 binary_default = false
+
+# Packaged agent definitions and reusable handler factories.
+[[packages]]
+name = "mn-worker-python-host-agent"
+path = "mn-agents/worker_python_host_agent"
+publish_group = "agent"
+version = "1.2.7"
+installer_groups = ["agent"]
+binary_default = false
+
+[[packages]]
+name = "mn-worker-python-docker-agent"
+path = "mn-agents/worker_python_docker_agent"
+publish_group = "agent"
+version = "1.2.7"
+installer_groups = ["agent"]
+binary_default = false
+
+[[packages]]
+name = "mn-worker-llm-host-agent"
+path = "mn-agents/worker_llm_host_agent"
+publish_group = "agent"
+version = "1.2.7"
+installer_groups = ["agent"]
+binary_default = false
+
+[[packages]]
+name = "mn-control-terminal-sink-agent"
+path = "mn-agents/control_terminal_sink_agent"
+publish_group = "agent"
+version = "1.2.7"
+installer_groups = ["agent"]
+binary_default = false
+
+[[packages]]
+name = "mn-control-message-router-agent"
+path = "mn-agents/control_message_router_agent"
+publish_group = "agent"
+version = "1.2.7"
+installer_groups = ["agent"]
+binary_default = false
+
+[[packages]]
+name = "mn-module-beam-module-agent"
+path = "mn-agents/module_beam_module_agent"
+publish_group = "agent"
+version = "1.2.7"
+installer_groups = ["agent"]
+binary_default = false
+
+[[packages]]
+name = "mn-service-openshell-agent"
+path = "mn-agents/service_openshell_agent"
+publish_group = "agent"
+version = "1.2.7"
+installer_groups = ["agent"]
+binary_default = false
+
+[[packages]]
+name = "mn-prototype-operation-router-agent"
+path = "mn-agents/prototype_operation_router_agent"
+publish_group = "agent"
+version = "1.2.7"
+installer_groups = ["agent"]
+binary_default = false
+
+[[packages]]
+name = "mn-prototype-stateful-step-agent"
+path = "mn-agents/prototype_stateful_step_agent"
+publish_group = "agent"
+version = "1.2.7"
+installer_groups = ["agent"]
+binary_default = false
+
+[[packages]]
+name = "mn-prototype-entity-queue-agent"
+path = "mn-agents/prototype_entity_queue_agent"
+publish_group = "agent"
+version = "1.2.7"
+installer_groups = ["agent"]
+binary_default = false
+
+[[packages]]
+name = "mn-prototype-bounded-tool-loop-agent"
+path = "mn-agents/prototype_bounded_tool_loop_agent"
+publish_group = "agent"
+version = "1.2.7"
+installer_groups = ["agent"]
+binary_default = false
+
+[[packages]]
+name = "mn-prototype-actor-review-agent"
+path = "mn-agents/prototype_actor_review_agent"
+publish_group = "agent"
+version = "1.2.7"
+installer_groups = ["agent"]
+binary_default = false
+
+[[packages]]
+name = "mn-prototype-artifact-finalizer-agent"
+path = "mn-agents/prototype_artifact_finalizer_agent"
+publish_group = "agent"
+version = "1.2.7"
+installer_groups = ["agent"]
+binary_default = false
+
+[[packages]]
+name = "mn-prototype-supervised-service-agent"
+path = "mn-agents/prototype_supervised_service_agent"
+publish_group = "agent"
+version = "1.2.7"
+installer_groups = ["agent"]
+binary_default = false
+
+[[packages]]
+name = "mn-prototype-stream-processor-agent"
+path = "mn-agents/prototype_stream_processor_agent"
+publish_group = "agent"
+version = "1.2.7"
+installer_groups = ["agent"]
+binary_default = false
