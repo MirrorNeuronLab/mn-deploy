@@ -87,10 +87,10 @@ Clear runtime Redis state:
   API, Web UI, package metadata, and runtime support files. In binary mode,
   `--core-version`, `--python-sdk-version`, `--cli-version`, `--api-version`,
   and `--web-ui-version` can override those components independently; for
-  example, `./install.sh --core-version v1.2.22 --python-sdk-version v1.2.23
-  --cli-version v1.2.23 --api-version v1.2.23 --web-ui-version v1.2.23`.
-  With no version flags, binary installs use core `v1.2.22` and SDK, CLI, API,
-  and Web UI `v1.2.23`.
+  example, `./install.sh --core-version v1.2.24 --python-sdk-version v1.2.24
+  --cli-version v1.2.24 --api-version v1.2.24 --web-ui-version v1.2.24`.
+  With no version flags, binary installs use core `v1.2.24` and SDK, CLI, API,
+  and Web UI `v1.2.24`.
 - Versioned installer support files live under `install_support/<version>/`.
   Create a release snapshot with:
 

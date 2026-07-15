@@ -36,7 +36,7 @@ Options:
   --build-command SCRIPT     npm script to run with --build.
                              Env: MN_OTTERDESK_BUILD_COMMAND.
                              Default: dist:mac.
-  --version VERSION          Release version/tag, for example v1.2.8.
+  --version VERSION          Release version/tag, for example v1.2.24.
                              Env: MN_OTTERDESK_VERSION or MN_PACKAGE_VERSION.
   --project PROJECT          GAR project. Env: MN_GAR_PROJECT.
                              Default: mirrorneuron-public-packages.
@@ -58,12 +58,12 @@ Options:
   -h, --help                 Show this help.
 
 Examples:
-  ./publish_public_otterdesk_to_google_artifact_registry.sh --version v1.2.8
+  ./publish_public_otterdesk_to_google_artifact_registry.sh --version v1.2.24
 
   ./publish_public_otterdesk_to_google_artifact_registry.sh \\
     --apply \\
     --build \\
-    --version v1.2.8
+    --version v1.2.24
 EOF
 }
 
@@ -203,7 +203,7 @@ infer_version() {
         fi
     fi
 
-    die "Release version is required. Pass --version v1.2.8 or set MN_OTTERDESK_VERSION."
+    die "Release version is required. Pass --version v1.2.24 or set MN_OTTERDESK_VERSION."
 }
 
 sha256_file() {

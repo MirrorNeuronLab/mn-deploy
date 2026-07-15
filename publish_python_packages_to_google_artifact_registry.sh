@@ -18,6 +18,7 @@ GCLOUD_BIN="${MN_GCLOUD_BIN:-gcloud}"
 DIST_DIR="${MN_PYTHON_DIST_DIR:-${SCRIPT_DIR}/dist/python-packages}"
 LOCAL_INDEX_DIR="${MN_LOCAL_PYTHON_INDEX_DIR:-${SCRIPT_DIR}/local-python-index}"
 APPLY="N"
+PRUNE="Y"
 
 usage() {
     cat <<EOF
@@ -30,6 +31,7 @@ Defaults to dry-run. Pass --apply to upload and delete stale GAR package names.
 
 Options:
   --apply                Upload packages and delete stale GAR package names.
+  --no-prune             Upload packages without deleting unrelated GAR package names.
   --project PROJECT      Google Cloud project ID. Env: MN_GAR_PROJECT.
   --location LOCATION    GAR location. Env: MN_GAR_LOCATION. Default: us-central1.
   --repository NAME      GAR Python repository. Env: MN_GAR_REPOSITORY. Default: mirrorneuron-python.
@@ -44,6 +46,7 @@ EOF
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --apply) APPLY="Y" ;;
+        --no-prune) PRUNE="N" ;;
         --project)
             shift
             [ "$#" -gt 0 ] || { echo "--project requires a value." >&2; exit 1; }
@@ -451,13 +454,15 @@ while IFS="$(printf '\t')" read -r remote_canonical_name remote_package; do
         continue
     fi
     stale_count=$((stale_count + 1))
-    if [ "$APPLY" = "Y" ]; then
+    if [ "$APPLY" = "Y" ] && [ "$PRUNE" = "Y" ]; then
         echo "Deleting stale GAR package ${remote_package}."
         "$GCLOUD_BIN" artifacts packages delete "$remote_package" \
             --project="$PROJECT" \
             --repository="$REPOSITORY" \
             --location="$LOCATION" \
             --quiet
+    elif [ "$APPLY" = "Y" ]; then
+        echo "Skipping stale GAR package \${remote_package} (--no-prune)."
     else
         echo "DRY RUN: would delete stale GAR package ${remote_package}."
     fi

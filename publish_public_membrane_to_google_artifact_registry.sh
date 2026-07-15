@@ -37,7 +37,7 @@ upload generic binary artifacts, and push Docker images.
 
 Options:
   --apply                         Publish artifacts. Default is dry-run.
-  --version VERSION               Release version/tag, for example v1.2.7.
+  --version VERSION               Release version/tag, for example v1.2.24.
                                    Env: MN_MEMBRANE_VERSION or MN_PACKAGE_VERSION.
   --project PROJECT               GAR project. Env: MN_GAR_PROJECT.
                                    Default: mirrorneuron-public-packages.
@@ -73,15 +73,15 @@ Options:
   -h, --help                      Show this help.
 
 Examples:
-  ./publish_public_membrane_to_google_artifact_registry.sh --version v1.2.7
+  ./publish_public_membrane_to_google_artifact_registry.sh --version v1.2.24
 
   ./publish_public_membrane_to_google_artifact_registry.sh \\
     --apply \\
-    --version v1.2.7
+    --version v1.2.24
 
   ./publish_public_membrane_to_google_artifact_registry.sh \\
     --apply \\
-    --version v1.2.7 \\
+    --version v1.2.24 \\
     --binary-artifacts-dir /tmp/membrane-release-assets
 EOF
 }
@@ -242,7 +242,7 @@ infer_version() {
         fi
     fi
 
-    die "Release version is required. Pass --version v1.2.7 or set MN_MEMBRANE_VERSION."
+    die "Release version is required. Pass --version v1.2.24 or set MN_MEMBRANE_VERSION."
 }
 
 host_package_suffix() {
