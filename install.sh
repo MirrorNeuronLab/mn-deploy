@@ -390,16 +390,17 @@ export GH_PROMPT_DISABLED="${GH_PROMPT_DISABLED:-1}"
 export PIP_NO_INPUT="${PIP_NO_INPUT:-1}"
 
 # Use color only for an interactive terminal and respect the NO_COLOR convention.
-if [ -t 3 ] && [ -z "${NO_COLOR:-}" ]; then
-    BOLD="\033[1m"
-    DIM="\033[2m"
-    RED="\033[31m"
-    GREEN="\033[32m"
-    YELLOW="\033[33m"
-    BLUE="\033[34m"
-    CYAN="\033[36m"
-    MAGENTA="\033[35m"
-    RESET="\033[0m"
+if [ -t 3 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-dumb}" != "dumb" ]; then
+    ESC="$(printf '\033')"
+    BOLD="${ESC}[1m"
+    DIM="${ESC}[2m"
+    RED="${ESC}[31m"
+    GREEN="${ESC}[32m"
+    YELLOW="${ESC}[33m"
+    BLUE="${ESC}[34m"
+    CYAN="${ESC}[36m"
+    MAGENTA="${ESC}[35m"
+    RESET="${ESC}[0m"
 else
     BOLD=""
     DIM=""
@@ -2371,16 +2372,17 @@ set -euo pipefail
 # Keep installer output visible even when a subcommand redirects stdout/stderr.
 exec 3>&1
 
-if [ -t 3 ] && [ -z "${NO_COLOR:-}" ]; then
-    BOLD="\033[1m"
-    DIM="\033[2m"
-    RED="\033[31m"
-    GREEN="\033[32m"
-    YELLOW="\033[33m"
-    BLUE="\033[34m"
-    CYAN="\033[36m"
-    MAGENTA="\033[35m"
-    RESET="\033[0m"
+if [ -t 3 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-dumb}" != "dumb" ]; then
+    ESC="$(printf '\033')"
+    BOLD="${ESC}[1m"
+    DIM="${ESC}[2m"
+    RED="${ESC}[31m"
+    GREEN="${ESC}[32m"
+    YELLOW="${ESC}[33m"
+    BLUE="${ESC}[34m"
+    CYAN="${ESC}[36m"
+    MAGENTA="${ESC}[35m"
+    RESET="${ESC}[0m"
 else
     BOLD=""
     DIM=""
@@ -4209,16 +4211,17 @@ export GIT_TERMINAL_PROMPT="${GIT_TERMINAL_PROMPT:-0}"
 export GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new}"
 export PIP_NO_INPUT="${PIP_NO_INPUT:-1}"
 
-if [ -t 3 ] && [ -z "${NO_COLOR:-}" ]; then
-    BOLD="\033[1m"
-    DIM="\033[2m"
-    RED="\033[31m"
-    GREEN="\033[32m"
-    YELLOW="\033[33m"
-    BLUE="\033[34m"
-    CYAN="\033[36m"
-    MAGENTA="\033[35m"
-    RESET="\033[0m"
+if [ -t 3 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-dumb}" != "dumb" ]; then
+    ESC="$(printf '\033')"
+    BOLD="${ESC}[1m"
+    DIM="${ESC}[2m"
+    RED="${ESC}[31m"
+    GREEN="${ESC}[32m"
+    YELLOW="${ESC}[33m"
+    BLUE="${ESC}[34m"
+    CYAN="${ESC}[36m"
+    MAGENTA="${ESC}[35m"
+    RESET="${ESC}[0m"
 else
     BOLD=""
     DIM=""

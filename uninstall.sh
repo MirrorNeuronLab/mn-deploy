@@ -5,14 +5,15 @@ set -e
 # Keep uninstaller output visible even when prompts are piped.
 exec 3>&1
 
-if [ -t 3 ] && [ -z "${NO_COLOR:-}" ]; then
-    BOLD="\033[1m"
-    RED="\033[31m"
-    GREEN="\033[32m"
-    YELLOW="\033[33m"
-    BLUE="\033[34m"
-    CYAN="\033[36m"
-    RESET="\033[0m"
+if [ -t 3 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-dumb}" != "dumb" ]; then
+    ESC="$(printf '\033')"
+    BOLD="${ESC}[1m"
+    RED="${ESC}[31m"
+    GREEN="${ESC}[32m"
+    YELLOW="${ESC}[33m"
+    BLUE="${ESC}[34m"
+    CYAN="${ESC}[36m"
+    RESET="${ESC}[0m"
 else
     BOLD=""
     RED=""

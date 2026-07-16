@@ -10,13 +10,14 @@ DATABASE=""
 ASSUME_YES="N"
 ASYNC="N"
 
-if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
-    BOLD="\033[1m"
-    RED="\033[31m"
-    GREEN="\033[32m"
-    YELLOW="\033[33m"
-    CYAN="\033[36m"
-    RESET="\033[0m"
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-dumb}" != "dumb" ]; then
+    ESC="$(printf '\033')"
+    BOLD="${ESC}[1m"
+    RED="${ESC}[31m"
+    GREEN="${ESC}[32m"
+    YELLOW="${ESC}[33m"
+    CYAN="${ESC}[36m"
+    RESET="${ESC}[0m"
 else
     BOLD=""
     RED=""
