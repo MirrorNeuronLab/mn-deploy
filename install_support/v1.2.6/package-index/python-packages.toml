@@ -251,13 +251,6 @@ version = "1.2.6"
 installer_groups = ["skill"]
 binary_default = false
 
-[[packages]]
-name = "mirrorneuron-w3m-browser-skill"
-path = "mn-skills/w3m_browser_skill"
-publish_group = "skill"
-version = "1.2.6"
-installer_groups = ["skill"]
-binary_default = false
 
 [[packages]]
 name = "mirrorneuron-web-browser-skill"
