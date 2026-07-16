@@ -428,7 +428,7 @@ function print_header() {
 }
 
 function print_step() { printf '%s==>%s %s\n' "${CYAN}${BOLD}" "$RESET" "$1" >&3; }
-function print_success() { printf '%s✓%s %s\n' "${GREEN}${BOLD}" "$RESET" "$1" >&3; }
+function print_success() { printf '%s✔%s %s\n' "${GREEN}${BOLD}" "$RESET" "$1" >&3; }
 function print_error() { printf '%serror:%s %s\n' "${RED}${BOLD}" "$RESET" "$1" >&3; }
 function print_warning() { printf '%swarning:%s %s\n' "${YELLOW}${BOLD}" "$RESET" "$1" >&3; }
 function print_detail() {
@@ -490,15 +490,15 @@ function spinner() {
     local pid=$1
     local msg=$2
     local delay=0.1
-    local spinstr='|/-\'
+    local frames=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
+    local frame_index=0
     local interactive="N"
     if [ -t 3 ]; then
         interactive="Y"
         tput civis >&3 2>/dev/null || true
         while kill -0 "$pid" 2>/dev/null; do
-            local temp=${spinstr#?}
-            printf '\r%s%s%s %s' "${MAGENTA}${BOLD}" "$spinstr" "$RESET" "$msg" >&3
-            spinstr=$temp${spinstr%"$temp"}
+            printf '\r%s%s%s %s' "${MAGENTA}${BOLD}" "${frames[$frame_index]}" "$RESET" "$msg" >&3
+            frame_index=$(((frame_index + 1) % ${#frames[@]}))
             sleep "$delay"
         done
     else
@@ -2469,7 +2469,7 @@ function print_header() {
 }
 
 function print_step() { printf '%s==>%s %s\n' "${CYAN}${BOLD}" "$RESET" "$1" >&3; }
-function print_success() { printf '%s✓%s %s\n' "${GREEN}${BOLD}" "$RESET" "$1" >&3; }
+function print_success() { printf '%s✔%s %s\n' "${GREEN}${BOLD}" "$RESET" "$1" >&3; }
 function print_error() { printf '%serror:%s %s\n' "${RED}${BOLD}" "$RESET" "$1" >&3; }
 function print_warning() { printf '%swarning:%s %s\n' "${YELLOW}${BOLD}" "$RESET" "$1" >&3; }
 function print_detail() {
@@ -2785,15 +2785,15 @@ function spinner() {
     local pid=$1
     local msg=$2
     local delay=0.1
-    local spinstr='|/-\'
+    local frames=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
+    local frame_index=0
     local interactive="N"
     if [ -t 3 ]; then
         interactive="Y"
         tput civis >&3 2>/dev/null || true
         while kill -0 "$pid" 2>/dev/null; do
-            local temp=${spinstr#?}
-            printf '\r%s%s%s %s' "${MAGENTA}${BOLD}" "$spinstr" "$RESET" "$msg" >&3
-            spinstr=$temp${spinstr%"$temp"}
+            printf '\r%s%s%s %s' "${MAGENTA}${BOLD}" "${frames[$frame_index]}" "$RESET" "$msg" >&3
+            frame_index=$(((frame_index + 1) % ${#frames[@]}))
             sleep "$delay"
         done
     else
@@ -4333,7 +4333,7 @@ function print_header() {
 }
 
 function print_step() { printf '%s==>%s %s\n' "${CYAN}${BOLD}" "$RESET" "$1" >&3; }
-function print_success() { printf '%s✓%s %s\n' "${GREEN}${BOLD}" "$RESET" "$1" >&3; }
+function print_success() { printf '%s✔%s %s\n' "${GREEN}${BOLD}" "$RESET" "$1" >&3; }
 function print_error() { printf '%serror:%s %s\n' "${RED}${BOLD}" "$RESET" "$1" >&3; }
 function print_warning() { printf '%swarning:%s %s\n' "${YELLOW}${BOLD}" "$RESET" "$1" >&3; }
 function print_detail() {
@@ -4814,15 +4814,15 @@ function spinner() {
     local pid=$1
     local msg=$2
     local delay=0.1
-    local spinstr='|/-\'
+    local frames=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
+    local frame_index=0
     local interactive="N"
     if [ -t 3 ]; then
         interactive="Y"
         tput civis >&3 2>/dev/null || true
         while kill -0 "$pid" 2>/dev/null; do
-            local temp=${spinstr#?}
-            printf '\r%s%s%s %s' "${MAGENTA}${BOLD}" "$spinstr" "$RESET" "$msg" >&3
-            spinstr=$temp${spinstr%"$temp"}
+            printf '\r%s%s%s %s' "${MAGENTA}${BOLD}" "${frames[$frame_index]}" "$RESET" "$msg" >&3
+            frame_index=$(((frame_index + 1) % ${#frames[@]}))
             sleep "$delay"
         done
     else
