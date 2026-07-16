@@ -6,6 +6,27 @@ CLEAN=0
 DRY_RUN=0
 RECURSE_SUBMODULES=0
 
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+  BOLD="\033[1m"
+  RED="\033[31m"
+  GREEN="\033[32m"
+  YELLOW="\033[33m"
+  CYAN="\033[36m"
+  RESET="\033[0m"
+else
+  BOLD=""
+  RED=""
+  GREEN=""
+  YELLOW=""
+  CYAN=""
+  RESET=""
+fi
+
+ui_step() { printf '%s==>%s %s\n' "${CYAN}${BOLD}" "$RESET" "$1"; }
+ui_success() { printf '%s✓%s %s\n' "${GREEN}${BOLD}" "$RESET" "$1"; }
+ui_warning() { printf '%swarning:%s %s\n' "${YELLOW}${BOLD}" "$RESET" "$1"; }
+ui_error() { printf '%serror:%s %s\n' "${RED}${BOLD}" "$RESET" "$1" >&2; }
+
 usage() {
   cat <<'EOF_USAGE'
 Usage:
@@ -43,7 +64,7 @@ while (( "$#" > 0 )); do
       exit 0
       ;;
     *)
-      echo "Unknown option: $1"
+      ui_error "Unknown option: $1"
       usage
       exit 1
       ;;
@@ -76,32 +97,32 @@ for url in "${repos[@]}"; do
   if [ -d "$target" ]; then
     if (( CLEAN )); then
       if (( DRY_RUN )); then
-        echo "[dry-run] rm -rf -- '${target}'"
+        ui_step "Would remove ${target}"
       else
-        echo "[clean] removing: $target"
+        ui_step "Removing ${target}"
         rm -rf -- "$target"
       fi
     else
-      echo "[skip] exists: $target (use --clean to replace)"
+      ui_warning "Skipped ${target}; use --clean to replace it."
       continue
     fi
   fi
 
   if (( RECURSE_SUBMODULES )); then
     if (( DRY_RUN )); then
-      echo "[dry-run] git clone --recurse-submodules '$url' '$target'"
+      ui_step "Would clone ${name} with submodules"
     else
-      echo "Cloning (with submodules): $url -> $target"
+      ui_step "Cloning ${name} with submodules"
       git clone --recurse-submodules "$url" "$target"
     fi
   else
     if (( DRY_RUN )); then
-      echo "[dry-run] git clone '$url' '$target'"
+      ui_step "Would clone ${name}"
     else
-      echo "Cloning: $url -> $target"
+      ui_step "Cloning ${name}"
       git clone "$url" "$target"
     fi
   fi
 done
 
-echo "Done."
+ui_success "Repository setup completed."

@@ -5,30 +5,31 @@ set -e
 # Keep uninstaller output visible even when prompts are piped.
 exec 3>&1
 
-# Define Colors
-BOLD="\033[1m"
-RED="\033[31m"
-GREEN="\033[32m"
-YELLOW="\033[33m"
-BLUE="\033[34m"
-CYAN="\033[36m"
-MAGENTA="\033[35m"
-RESET="\033[0m"
+if [ -t 3 ] && [ -z "${NO_COLOR:-}" ]; then
+    BOLD="\033[1m"
+    RED="\033[31m"
+    GREEN="\033[32m"
+    YELLOW="\033[33m"
+    BLUE="\033[34m"
+    CYAN="\033[36m"
+    RESET="\033[0m"
+else
+    BOLD=""
+    RED=""
+    GREEN=""
+    YELLOW=""
+    BLUE=""
+    CYAN=""
+    RESET=""
+fi
 
 function print_header() {
-    echo -e "${MAGENTA}${BOLD}" >&3
-    echo "  __  __ _                     _   _                           " >&3
-    echo " |  \/  (_)_ __ _ __ ___  _ __| \ | | ___ _   _ _ __ ___  _ __ " >&3
-    echo " | |\/| | | '__| '__/ _ \| '__|  \| |/ _ \ | | | '__/ _ \| '_ \\" >&3
-    echo " | |  | | | |  | | | (_) | |  | |\  |  __/ |_| | | | (_) | | | |" >&3
-    echo " |_|  |_|_|_|  |_|  \___/|_|  |_| \_|\___|\__,_|_|  \___/|_| |_|" >&3
-    echo -e "${RESET}" >&3
-    echo -e "${RED}${BOLD} => Welcome to the MirrorNeuron Uninstaller${RESET}\n" >&3
+    printf '\n%s%s%s\n' "${RED}${BOLD}" "MirrorNeuron Uninstaller" "$RESET" >&3
 }
 
-function print_step() { echo -e "${CYAN}${BOLD}==>${RESET} ${BOLD}$1${RESET}" >&3; }
-function print_success() { echo -e "${GREEN}${BOLD}==>${RESET} ${GREEN}$1${RESET}" >&3; }
-function print_warning() { echo -e "${YELLOW}${BOLD}==>${RESET} ${YELLOW}$1${RESET}" >&3; }
+function print_step() { printf '%s==>%s %s\n' "${CYAN}${BOLD}" "$RESET" "$1" >&3; }
+function print_success() { printf '%s✓%s %s\n' "${GREEN}${BOLD}" "$RESET" "$1" >&3; }
+function print_warning() { printf '%swarning:%s %s\n' "${YELLOW}${BOLD}" "$RESET" "$1" >&3; }
 
 ASSUME_YES="N"
 
@@ -95,7 +96,7 @@ function ask() {
 
 print_header
 
-echo -e "${RED}${BOLD}Warning: This will permanently remove all MirrorNeuron components and configurations from your system.${RESET}" >&3
+print_warning "This permanently removes MirrorNeuron components and configuration."
 CONFIRM=$(ask "Are you sure you want to proceed?" "N")
 
 if [ "$CONFIRM" != "Y" ]; then
@@ -234,4 +235,4 @@ else
 fi
 
 echo "" >&3
-print_success "MirrorNeuron uninstallation successfully completed! 🧹" >&3
+print_success "MirrorNeuron uninstallation completed."

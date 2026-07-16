@@ -15,6 +15,37 @@ MN_BLUEPRINT_SOURCE="${MN_BLUEPRINT_SOURCE:-github}"
 MN_BLUEPRINT_REPO="${MN_BLUEPRINT_REPO:-https://github.com/MirrorNeuronLab/mn-blueprints.git}"
 MN_BLUEPRINT_LOCAL="${MN_BLUEPRINT_LOCAL:-}"
 MN_MANAGED_PYTHON_VERSION="${MN_MANAGED_PYTHON_VERSION:-3.11}"
+MN_VERBOSE="${MN_VERBOSE:-N}"
+
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+    BOLD="\033[1m"
+    RED="\033[31m"
+    GREEN="\033[32m"
+    YELLOW="\033[33m"
+    BLUE="\033[34m"
+    CYAN="\033[36m"
+    RESET="\033[0m"
+else
+    BOLD=""
+    RED=""
+    GREEN=""
+    YELLOW=""
+    BLUE=""
+    CYAN=""
+    RESET=""
+fi
+
+ui_title() { printf '\n%s%s%s\n' "${BLUE}${BOLD}" "$1" "$RESET"; }
+ui_step() { printf '%s==>%s %s\n' "${CYAN}${BOLD}" "$RESET" "$1"; }
+ui_success() { printf '%s✓%s %s\n' "${GREEN}${BOLD}" "$RESET" "$1"; }
+ui_warning() { printf '%swarning:%s %s\n' "${YELLOW}${BOLD}" "$RESET" "$1"; }
+ui_error() { printf '%serror:%s %s\n' "${RED}${BOLD}" "$RESET" "$1"; }
+ui_detail() {
+    if [ "$MN_VERBOSE" = "Y" ]; then
+        printf '    %s\n' "$1"
+    fi
+}
+ui_status() { printf '  %-14s %s\n' "$1" "$2"; }
 
 generate_mn_cookie() {
     local secret
@@ -69,7 +100,7 @@ resolve_mn_cookie() {
         cookie=""
     fi
     if [ -z "$cookie" ]; then
-        echo "=> Error: failed to generate MN_COOKIE."
+        ui_error "Failed to generate MN_COOKIE."
         exit 1
     fi
 
@@ -79,17 +110,7 @@ resolve_mn_cookie() {
 }
 
 print_ascii_art() {
-    cat << "ASCIIEOF"
-  __  __ _                     _   _                     
- |  \/  (_)_ __ _ __ ___  _ __| \ | | ___ _   _ _ __ ___  _ __ 
- | |\/| | | '__| '__/ _ \| '__|  \| |/ _ \ | | | '__/ _ \| '_ \ 
- | |  | | | |  | | | (_) | |  | |\  |  __/ |_| | | | (_) | | | |
- |_|  |_|_|_|  |_|  \___/|_|  |_| \_|\___|\__,_|_|  \___/|_| |_|
-                                                               
-===================================================================
-                  MirrorNeuron Server Manager                      
-===================================================================
-ASCIIEOF
+    ui_title "MirrorNeuron runtime"
 }
 
 check_status() {
@@ -215,32 +236,29 @@ kill_tree() {
 start_services() {
     print_ascii_art
     if check_status "$API_PID_FILE"; then
-        echo "=> Error: MirrorNeuron API is already running."
-        echo "=> Use '$0 status' to check, or '$0 stop' to stop."
+        ui_error "MirrorNeuron API is already running."
+        printf 'Hint: use %s status or %s stop.\n' "$0" "$0"
         exit 1
     fi
     if ! runtime_compose_available; then
         docker_names="$(docker ps --format '{{.Names}}')"
         if grep -qx "mirror-neuron-core" <<< "$docker_names"; then
-            echo "=> Error: MirrorNeuron Core (Docker) is already running."
-            echo "=> Use '$0 status' to check, or '$0 stop' to stop."
+            ui_error "MirrorNeuron Core is already running."
+            printf 'Hint: use %s status or %s stop.\n' "$0" "$0"
             exit 1
         fi
     fi
 
     mkdir -p "$PID_DIR" "$LOG_DIR"
 
-    echo "==========================================="
-    echo "Starting Services in Detached Mode..."
-    echo "==========================================="
+    ui_step "Starting MirrorNeuron"
 
     mn_cookie="$(resolve_mn_cookie)"
     if runtime_compose_available; then
-        echo "=> Starting MirrorNeuron Docker runtime (Compose)..."
         runtime_compose up -d >/dev/null
-        echo "   [Started] Docker runtime (Compose project: mirror-neuron)"
+        ui_success "Docker runtime started."
+        ui_detail "Compose project: mirror-neuron"
     else
-        echo "=> Starting MirrorNeuron Core Service (Docker)..."
         docker rm -f mirror-neuron-core >/dev/null 2>&1 || true
         core_cmd=(
             docker run -d --name mirror-neuron-core --network host
@@ -268,10 +286,10 @@ start_services() {
         fi
         core_cmd+=(mirror-neuron-core:latest)
         "${core_cmd[@]}" >/dev/null
-        echo "   [Started] Core Service (Docker: mirror-neuron-core)"
+        ui_success "Core service started."
     fi
 
-    echo "=> Waiting for Elixir to boot..."
+    ui_step "Waiting for the runtime to boot"
     sleep 3
 
     apply_runtime_env_default "MN_API_HOST"
@@ -296,41 +314,37 @@ start_services() {
     api_started=0
     API_BIN="${VENV_DIR}/bin/mn-api"
     if [ -x "$API_BIN" ]; then
-        echo "=> Starting mn-api (REST on port ${MN_API_PORT:-54001})..."
         nohup "$API_BIN" > "$API_LOG" 2>&1 &
         API_PID=$!
         echo $API_PID > "$API_PID_FILE"
         api_started=1
-        echo "   [Started] REST API (PID: $API_PID)"
+        ui_success "REST API started."
+        ui_detail "REST API PID: $API_PID"
     else
-        echo "=> Warning: mn-api not found, skipping. Did you run setup.sh?"
+        ui_warning "mn-api is not installed; REST API was skipped."
     fi
 
     if [ "$api_started" -eq 1 ]; then
         write_runtime_endpoints_file
-        echo "   Runtime endpoints: $RUNTIME_ENDPOINTS_FILE"
+        ui_detail "Runtime endpoints: $RUNTIME_ENDPOINTS_FILE"
     fi
 
-    echo ""
-    echo "==========================================="
-    echo "MirrorNeuron is running in the background!"
-    echo "Logs are available at:"
-    echo "  Core: $BEAM_LOG"
-    echo "  API:  $API_LOG"
-    echo ""
-    echo "Run 'mn' anywhere in your terminal to use the CLI."
-    echo "Run '$0 stop' to shut down the services."
-    echo "==========================================="
+    printf '\n'
+    ui_success "MirrorNeuron is running."
+    printf 'Next: mn node list\n'
+    ui_detail "Core log: $BEAM_LOG"
+    ui_detail "API log: $API_LOG"
+    ui_detail "Stop services: $0 stop"
 }
 
 stop_services() {
-    echo "=> Stopping MirrorNeuron Services..."
+    ui_step "Stopping MirrorNeuron"
     
     if runtime_compose_available; then
-        echo "   Stopping Docker runtime (Compose)..."
+        ui_detail "Stopping Docker runtime."
         runtime_compose down >/dev/null 2>&1 || true
     else
-        echo "   Stopping Core Service (Docker: mirror-neuron-core)..."
+        ui_detail "Stopping Core service."
         docker stop mirror-neuron-core >/dev/null 2>&1 || true
         docker rm mirror-neuron-core >/dev/null 2>&1 || true
     fi
@@ -340,9 +354,9 @@ stop_services() {
             local pid=$(cat "$pid_file")
             if kill -0 "$pid" 2>/dev/null; then
                 if [ "$pid_file" == "$API_PID_FILE" ]; then
-                    echo "   Stopping REST API (PID: $pid)..."
+                    ui_detail "Stopping REST API (PID: $pid)."
                 else
-                    echo "   Stopping Legacy Core Service (PID: $pid)..."
+                    ui_detail "Stopping legacy Core service (PID: $pid)."
                 fi
                 kill_tree "$pid"
                 sleep 1
@@ -351,47 +365,53 @@ stop_services() {
         fi
     done
     
-    echo "=> All services stopped."
+    ui_success "MirrorNeuron stopped."
 }
 
 status_services() {
     print_ascii_art
-    echo "Service Status:"
+    printf 'Service status\n'
     
     if runtime_compose_available; then
         if runtime_compose ps --status running --services 2>/dev/null | grep -qx "mirror-neuron-core"; then
-            echo "  [OK] Docker runtime (Compose) is running"
+            ui_status "Core" "running"
         else
-            echo "  [--] Docker runtime (Compose) is not running"
+            ui_status "Core" "stopped"
         fi
     else
         docker_names="$(docker ps --format '{{.Names}}')"
         if grep -qx "mirror-neuron-core" <<< "$docker_names"; then
-            echo "  [OK] Core Service (Docker: mirror-neuron-core) is running"
+            ui_status "Core" "running"
         else
-            echo "  [--] Core Service (Docker: mirror-neuron-core) is not running"
+            ui_status "Core" "stopped"
         fi
     fi
 
     check_status "$API_PID_FILE"
     local api_stat=$?
     if [ $api_stat -eq 0 ]; then
-        echo "  [OK] REST API is running (PID: $(cat "$API_PID_FILE"))"
+        ui_status "REST API" "running"
+        ui_detail "REST API PID: $(cat "$API_PID_FILE")"
     elif [ $api_stat -eq 1 ]; then
-        echo "  [!!] REST API PID file exists but process is dead."
+        ui_status "REST API" "stale PID removed"
         rm -f "$API_PID_FILE"
     else
-        echo "  [--] REST API is not running."
+        ui_status "REST API" "stopped"
     fi
 }
 
-case "$1" in
+if [ "${1:-}" = "-v" ] || [ "${1:-}" = "--verbose" ]; then
+    MN_VERBOSE="Y"
+    shift
+fi
+
+case "${1:-}" in
     start) start_services ;;
     stop) stop_services ;;
     restart) stop_services; sleep 2; start_services ;;
     status) status_services ;;
     *)
-        echo "Usage: $0 {start|stop|restart|status}"
+        echo "Usage: $0 [--verbose] {start|stop|restart|status}"
         exit 1
         ;;
 esac

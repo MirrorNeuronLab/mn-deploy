@@ -8,6 +8,7 @@ exec 3>&1
 MN_INSTALL_MODE="${MN_INSTALL_MODE:-binary}"
 MN_INSTALL_MODE_EXPLICIT="N"
 MN_INSTALL_HELP_REQUESTED="N"
+MN_INSTALL_VERBOSE="${MN_INSTALL_VERBOSE:-N}"
 LATEST="v1.2.24"
 MN_DEFAULT_INSTALL_VERSION="${MN_DEFAULT_INSTALL_VERSION:-$LATEST}"
 MN_INSTALL_VERSION="${MN_INSTALL_VERSION:-}"
@@ -29,6 +30,7 @@ Common options:
   --version TAG                 Install this release version, for example v1.2.24.
   --yes, -y                     Run non-interactively with defaults and flags. This is the default.
   --interactive                 Ask each install question before proceeding.
+  -v, --verbose                 Show installation details and command paths.
   --no-reinstall                Keep an existing install instead of overwriting it.
   --web-ui / --no-web-ui        Enable or skip Web UI setup.
   --redis / --no-redis          Enable or skip Redis Docker setup.
@@ -158,6 +160,9 @@ while [ "$#" -gt 0 ]; do
             ;;
         -h|--help)
             MN_INSTALL_HELP_REQUESTED="Y"
+            ;;
+        -v|--verbose)
+            MN_INSTALL_VERBOSE="Y"
             ;;
         *)
             MN_INSTALL_ARGS+=("$1")
@@ -384,16 +389,28 @@ export GIT_TERMINAL_PROMPT="${GIT_TERMINAL_PROMPT:-0}"
 export GH_PROMPT_DISABLED="${GH_PROMPT_DISABLED:-1}"
 export PIP_NO_INPUT="${PIP_NO_INPUT:-1}"
 
-# Define Colors
-BOLD="\033[1m"
-DIM="\033[2m"
-RED="\033[31m"
-GREEN="\033[32m"
-YELLOW="\033[33m"
-BLUE="\033[34m"
-CYAN="\033[36m"
-MAGENTA="\033[35m"
-RESET="\033[0m"
+# Use color only for an interactive terminal and respect the NO_COLOR convention.
+if [ -t 3 ] && [ -z "${NO_COLOR:-}" ]; then
+    BOLD="\033[1m"
+    DIM="\033[2m"
+    RED="\033[31m"
+    GREEN="\033[32m"
+    YELLOW="\033[33m"
+    BLUE="\033[34m"
+    CYAN="\033[36m"
+    MAGENTA="\033[35m"
+    RESET="\033[0m"
+else
+    BOLD=""
+    DIM=""
+    RED=""
+    GREEN=""
+    YELLOW=""
+    BLUE=""
+    CYAN=""
+    MAGENTA=""
+    RESET=""
+fi
 
 MN_MANAGED_PYTHON="${MN_MANAGED_PYTHON:-1}"
 MN_MANAGED_PYTHON_VERSION="${MN_MANAGED_PYTHON_VERSION:-3.11}"
@@ -405,20 +422,19 @@ MN_GITHUB_TOKEN_VALUE=""
 MN_GITHUB_GIT_AUTH_CONFIGURED="N"
 
 function print_header() {
-    echo -e "${MAGENTA}${BOLD}" >&3
-    echo "  __  __ _                     _   _                           " >&3
-    echo " |  \/  (_)_ __ _ __ ___  _ __| \ | | ___ _   _ _ __ ___  _ __ " >&3
-    echo " | |\/| | | '__| '__/ _ \| '__|  \| |/ _ \ | | | '__/ _ \| '_ \\" >&3
-    echo " | |  | | | |  | | | (_) | |  | |\  |  __/ |_| | | | (_) | | | |" >&3
-    echo " |_|  |_|_|_|  |_|  \___/|_|  |_| \_|\___|\__,_|_|  \___/|_| |_|" >&3
-    echo -e "${RESET}" >&3
-    echo -e "${BLUE}${BOLD} => Welcome to the MirrorNeuron Installer${RESET}\n" >&3
+    printf '\n%s%s%s\n' "${BLUE}${BOLD}" "MirrorNeuron Installer" "$RESET" >&3
+    printf '  Source: GitHub repositories\n' >&3
 }
 
-function print_step() { echo -e "${CYAN}${BOLD}==>${RESET} ${BOLD}$1${RESET}" >&3; }
-function print_success() { echo -e "${GREEN}${BOLD}==>${RESET} ${GREEN}$1${RESET}" >&3; }
-function print_error() { echo -e "${RED}${BOLD}==>${RESET} ${RED}$1${RESET}" >&3; }
-function print_warning() { echo -e "${YELLOW}${BOLD}==>${RESET} ${YELLOW}$1${RESET}" >&3; }
+function print_step() { printf '%s==>%s %s\n' "${CYAN}${BOLD}" "$RESET" "$1" >&3; }
+function print_success() { printf '%s✓%s %s\n' "${GREEN}${BOLD}" "$RESET" "$1" >&3; }
+function print_error() { printf '%serror:%s %s\n' "${RED}${BOLD}" "$RESET" "$1" >&3; }
+function print_warning() { printf '%swarning:%s %s\n' "${YELLOW}${BOLD}" "$RESET" "$1" >&3; }
+function print_detail() {
+    if [ "$MN_INSTALL_VERBOSE" = "Y" ]; then
+        printf '    %s\n' "$1" >&3
+    fi
+}
 
 function find_source_workspace() {
     local script_dir
@@ -456,8 +472,12 @@ function run_quiet() {
     local log_file="${log_dir}/${label//[^A-Za-z0-9_.-]/_}.$$.log"
 
     if ! "$@" >"$log_file" 2>&1; then
-        print_error "$label failed. Log: $log_file"
-        tail -n 20 "$log_file" >&3 2>/dev/null || true
+        print_error "$label failed. Details: $log_file"
+        if [ "$MN_INSTALL_VERBOSE" = "Y" ]; then
+            tail -n 20 "$log_file" >&3 2>/dev/null || true
+        else
+            printf '  Re-run with --verbose to show the last log lines.\n' >&3
+        fi
         if grep -Eqi "could not read Username for 'https://github.com'|authentication failed|repository not found" "$log_file" 2>/dev/null; then
             print_error "GitHub clone authentication failed. For private MirrorNeuron repositories, run 'gh auth login' or set GITHUB_TOKEN/GH_TOKEN and rerun."
         fi
@@ -470,21 +490,29 @@ function spinner() {
     local msg=$2
     local delay=0.1
     local spinstr='|/-\'
-    tput civis >&3 2>/dev/null || true
-    while kill -0 "$pid" 2>/dev/null; do
-        local temp=${spinstr#?}
-        printf "\r${MAGENTA}${BOLD}[%c]${RESET} ${msg}" "$spinstr" >&3
-        spinstr=$temp${spinstr%"$temp"}
-        sleep $delay
-    done
+    local interactive="N"
+    if [ -t 3 ]; then
+        interactive="Y"
+        tput civis >&3 2>/dev/null || true
+        while kill -0 "$pid" 2>/dev/null; do
+            local temp=${spinstr#?}
+            printf '\r%s%s%s %s' "${MAGENTA}${BOLD}" "$spinstr" "$RESET" "$msg" >&3
+            spinstr=$temp${spinstr%"$temp"}
+            sleep "$delay"
+        done
+    else
+        print_step "$msg"
+    fi
     set +e
     wait "$pid"
     local exit_code=$?
     set -e
     if [ "$exit_code" -eq 0 ]; then
-        printf "\r${GREEN}${BOLD}[✔]${RESET} ${msg}                               \n" >&3
+        if [ "$interactive" = "Y" ]; then printf '\r\033[2K' >&3; fi
+        print_success "$msg"
     else
-        printf "\r${RED}${BOLD}[✖]${RESET} ${msg} (Failed)                      \n" >&3
+        if [ "$interactive" = "Y" ]; then printf '\r\033[2K' >&3; fi
+        print_error "$msg failed."
         tput cnorm >&3 2>/dev/null || true
         exit $exit_code
     fi
@@ -576,7 +604,7 @@ EOF
     export MN_GITHUB_TOKEN_FOR_GIT="$token"
     export GIT_ASKPASS="$askpass"
     MN_GITHUB_GIT_AUTH_CONFIGURED="Y"
-    print_success "Configured GitHub authentication for non-interactive Git clones."
+    print_detail "Configured GitHub authentication for non-interactive Git clones."
 }
 
 function python_version() {
@@ -664,7 +692,7 @@ function install_uv() {
         exit 1
     fi
 
-    print_success "Installed uv at $MN_UV_BIN."
+    print_detail "Installed uv at $MN_UV_BIN."
 }
 
 function resolve_uv() {
@@ -726,7 +754,7 @@ function install_managed_python() {
     fi
 
     MN_PYTHON_BIN="$managed_bin"
-    print_success "Using uv-managed Python $(python_version "$managed_bin") at $managed_bin."
+    print_detail "Using uv-managed Python $(python_version "$managed_bin") at $managed_bin."
 }
 
 function print_python_requirement_error() {
@@ -771,7 +799,7 @@ function resolve_python_runtime() {
         fi
         if python_is_supported "$resolved" && python_is_selected_minor "$resolved"; then
             MN_PYTHON_BIN="$resolved"
-            print_success "Using Python $(python_version "$MN_PYTHON_BIN") at $MN_PYTHON_BIN."
+            print_detail "Using Python $(python_version "$MN_PYTHON_BIN") at $MN_PYTHON_BIN."
             return
         fi
         if [ -n "${MN_PYTHON:-}" ]; then
@@ -782,7 +810,7 @@ function resolve_python_runtime() {
 
     if managed_python_enabled; then
         install_managed_python
-        print_success "Using Python $(python_version "$MN_PYTHON_BIN") at $MN_PYTHON_BIN."
+        print_detail "Using Python $(python_version "$MN_PYTHON_BIN") at $MN_PYTHON_BIN."
         return
     fi
 
@@ -791,8 +819,6 @@ function resolve_python_runtime() {
     print_python_requirement_error "$resolved"
     exit 1
 }
-
-print_header
 
 INSTALL_DIR="${MN_HOME:-${HOME}/.mn}"
 BIN_DIR="${HOME}/.local/bin"
@@ -872,6 +898,7 @@ Options:
   --version TAG                 Install this release tag from each GitHub repo. If omitted, use each repo's default branch.
   --yes                         Run non-interactively with defaults and flags. This is the default.
   --interactive                 Ask each install question before proceeding.
+  -v, --verbose                 Show installation details and command paths.
   --no-reinstall                Keep an existing install instead of overwriting it.
   --web-ui / --no-web-ui        Enable or skip GitHub Web UI install/build.
   --redis / --no-redis          Enable or skip Redis Docker setup.
@@ -1089,6 +1116,8 @@ function finalize_github_install_version() {
 }
 
 finalize_github_install_version
+
+print_header
 
 function github_ref_suffix() {
     if [ -n "$INSTALL_VERSION" ]; then
@@ -2014,7 +2043,7 @@ if [ -d "$INSTALL_DIR" ] || [ -f "$BIN_DIR/mn" ]; then
         REINSTALL=$(ask "Do you want to reinstall (overwrite old ones)?" "$REINSTALL")
     fi
     if [ "$REINSTALL" = "N" ]; then
-        echo -e "${YELLOW}Installation cancelled by user.${RESET}" >&3
+        print_warning "Installation cancelled."
         exit 0
     fi
     echo "" >&3
@@ -2022,7 +2051,6 @@ if [ -d "$INSTALL_DIR" ] || [ -f "$BIN_DIR/mn" ]; then
 fi
 
 # Interactive Prompts
-echo -e "${CYAN}${BOLD}Configuration${RESET}" >&3
 if [ "$NON_INTERACTIVE" != "Y" ]; then
     INSTALL_WEB_UI=$(ask "Do you want to install the Web UI?" "$INSTALL_WEB_UI")
     INSTALL_REDIS=$(ask "Do you want to install Redis via Docker?" "$INSTALL_REDIS")
@@ -2152,7 +2180,7 @@ function require_github_command_targets() {
 if [ "$INSTALL_WEB_UI" = "Y" ]; then
     print_step "Installing Web UI"
     if [ -z "${INSTALL_VERSION:-}" ] && [ -n "$SOURCE_WORKSPACE" ] && [ -d "$SOURCE_WORKSPACE/mn-web-ui" ]; then
-        print_success "Using local Web UI source from $SOURCE_WORKSPACE/mn-web-ui."
+        print_detail "Using local Web UI source: $SOURCE_WORKSPACE/mn-web-ui"
     fi
     (
         UI_DIR="${INSTALL_DIR}/webui"
@@ -2200,21 +2228,21 @@ if [ "$INSTALL_CLI" = "Y" ] || [ "$INSTALL_API" = "Y" ]; then
         rm -f "$BIN_DIR/mn-api"
         ln -s "$VENV_DIR/bin/mn-api" "$BIN_DIR/mn-api"
     fi
-    print_success "Command symlinks created."
+    print_detail "Command links: ${BIN_DIR}"
 else
     print_warning "Skipping command symlink creation because CLI/API installation is disabled."
 fi
 
 echo "" >&3
-print_success "MirrorNeuron GitHub installation successfully completed!" >&3
+print_success "MirrorNeuron installation completed."
 if [ "$INSTALL_CLI" = "Y" ]; then
-    echo -e "CLI is available as ${YELLOW}mn${RESET}." >&3
+    print_detail "CLI: mn"
 fi
 if [ "$INSTALL_API" = "Y" ]; then
-    echo -e "API is available as ${YELLOW}mn-api${RESET}." >&3
+    print_detail "API: mn-api"
 fi
 if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
-    echo -e "Membrane context engine is available on ${YELLOW}${MN_CONTEXT_ADDR:-localhost:50052}${RESET}." >&3
+    print_detail "Membrane endpoint: ${MN_CONTEXT_ADDR:-localhost:50052}"
 fi
 
 function shell_escape_value() {
@@ -2259,10 +2287,10 @@ function ensure_shell_profile_exports() {
     fi
 
     if [ "$needs_path" = "Y" ]; then
-        echo -e "\n${YELLOW}${BOLD}Note:${RESET} ${YELLOW}$BIN_DIR is not in your PATH.${RESET}" >&3
+        print_warning "${BIN_DIR} is not in your PATH."
     fi
     if [ "$needs_runtime_home" = "Y" ]; then
-        echo -e "${YELLOW}Persisting MN_HOME=${INSTALL_DIR} for future terminal sessions.${RESET}" >&3
+        print_detail "Persisting MN_HOME=${INSTALL_DIR} for future terminal sessions."
     fi
 
     local detected_profiles=()
@@ -2297,25 +2325,26 @@ function ensure_shell_profile_exports() {
             wrote_profile="Y"
         fi
         if [ "$wrote_profile" = "Y" ]; then
-            echo -e "Automatically added MirrorNeuron shell exports to ${CYAN}$profile${RESET}" >&3
+            print_detail "Updated shell exports: ${profile}"
         fi
     done
 
-    echo -e "${YELLOW}Please restart your terminal or run \`source ~/.zshrc\` (or your shell's configuration file) to use the updated MirrorNeuron environment.${RESET}" >&3
+    print_warning "Restart your terminal to use the updated MirrorNeuron environment."
 }
 
 ensure_shell_profile_exports
 
-echo -e "\n${BOLD}Quick Start:${RESET}" >&3
 if [ "$START_AS_WORKER" = "Y" ]; then
-    echo -e "  1. Start the server (Core & API): ${GREEN}mn runtime start --worker-node${RESET}" >&3
+    print_detail "Start the server: mn runtime start --worker-node"
 else
-    echo -e "  1. Start the server (Core & API): ${GREEN}mn runtime start${RESET}" >&3
+    print_detail "Start the server: mn runtime start"
 fi
 if [ "$INSTALL_WEB_UI" = "Y" ]; then
-    echo -e "  2. Start the UI:   ${GREEN}cd ${INSTALL_DIR}/webui && npm run dev${RESET}" >&3
+    print_detail "Start the Web UI: cd ${INSTALL_DIR}/webui && npm run dev"
 fi
-echo -e "  3. Use the CLI:    ${GREEN}mn node list${RESET}\n" >&3
+if [ "$INSTALL_CLI" = "Y" ]; then
+    printf 'Next: mn node list\n' >&3
+fi
 
 if [ "$START_NOW" = "Y" ]; then
     print_step "Starting MirrorNeuron Server..."
@@ -2342,15 +2371,27 @@ set -euo pipefail
 # Keep installer output visible even when a subcommand redirects stdout/stderr.
 exec 3>&1
 
-BOLD="\033[1m"
-DIM="\033[2m"
-RED="\033[31m"
-GREEN="\033[32m"
-YELLOW="\033[33m"
-BLUE="\033[34m"
-CYAN="\033[36m"
-MAGENTA="\033[35m"
-RESET="\033[0m"
+if [ -t 3 ] && [ -z "${NO_COLOR:-}" ]; then
+    BOLD="\033[1m"
+    DIM="\033[2m"
+    RED="\033[31m"
+    GREEN="\033[32m"
+    YELLOW="\033[33m"
+    BLUE="\033[34m"
+    CYAN="\033[36m"
+    MAGENTA="\033[35m"
+    RESET="\033[0m"
+else
+    BOLD=""
+    DIM=""
+    RED=""
+    GREEN=""
+    YELLOW=""
+    BLUE=""
+    CYAN=""
+    MAGENTA=""
+    RESET=""
+fi
 
 SCRIPT_DIR="$(mn_script_dir)"
 WORKSPACE_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -2421,20 +2462,19 @@ START_AS_WORKER="N"
 NON_INTERACTIVE="Y"
 
 function print_header() {
-    echo -e "${MAGENTA}${BOLD}" >&3
-    echo "  __  __ _                     _   _                           " >&3
-    echo " |  \/  (_)_ __ _ __ ___  _ __| \ | | ___ _   _ _ __ ___  _ __ " >&3
-    echo " | |\/| | | '__| '__/ _ \| '__|  \| |/ _ \ | | | '__/ _ \| '_ \\" >&3
-    echo " | |  | | | |  | | | (_) | |  | |\  |  __/ |_| | | | (_) | | | |" >&3
-    echo " |_|  |_|_|_|  |_|  \___/|_|  |_| \_|\___|\__,_|_|  \___/|_| |_|" >&3
-    echo -e "${RESET}" >&3
-    echo -e "${BLUE}${BOLD} => MirrorNeuron Local Workspace Installer${RESET}\n" >&3
+    printf '\n%s%s%s\n' "${BLUE}${BOLD}" "MirrorNeuron Installer" "$RESET" >&3
+    printf '  Source: local workspace\n' >&3
 }
 
-function print_step() { echo -e "${CYAN}${BOLD}==>${RESET} ${BOLD}$1${RESET}" >&3; }
-function print_success() { echo -e "${GREEN}${BOLD}==>${RESET} ${GREEN}$1${RESET}" >&3; }
-function print_error() { echo -e "${RED}${BOLD}==>${RESET} ${RED}$1${RESET}" >&3; }
-function print_warning() { echo -e "${YELLOW}${BOLD}==>${RESET} ${YELLOW}$1${RESET}" >&3; }
+function print_step() { printf '%s==>%s %s\n' "${CYAN}${BOLD}" "$RESET" "$1" >&3; }
+function print_success() { printf '%s✓%s %s\n' "${GREEN}${BOLD}" "$RESET" "$1" >&3; }
+function print_error() { printf '%serror:%s %s\n' "${RED}${BOLD}" "$RESET" "$1" >&3; }
+function print_warning() { printf '%swarning:%s %s\n' "${YELLOW}${BOLD}" "$RESET" "$1" >&3; }
+function print_detail() {
+    if [ "$MN_INSTALL_VERBOSE" = "Y" ]; then
+        printf '    %s\n' "$1" >&3
+    fi
+}
 
 function run_quiet() {
     local label="$1"
@@ -2444,8 +2484,12 @@ function run_quiet() {
     local log_file="${log_dir}/${label//[^A-Za-z0-9_.-]/_}.$$.log"
 
     if ! "$@" >"$log_file" 2>&1; then
-        print_error "$label failed. Log: $log_file"
-        tail -n 20 "$log_file" >&3 2>/dev/null || true
+        print_error "$label failed. Details: $log_file"
+        if [ "$MN_INSTALL_VERBOSE" = "Y" ]; then
+            tail -n 20 "$log_file" >&3 2>/dev/null || true
+        else
+            printf '  Re-run with --verbose to show the last log lines.\n' >&3
+        fi
         exit 1
     fi
 }
@@ -2533,7 +2577,7 @@ function install_uv() {
         exit 1
     fi
 
-    print_success "Installed uv at $MN_UV_BIN."
+    print_detail "Installed uv at $MN_UV_BIN."
 }
 
 function resolve_uv() {
@@ -2595,7 +2639,7 @@ function install_managed_python() {
     fi
 
     MN_PYTHON_BIN="$managed_bin"
-    print_success "Using uv-managed Python $(python_version "$managed_bin") at $managed_bin."
+    print_detail "Using uv-managed Python $(python_version "$managed_bin") at $managed_bin."
 }
 
 function print_python_requirement_error() {
@@ -2640,7 +2684,7 @@ function resolve_python_runtime() {
         fi
         if python_is_supported "$resolved" && python_is_selected_minor "$resolved"; then
             MN_PYTHON_BIN="$resolved"
-            print_success "Using Python $(python_version "$MN_PYTHON_BIN") at $MN_PYTHON_BIN."
+            print_detail "Using Python $(python_version "$MN_PYTHON_BIN") at $MN_PYTHON_BIN."
             return
         fi
         if [ -n "${MN_PYTHON:-}" ]; then
@@ -2670,6 +2714,7 @@ Installs MirrorNeuron from local sibling folders under:
 Options:
   --yes                 Run non-interactively with defaults. This is the default.
   --interactive         Ask each install question before proceeding.
+  -v, --verbose         Show installation details and command paths.
   --web-ui              Enable local Web UI npm install/build.
   --no-web-ui           Skip local Web UI npm install/build.
   --redis               Enable Redis Docker setup.
@@ -2739,21 +2784,29 @@ function spinner() {
     local msg=$2
     local delay=0.1
     local spinstr='|/-\'
-    tput civis >&3 2>/dev/null || true
-    while kill -0 "$pid" 2>/dev/null; do
-        local temp=${spinstr#?}
-        printf "\r${MAGENTA}${BOLD}[%c]${RESET} %s" "$spinstr" "$msg" >&3
-        spinstr=$temp${spinstr%"$temp"}
-        sleep "$delay"
-    done
+    local interactive="N"
+    if [ -t 3 ]; then
+        interactive="Y"
+        tput civis >&3 2>/dev/null || true
+        while kill -0 "$pid" 2>/dev/null; do
+            local temp=${spinstr#?}
+            printf '\r%s%s%s %s' "${MAGENTA}${BOLD}" "$spinstr" "$RESET" "$msg" >&3
+            spinstr=$temp${spinstr%"$temp"}
+            sleep "$delay"
+        done
+    else
+        print_step "$msg"
+    fi
     set +e
     wait "$pid"
     local exit_code=$?
     set -e
     if [ "$exit_code" -eq 0 ]; then
-        printf "\r${GREEN}${BOLD}[OK]${RESET} %s                               \n" "$msg" >&3
+        if [ "$interactive" = "Y" ]; then printf '\r\033[2K' >&3; fi
+        print_success "$msg"
     else
-        printf "\r${RED}${BOLD}[ERR]${RESET} %s                               \n" "$msg" >&3
+        if [ "$interactive" = "Y" ]; then printf '\r\033[2K' >&3; fi
+        print_error "$msg failed."
         tput cnorm >&3 2>/dev/null || true
         exit "$exit_code"
     fi
@@ -3899,7 +3952,7 @@ function ensure_shell_profile_exports() {
             wrote_profile="Y"
         fi
         if [ "$wrote_profile" = "Y" ]; then
-            echo -e "Added MirrorNeuron shell exports to ${CYAN}${profile}${RESET}" >&3
+            print_detail "Updated shell exports: ${profile}"
         fi
     done
 }
@@ -3924,7 +3977,6 @@ if [ -d "$INSTALL_DIR" ] || [ -L "$INSTALL_DIR" ] || [ -d "$VENV_DIR" ] || [ -f 
     print_warning "MirrorNeuron appears to be already installed; refreshing local source install."
 fi
 
-echo -e "${CYAN}${BOLD}Configuration${RESET}" >&3
 if [ "$NON_INTERACTIVE" != "Y" ]; then
     INSTALL_WEB_UI=$(ask "Install/build local Web UI?" "$INSTALL_WEB_UI")
     INSTALL_REDIS=$(ask "Install/start Redis via Docker?" "$INSTALL_REDIS")
@@ -3976,14 +4028,14 @@ replace_symlink "$PY_SDK_DIR" "$INSTALL_DIR/python-sdk-source"
 write_local_install_metadata
 print_step "Writing Docker Compose runtime configuration"
 write_runtime_compose_files
-print_success "Local component links created under ${INSTALL_DIR}."
+print_detail "Local component links: ${INSTALL_DIR}"
 
 print_step "Building MirrorNeuron Core Docker image from local source"
 (
     cd "$CORE_DIR"
     DOCKER_BUILDKIT="${DOCKER_BUILDKIT:-1}" docker build -t mirror-neuron-core:latest .
 )
-print_success "Built local core image mirror-neuron-core:latest."
+print_detail "Built local core image: mirror-neuron-core:latest"
 
 function require_local_cli_target_executables() {
     local missing="N"
@@ -4098,34 +4150,33 @@ rm -f "$BIN_DIR/mn" "$BIN_DIR/mn-api" "$INSTALL_DIR/mn"
 replace_symlink "$VENV_DIR/bin/mn" "$BIN_DIR/mn"
 replace_symlink "$VENV_DIR/bin/mn-api" "$BIN_DIR/mn-api"
 replace_symlink "$VENV_DIR/bin/mn" "$INSTALL_DIR/mn"
-print_success "Symlinks created in ${BIN_DIR}."
+print_detail "Command links: ${BIN_DIR}"
 
 ensure_shell_profile_exports
 
 echo "" >&3
-print_success "MirrorNeuron local installation completed."
-echo -e "Core image: ${YELLOW}mirror-neuron-core:latest${RESET} built from ${CYAN}${CORE_DIR}${RESET}" >&3
-echo -e "CLI/API:    ${YELLOW}editable Python installs${RESET} from local workspace" >&3
-echo -e "State dir:  ${CYAN}${INSTALL_DIR}${RESET}" >&3
-echo -e "Cookie:     ${CYAN}${INSTALL_DIR}/erlang.cookie${RESET}" >&3
+print_success "MirrorNeuron installation completed."
+print_detail "Core image: mirror-neuron-core:latest (${CORE_DIR})"
+print_detail "CLI/API: editable installs from the local workspace"
+print_detail "State: ${INSTALL_DIR}"
+print_detail "Cookie: ${INSTALL_DIR}/erlang.cookie"
 if [ "$INSTALL_WEB_UI" = "Y" ]; then
-    echo -e "Web UI:     ${CYAN}${UI_LINK_DIR}${RESET} -> ${WEB_UI_DIR}" >&3
+    print_detail "Web UI: ${UI_LINK_DIR} -> ${WEB_UI_DIR}"
 fi
 if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
-    echo -e "Membrane:   ${CYAN}${MEMBRANE_DIR}${RESET} on ${YELLOW}${MN_CONTEXT_ADDR:-localhost:50052}${RESET}" >&3
+    print_detail "Membrane: ${MEMBRANE_DIR} (${MN_CONTEXT_ADDR:-localhost:50052})"
 fi
 
-echo -e "\n${BOLD}Quick Start:${RESET}" >&3
 if [ "$START_AS_WORKER" = "Y" ]; then
-    echo -e "  1. Start server: ${GREEN}mn runtime start --worker-node${RESET}" >&3
+    print_detail "Start the server: mn runtime start --worker-node"
 else
-    echo -e "  1. Start server: ${GREEN}mn runtime start${RESET}" >&3
+    print_detail "Start the server: mn runtime start"
 fi
 if [ "$INSTALL_WEB_UI" = "Y" ]; then
-    echo -e "  2. Start UI:     ${GREEN}cd ${UI_LINK_DIR} && npm run dev${RESET}" >&3
+    print_detail "Start the Web UI: cd ${UI_LINK_DIR} && npm run dev"
 fi
-echo -e "  3. Use CLI:      ${GREEN}mn node list${RESET}" >&3
-echo -e "  4. Rebuild core after Elixir changes: ${GREEN}${SCRIPT_DIR}/install.sh --mode local --no-web-ui --no-skills${RESET}\n" >&3
+printf 'Next: mn node list\n' >&3
+print_detail "Rebuild after Elixir changes: ${SCRIPT_DIR}/install.sh --mode local --no-web-ui --no-skills"
 
 if [ "$START_NOW" = "Y" ]; then
     print_step "Starting MirrorNeuron Server"
@@ -4158,14 +4209,27 @@ export GIT_TERMINAL_PROMPT="${GIT_TERMINAL_PROMPT:-0}"
 export GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new}"
 export PIP_NO_INPUT="${PIP_NO_INPUT:-1}"
 
-BOLD="\033[1m"
-RED="\033[31m"
-GREEN="\033[32m"
-YELLOW="\033[33m"
-BLUE="\033[34m"
-CYAN="\033[36m"
-MAGENTA="\033[35m"
-RESET="\033[0m"
+if [ -t 3 ] && [ -z "${NO_COLOR:-}" ]; then
+    BOLD="\033[1m"
+    DIM="\033[2m"
+    RED="\033[31m"
+    GREEN="\033[32m"
+    YELLOW="\033[33m"
+    BLUE="\033[34m"
+    CYAN="\033[36m"
+    MAGENTA="\033[35m"
+    RESET="\033[0m"
+else
+    BOLD=""
+    DIM=""
+    RED=""
+    GREEN=""
+    YELLOW=""
+    BLUE=""
+    CYAN=""
+    MAGENTA=""
+    RESET=""
+fi
 
 SCRIPT_DIR="$(mn_script_dir)"
 INSTALL_DIR="${MN_HOME:-${HOME}/.mn}"
@@ -4260,15 +4324,20 @@ REINSTALL="Y"
 NON_INTERACTIVE="Y"
 
 function print_header() {
-    echo -e "${BLUE}${BOLD}Installing MirrorNeuron core ${CORE_INSTALL_VERSION}${RESET}" >&3
-    echo -e "${CYAN}SDK ${PYTHON_SDK_INSTALL_VERSION} · CLI ${CLI_INSTALL_VERSION} · API ${API_INSTALL_VERSION} · Web UI ${WEB_UI_INSTALL_VERSION}${RESET}" >&3
-    echo -e "${CYAN}Released package install${RESET}\n" >&3
+    printf '\n%s%s%s\n' "${BLUE}${BOLD}" "MirrorNeuron Installer" "$RESET" >&3
+    printf '  Release: %s\n' "$CORE_INSTALL_VERSION" >&3
+    print_detail "SDK ${PYTHON_SDK_INSTALL_VERSION}; CLI ${CLI_INSTALL_VERSION}; API ${API_INSTALL_VERSION}; Web UI ${WEB_UI_INSTALL_VERSION}"
 }
 
-function print_step() { echo -e "${CYAN}${BOLD}==>${RESET} ${BOLD}$1${RESET}" >&3; }
-function print_success() { echo -e "${GREEN}${BOLD}==>${RESET} ${GREEN}$1${RESET}" >&3; }
-function print_error() { echo -e "${RED}${BOLD}==>${RESET} ${RED}$1${RESET}" >&3; }
-function print_warning() { echo -e "${YELLOW}${BOLD}==>${RESET} ${YELLOW}$1${RESET}" >&3; }
+function print_step() { printf '%s==>%s %s\n' "${CYAN}${BOLD}" "$RESET" "$1" >&3; }
+function print_success() { printf '%s✓%s %s\n' "${GREEN}${BOLD}" "$RESET" "$1" >&3; }
+function print_error() { printf '%serror:%s %s\n' "${RED}${BOLD}" "$RESET" "$1" >&3; }
+function print_warning() { printf '%swarning:%s %s\n' "${YELLOW}${BOLD}" "$RESET" "$1" >&3; }
+function print_detail() {
+    if [ "$MN_INSTALL_VERBOSE" = "Y" ]; then
+        printf '    %s\n' "$1" >&3
+    fi
+}
 
 function usage() {
     local script_name="${MN_INSTALL_SCRIPT_NAME:-$(basename "$0")}"
@@ -4281,6 +4350,7 @@ Options:
   --version TAG                 Install this release version. Default: ${MN_DEFAULT_INSTALL_VERSION}.
   --yes                         Run non-interactively with defaults and flags. This is the default.
   --interactive                 Ask each install question before proceeding.
+  -v, --verbose                 Show installation details and command paths.
   --no-reinstall                Keep an existing install instead of overwriting it.
   --web-ui / --no-web-ui        Enable or skip the Web UI npm package.
   --redis / --no-redis          Enable or skip Redis Docker setup.
@@ -4717,8 +4787,12 @@ function run_quiet() {
     local log_file="${log_dir}/${label//[^A-Za-z0-9_.-]/_}.$$.log"
 
     if ! "$@" >"$log_file" 2>&1; then
-        print_error "$label failed. Log: $log_file"
-        tail -n 30 "$log_file" >&3 2>/dev/null || true
+        print_error "$label failed. Details: $log_file"
+        if [ "$MN_INSTALL_VERBOSE" = "Y" ]; then
+            tail -n 30 "$log_file" >&3 2>/dev/null || true
+        else
+            printf '  Re-run with --verbose to show the last log lines.\n' >&3
+        fi
         exit 1
     fi
 }
@@ -4738,23 +4812,31 @@ function spinner() {
     local msg=$2
     local delay=0.1
     local spinstr='|/-\'
-    tput civis >&3 2>/dev/null || true
-    while kill -0 "$pid" 2>/dev/null; do
-        local temp=${spinstr#?}
-        printf "\r${MAGENTA}${BOLD}[%c]${RESET} ${msg}" "$spinstr" >&3
-        spinstr=$temp${spinstr%"$temp"}
-        sleep $delay
-    done
+    local interactive="N"
+    if [ -t 3 ]; then
+        interactive="Y"
+        tput civis >&3 2>/dev/null || true
+        while kill -0 "$pid" 2>/dev/null; do
+            local temp=${spinstr#?}
+            printf '\r%s%s%s %s' "${MAGENTA}${BOLD}" "$spinstr" "$RESET" "$msg" >&3
+            spinstr=$temp${spinstr%"$temp"}
+            sleep "$delay"
+        done
+    else
+        print_step "$msg"
+    fi
     set +e
     wait "$pid"
     local exit_code=$?
     set -e
     if [ "$exit_code" -eq 0 ]; then
-        printf "\r${GREEN}${BOLD}[✔]${RESET} ${msg}                               \n" >&3
+        if [ "$interactive" = "Y" ]; then printf '\r\033[2K' >&3; fi
+        print_success "$msg"
     else
-        printf "\r${RED}${BOLD}[✖]${RESET} ${msg} (Failed)                      \n" >&3
+        if [ "$interactive" = "Y" ]; then printf '\r\033[2K' >&3; fi
+        print_error "$msg failed."
         tput cnorm >&3 2>/dev/null || true
-        exit $exit_code
+        exit "$exit_code"
     fi
     tput cnorm >&3 2>/dev/null || true
 }
@@ -4906,7 +4988,7 @@ function install_uv() {
         exit 1
     fi
 
-    print_success "Installed uv at $MN_UV_BIN."
+    print_detail "Installed uv at $MN_UV_BIN."
 }
 
 function resolve_uv() {
@@ -4968,7 +5050,7 @@ function install_managed_python() {
     fi
 
     MN_PYTHON_BIN="$managed_bin"
-    print_success "Using uv-managed Python $(python_version "$managed_bin") at $managed_bin."
+    print_detail "Using uv-managed Python $(python_version "$managed_bin") at $managed_bin."
 }
 
 function print_python_requirement_error() {
@@ -5014,7 +5096,7 @@ function resolve_python_runtime() {
         fi
         if python_is_supported "$resolved" && python_is_selected_minor "$resolved"; then
             MN_PYTHON_BIN="$resolved"
-            print_success "Using Python $(python_version "$MN_PYTHON_BIN") at $MN_PYTHON_BIN."
+            print_detail "Using Python $(python_version "$MN_PYTHON_BIN") at $MN_PYTHON_BIN."
             return
         fi
         if [ -n "${MN_PYTHON:-}" ]; then
@@ -5025,7 +5107,7 @@ function resolve_python_runtime() {
 
     if managed_python_enabled; then
         install_managed_python
-        print_success "Using Python $(python_version "$MN_PYTHON_BIN") at $MN_PYTHON_BIN."
+        print_detail "Using Python $(python_version "$MN_PYTHON_BIN") at $MN_PYTHON_BIN."
         return
     fi
 
@@ -5114,7 +5196,7 @@ function install_core_from_release() {
         asset_url="$(core_asset_url_for_tag "$tag" "$platform")"
     fi
 
-    print_success "Using MirrorNeuron core release $tag for Docker platform $platform."
+    print_detail "Core release $tag for Docker platform $platform."
     run_quiet "download-core-release" curl_github -fL "$asset_url" -o "$tarball"
 
     mn_remove_path_or_exit "$INSTALL_DIR" "MirrorNeuron state directory"
@@ -6298,10 +6380,10 @@ function add_shell_profile_exports() {
     fi
 
     if [ "$needs_path" = "Y" ]; then
-        echo -e "\n${YELLOW}${BOLD}Note:${RESET} ${YELLOW}$BIN_DIR is not in your PATH.${RESET}" >&3
+        print_warning "${BIN_DIR} is not in your PATH."
     fi
     if [ "$needs_runtime_home" = "Y" ]; then
-        echo -e "${YELLOW}Persisting MN_HOME=${INSTALL_DIR} for future terminal sessions.${RESET}" >&3
+        print_detail "Persisting MN_HOME=${INSTALL_DIR} for future terminal sessions."
     fi
 
     local detected_profiles=()
@@ -6336,17 +6418,16 @@ function add_shell_profile_exports() {
             wrote_profile="Y"
         fi
         if [ "$wrote_profile" = "Y" ]; then
-            echo -e "Automatically added MirrorNeuron shell exports to ${CYAN}$profile${RESET}" >&3
+            print_detail "Updated shell exports: ${profile}"
         fi
     done
 
-    echo -e "${YELLOW}Please restart your terminal or run \`source ~/.zshrc\` to use the updated MirrorNeuron environment.${RESET}" >&3
+    print_warning "Restart your terminal to use the updated MirrorNeuron environment."
 }
 
 print_header
 
 if [ "$NON_INTERACTIVE" != "Y" ]; then
-    echo -e "${CYAN}${BOLD}Configuration${RESET}" >&3
     INSTALL_WEB_UI=$(ask "Do you want to install the Web UI from npm?" "$INSTALL_WEB_UI")
     INSTALL_REDIS=$(ask "Do you want to install Redis via Docker?" "$INSTALL_REDIS")
     INSTALL_CONTEXT_ENGINE=$(ask "Do you want to install/start the Membrane context engine?" "$INSTALL_CONTEXT_ENGINE")
@@ -6389,7 +6470,7 @@ if [ -d "$INSTALL_DIR" ] || [ -f "$BIN_DIR/mn" ]; then
     print_warning "MirrorNeuron appears to be already installed."
     REINSTALL=$(ask "Do you want to reinstall (overwrite old ones)?" "$REINSTALL")
     if [ "$REINSTALL" = "N" ]; then
-        echo -e "${YELLOW}Installation cancelled by user.${RESET}" >&3
+        print_warning "Installation cancelled."
         exit 0
     fi
     echo "" >&3
@@ -6434,7 +6515,7 @@ fi
 if [ "$INSTALL_API" = "Y" ]; then
     ln -s "$VENV_DIR/bin/mn-api" "$BIN_DIR/mn-api"
 fi
-print_success "Command links ready."
+print_detail "Command links: ${BIN_DIR}"
 if [ "$INSTALL_CLI" = "Y" ] || [ "$INSTALL_API" = "Y" ]; then
     add_shell_profile_exports "Y"
 else
@@ -6458,20 +6539,21 @@ if [ "$START_NOW" = "Y" ]; then
 fi
 
 echo "" >&3
-print_success "MirrorNeuron core ${CORE_INSTALL_VERSION} installed (SDK ${PYTHON_SDK_INSTALL_VERSION}, CLI ${CLI_INSTALL_VERSION}, API ${API_INSTALL_VERSION}, Web UI ${WEB_UI_INSTALL_VERSION})." >&3
+print_success "MirrorNeuron ${CORE_INSTALL_VERSION} installed."
+print_detail "SDK ${PYTHON_SDK_INSTALL_VERSION}; CLI ${CLI_INSTALL_VERSION}; API ${API_INSTALL_VERSION}; Web UI ${WEB_UI_INSTALL_VERSION}"
 if [ "$INSTALL_CLI" = "Y" ]; then
-    echo -e "CLI: ${YELLOW}mn${RESET}" >&3
+    print_detail "CLI: mn"
 fi
 if [ "$INSTALL_API" = "Y" ]; then
-    echo -e "API: ${YELLOW}mn-api${RESET}" >&3
+    print_detail "API: mn-api"
 fi
 if [ "$INSTALL_CLI" = "Y" ]; then
     if [ "$START_NOW" = "Y" ]; then
-        echo -e "Next: ${GREEN}mn node list${RESET}" >&3
+        printf 'Next: mn node list\n' >&3
     elif [ "$START_AS_WORKER" = "Y" ]; then
-        echo -e "Next: ${GREEN}mn runtime start --worker-node${RESET}" >&3
+        printf 'Next: mn runtime start --worker-node\n' >&3
     else
-        echo -e "Next: ${GREEN}mn runtime start${RESET}" >&3
+        printf 'Next: mn runtime start\n' >&3
     fi
 fi
 }
