@@ -80,6 +80,10 @@ Clear runtime Redis state:
 - Use `./install.sh` or `./install.sh --mode binary` for release/package installs,
   `./install.sh --mode github` for repository installs, or `./install.sh --mode local`
   from a monorepo checkout for editable local installs.
+- Local installs persist `MN_MEMBRANE_SOURCE_MODE=source`, so both initial and
+  lazy context-engine starts build the linked `Membrane` checkout. Release and
+  GitHub installs use the versioned GAR runtime image unless
+  `MN_MEMBRANE_SOURCE_MODE` is explicitly overridden.
 - GitHub mode without `--version` installs from each repository's default branch.
   Use `--version v1.2.8` only when you want to pin GitHub installs to matching
   release tags.
