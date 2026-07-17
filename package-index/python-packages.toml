@@ -51,22 +51,6 @@ installer_groups = ["membrane-tools"]
 binary_default = false
 
 [[packages]]
-name = "mn-orchastrator"
-path = "Synapse/mn-orchastrator"
-publish_group = "synapse"
-version = "1.2.25"
-installer_groups = ["synapse"]
-binary_default = false
-
-[[packages]]
-name = "mn-orchastrator-mcp"
-path = "Synapse/mn-orchastrator-mcp"
-publish_group = "synapse"
-version = "1.2.25"
-installer_groups = ["synapse"]
-binary_default = false
-
-[[packages]]
 name = "mirrorneuron-blueprint-support-skill"
 path = "mn-skills/blueprint_support_skill"
 publish_group = "skill"
