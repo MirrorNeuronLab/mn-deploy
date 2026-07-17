@@ -27,7 +27,7 @@ Modes:
   binary   Install released artifacts/packages. This is the default.
 
 Common options:
-  --version TAG                 Install this release version, for example v1.2.24.
+  --version TAG                 Install this release version, for example v.1.2.25.
   --yes, -y                     Run non-interactively with defaults and flags. This is the default.
   --interactive                 Ask each install question before proceeding.
   -v, --verbose                 Show installation details and command paths.
@@ -62,9 +62,9 @@ Examples:
   ./$MN_INSTALL_SCRIPT_NAME --interactive
   ./$MN_INSTALL_SCRIPT_NAME --mode github
   ./$MN_INSTALL_SCRIPT_NAME --mode local --no-web-ui --no-skills
-  ./$MN_INSTALL_SCRIPT_NAME --version v1.2.24
-  ./$MN_INSTALL_SCRIPT_NAME --mode github --version v1.2.24
-  ./$MN_INSTALL_SCRIPT_NAME --core-version v1.2.24 --python-sdk-version v1.2.24 --cli-version v1.2.24 --api-version v1.2.24 --web-ui-version v1.2.24
+  ./$MN_INSTALL_SCRIPT_NAME --version v.1.2.25
+  ./$MN_INSTALL_SCRIPT_NAME --mode github --version v.1.2.25
+  ./$MN_INSTALL_SCRIPT_NAME --core-version v.1.2.25 --python-sdk-version v.1.2.25 --cli-version v.1.2.25 --api-version v.1.2.25 --web-ui-version v.1.2.25
 EOF
 }
 
@@ -149,7 +149,7 @@ while [ "$#" -gt 0 ]; do
         --version)
             shift
             if [ "$#" -eq 0 ]; then
-                echo "install.sh: --version requires a release tag such as v1.2.24." >&3
+                echo "install.sh: --version requires a release tag such as v.1.2.25." >&3
                 print_unified_usage
                 exit 1
             fi
@@ -931,7 +931,7 @@ Options:
 
 Examples:
   ./$script_name --mode github --no-web-ui
-  ./$script_name --mode github --version v1.2.24
+  ./$script_name --mode github --version v.1.2.25
   ./$script_name --mode github --interactive
   ./$script_name --mode github --python-components sdk,api
   MN_PYTHON=/opt/homebrew/bin/python3.11 ./$script_name --mode github
@@ -1012,7 +1012,7 @@ while [ "$#" -gt 0 ]; do
         --version)
             shift
             if [ "$#" -eq 0 ]; then
-                print_error "--version requires a release tag such as v1.2.24."
+                print_error "--version requires a release tag such as v.1.2.25."
                 github_usage
                 exit 1
             fi
@@ -4403,14 +4403,14 @@ Release/source options:
 
 Examples:
   ./$script_name --no-web-ui
-  ./$script_name --version v1.2.24
+  ./$script_name --version v.1.2.25
   ./$script_name --interactive
   ./$script_name --no-web-ui --python-components sdk,api
   ./$script_name --gar-project my-gcp-project --gar-repository mirrorneuron-python
   ./$script_name --python-index-url https://us-central1-python.pkg.dev/my-gcp-project/mirrorneuron-python/simple/
   MN_PYTHON=/opt/homebrew/bin/python3.11 ./$script_name
-  ./$script_name --version v1.2.24 --no-web-ui
-  ./$script_name --core-version v1.2.24 --python-sdk-version v1.2.24 --cli-version v1.2.24 --api-version v1.2.24 --web-ui-version v1.2.24
+  ./$script_name --version v.1.2.25 --no-web-ui
+  ./$script_name --core-version v.1.2.25 --python-sdk-version v.1.2.25 --cli-version v.1.2.25 --api-version v.1.2.25 --web-ui-version v.1.2.25
 EOF
 }
 
@@ -4494,7 +4494,7 @@ while [ "$#" -gt 0 ]; do
         --version)
             shift
             if [ "$#" -eq 0 ]; then
-                print_error "--version requires a release tag such as v1.2.24."
+                print_error "--version requires a release tag such as v.1.2.25."
                 usage
                 exit 1
             fi
@@ -4508,7 +4508,7 @@ while [ "$#" -gt 0 ]; do
         --core-version)
             shift
             if [ "$#" -eq 0 ]; then
-                print_error "--core-version requires a release tag such as v1.2.24."
+                print_error "--core-version requires a release tag such as v.1.2.25."
                 usage
                 exit 1
             fi
@@ -4520,7 +4520,7 @@ while [ "$#" -gt 0 ]; do
         --python-sdk-version)
             shift
             if [ "$#" -eq 0 ]; then
-                print_error "--python-sdk-version requires a release tag such as v1.2.24."
+                print_error "--python-sdk-version requires a release tag such as v.1.2.25."
                 usage
                 exit 1
             fi
@@ -4532,7 +4532,7 @@ while [ "$#" -gt 0 ]; do
         --cli-version)
             shift
             if [ "$#" -eq 0 ]; then
-                print_error "--cli-version requires a release tag such as v1.2.24."
+                print_error "--cli-version requires a release tag such as v.1.2.25."
                 usage
                 exit 1
             fi
@@ -4544,7 +4544,7 @@ while [ "$#" -gt 0 ]; do
         --api-version)
             shift
             if [ "$#" -eq 0 ]; then
-                print_error "--api-version requires a release tag such as v1.2.24."
+                print_error "--api-version requires a release tag such as v.1.2.25."
                 usage
                 exit 1
             fi
@@ -4556,7 +4556,7 @@ while [ "$#" -gt 0 ]; do
         --web-ui-version)
             shift
             if [ "$#" -eq 0 ]; then
-                print_error "--web-ui-version requires a release tag such as v1.2.24."
+                print_error "--web-ui-version requires a release tag such as v.1.2.25."
                 usage
                 exit 1
             fi
@@ -5168,7 +5168,7 @@ function resolve_core_release_tag() {
     if [ -z "$tag" ] || [ "$tag" = "$effective_url" ]; then
         local script_name="${MN_INSTALL_SCRIPT_NAME:-$(basename "$0")}"
         print_error "Could not resolve the latest MirrorNeuron release tag from $effective_url."
-        print_error "Set MN_CORE_RELEASE_TAG explicitly, for example: MN_CORE_RELEASE_TAG=v1.2.24 ./$script_name"
+        print_error "Set MN_CORE_RELEASE_TAG explicitly, for example: MN_CORE_RELEASE_TAG=v.1.2.25 ./$script_name"
         exit 1
     fi
 
