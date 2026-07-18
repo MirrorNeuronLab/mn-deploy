@@ -58,6 +58,7 @@ Clear runtime Redis state:
 ## Details
 
 - [Google Artifact Registry Python Publishing](./GOOGLE_ARTIFACT_REGISTRY.md)
+- [Released Package Inventory](./released.md)
 - [MirrorNeuron Component Guide](../mn-docs/component-guide.md#deployment-scripts)
 - [Installation](../mn-docs/installation.md)
 - [Docker and OpenShell for Blueprints](../mn-docs/docker_and_openshell_for_blueprints.md)
