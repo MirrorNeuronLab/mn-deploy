@@ -288,7 +288,7 @@ binary_default = false
 name = "mirrorneuron-web-browser-skill"
 path = "mn-skills/web_browser_skill"
 publish_group = "skill"
-version = "1.2.27"
+version = "1.2.28"
 installer_groups = ["skill"]
 binary_default = false
 
