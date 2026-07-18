@@ -110,13 +110,19 @@ Clear runtime Redis state:
   versioned runtime Docker Compose template and binary package index from the
   public `mn-deploy` GitHub repository.
 - Initial installs skip the Membrane context engine by default to keep setup
-  light. Use `--context-engine` with `MN_MEMBRANE_DIR` or a readable
-  `MN_MEMBRANE_GIT_URL` to enable it during install instead of waiting for the
-  first context-memory blueprint run.
+  light. In binary mode, use `--context-engine` to install the Membrane Python
+  runtime from GAR and start the versioned GAR engine image instead of waiting
+  for the first context-memory blueprint run.
 - Python packages published to Google Artifact Registry are controlled by
   `package-index/python-packages.toml`.
 - Binary mode uses the current public package repository by default:
   `https://us-central1-python.pkg.dev/mirrorneuron-public-packages/agent-skills/simple/`.
+- Binary mode installs agent definitions and the Membrane Python runtime from
+  that package repository and uses the versioned Membrane GAR image. It does
+  not clone `mn-agents` or `Membrane`; repository checkouts remain development
+  inputs for GitHub/local modes.
+- Binary mode does not preinstall skill packages. Each blueprint installs its
+  declared skill dependencies when they are needed.
 - GAR setup:
 
   ```bash
