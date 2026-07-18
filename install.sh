@@ -182,6 +182,51 @@ function mn_run_docker_build() {
     return "$status"
 }
 
+function mn_print_docker_desktop_permission_notice() {
+    [ "$(uname -s)" = "Darwin" ] || return 0
+
+    printf '==> Preparing Docker Desktop access\n' >&3
+    printf 'Docker Desktop may ask Terminal to access data from other apps. Select Allow so the installer can configure Docker services and Model Runner.\n' >&3
+}
+
+function mn_preferred_shell_profile() {
+    local shell_path="${SHELL:-}"
+    local shell_name="${shell_path##*/}"
+
+    case "$shell_name" in
+        zsh)
+            printf '%s/.zshrc\n' "$HOME"
+            ;;
+        bash)
+            if [ "$(uname -s)" = "Darwin" ]; then
+                printf '%s/.bash_profile\n' "$HOME"
+            else
+                printf '%s/.bashrc\n' "$HOME"
+            fi
+            ;;
+        sh)
+            printf '%s/.profile\n' "$HOME"
+            ;;
+        *)
+            if [ "$(uname -s)" = "Darwin" ]; then
+                printf '%s/.zshrc\n' "$HOME"
+            else
+                printf '%s/.profile\n' "$HOME"
+            fi
+            ;;
+    esac
+}
+
+function mn_print_next_shell_command() {
+    local command_text="$1"
+
+    if [ "${MN_SHELL_PROFILE_RELOAD_REQUIRED:-N}" = "Y" ]; then
+        printf 'Next: source %q && %s\n' "$MN_SHELL_PROFILE_PATH" "$command_text" >&3
+    else
+        printf 'Next: %s\n' "$command_text" >&3
+    fi
+}
+
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --mode)
@@ -905,6 +950,7 @@ MN_SYNCTHING_SYNC_PORT="${MN_SYNCTHING_SYNC_PORT:-22000}"
 MN_HOST_OPENSHELL_CONFIG_DIR="${OPENSHELL_CONTAINER_CONFIG_DIR:-${HOME}/.config/openshell-mirror-neuron}"
 MN_HOST_OPENSHELL_STATE_DIR="${MN_HOST_OPENSHELL_STATE_DIR:-${INSTALL_DIR}/openshell-state}"
 OPENSHELL_GATEWAY_USER="${OPENSHELL_GATEWAY_USER:-$(id -u):$(id -g)}"
+mn_print_docker_desktop_permission_notice
 DOCKER_HOST_SOCKET="${DOCKER_HOST_SOCKET:-$(mn_resolve_docker_host_socket)}"
 if [ -z "${OPENSHELL_GATEWAY_DOCKER_GROUP:-}" ] && [ "$(uname -s)" = "Darwin" ]; then
     OPENSHELL_GATEWAY_DOCKER_GROUP="0"
@@ -2335,6 +2381,8 @@ function ensure_shell_profile_exports() {
     local needs_path="N"
     local needs_runtime_home="Y"
     local default_home="${HOME}/.mn"
+    local shell_profile
+    local profile_updated="N"
 
     [[ ":$PATH:" != *":$BIN_DIR:"* ]] && needs_path="Y"
 
@@ -2349,15 +2397,8 @@ function ensure_shell_profile_exports() {
         print_detail "Persisting MN_HOME=${INSTALL_DIR} for future terminal sessions."
     fi
 
-    local detected_profiles=()
-    [ -f "$HOME/.zshrc" ] && detected_profiles+=("$HOME/.zshrc")
-    [ -f "$HOME/.bashrc" ] && detected_profiles+=("$HOME/.bashrc")
-    [ -f "$HOME/.bash_profile" ] && detected_profiles+=("$HOME/.bash_profile")
-    [ -f "$HOME/.profile" ] && detected_profiles+=("$HOME/.profile")
-
-    if [ ${#detected_profiles[@]} -eq 0 ]; then
-        detected_profiles+=("$HOME/.profile")
-    fi
+    shell_profile="$(mn_preferred_shell_profile)"
+    local detected_profiles=("$shell_profile")
 
     local profile path_line home_line wrote_header wrote_profile
     path_line="export PATH=\"$BIN_DIR:\$PATH\""
@@ -2382,10 +2423,18 @@ function ensure_shell_profile_exports() {
         fi
         if [ "$wrote_profile" = "Y" ]; then
             print_detail "Updated shell exports: ${profile}"
+            profile_updated="Y"
         fi
     done
 
-    print_warning "Restart your terminal to use the updated MirrorNeuron environment."
+    if [ "$needs_path" = "Y" ]; then
+        export PATH="${BIN_DIR}:${PATH}"
+    fi
+    if [ "$profile_updated" = "Y" ]; then
+        MN_SHELL_PROFILE_RELOAD_REQUIRED="Y"
+        MN_SHELL_PROFILE_PATH="$shell_profile"
+        print_warning "Open a new terminal, or run: source $(shell_escape_value "$shell_profile")"
+    fi
 }
 
 ensure_shell_profile_exports
@@ -2399,7 +2448,7 @@ if [ "$INSTALL_WEB_UI" = "Y" ]; then
     print_detail "Web UI: http://localhost:${MN_WEB_UI_PORT:-55173}"
 fi
 if [ "$INSTALL_CLI" = "Y" ]; then
-    printf 'Next: mn node list\n' >&3
+    mn_print_next_shell_command "mn node list"
 fi
 
 if [ "$START_NOW" = "Y" ]; then
@@ -2490,6 +2539,7 @@ MN_SYNCTHING_SYNC_PORT="${MN_SYNCTHING_SYNC_PORT:-22000}"
 MN_HOST_OPENSHELL_CONFIG_DIR="${OPENSHELL_CONTAINER_CONFIG_DIR:-${HOME}/.config/openshell-mirror-neuron}"
 MN_HOST_OPENSHELL_STATE_DIR="${MN_HOST_OPENSHELL_STATE_DIR:-${INSTALL_DIR}/openshell-state}"
 OPENSHELL_GATEWAY_USER="${OPENSHELL_GATEWAY_USER:-$(id -u):$(id -g)}"
+mn_print_docker_desktop_permission_notice
 DOCKER_HOST_SOCKET="${DOCKER_HOST_SOCKET:-$(mn_resolve_docker_host_socket)}"
 if [ -z "${OPENSHELL_GATEWAY_DOCKER_GROUP:-}" ] && [ "$(uname -s)" = "Darwin" ]; then
     OPENSHELL_GATEWAY_DOCKER_GROUP="0"
@@ -3980,6 +4030,8 @@ function ensure_shell_profile_exports() {
     local needs_path="N"
     local needs_runtime_home="Y"
     local default_home="${HOME}/.mn"
+    local shell_profile
+    local profile_updated="N"
 
     [[ ":$PATH:" != *":$BIN_DIR:"* ]] && needs_path="Y"
 
@@ -3994,15 +4046,8 @@ function ensure_shell_profile_exports() {
         print_warning "Persisting MN_HOME=${INSTALL_DIR} for future terminal sessions."
     fi
 
-    local detected_profiles=()
-    [ -f "$HOME/.zshrc" ] && detected_profiles+=("$HOME/.zshrc")
-    [ -f "$HOME/.bashrc" ] && detected_profiles+=("$HOME/.bashrc")
-    [ -f "$HOME/.bash_profile" ] && detected_profiles+=("$HOME/.bash_profile")
-    [ -f "$HOME/.profile" ] && detected_profiles+=("$HOME/.profile")
-
-    if [ "${#detected_profiles[@]}" -eq 0 ]; then
-        detected_profiles+=("$HOME/.profile")
-    fi
+    shell_profile="$(mn_preferred_shell_profile)"
+    local detected_profiles=("$shell_profile")
 
     local profile path_line home_line wrote_header wrote_profile
     path_line="export PATH=\"$BIN_DIR:\$PATH\""
@@ -4027,8 +4072,18 @@ function ensure_shell_profile_exports() {
         fi
         if [ "$wrote_profile" = "Y" ]; then
             print_detail "Updated shell exports: ${profile}"
+            profile_updated="Y"
         fi
     done
+
+    if [ "$needs_path" = "Y" ]; then
+        export PATH="${BIN_DIR}:${PATH}"
+    fi
+    if [ "$profile_updated" = "Y" ]; then
+        MN_SHELL_PROFILE_RELOAD_REQUIRED="Y"
+        MN_SHELL_PROFILE_PATH="$shell_profile"
+        print_warning "Open a new terminal, or run: source $(shell_escape_value "$shell_profile")"
+    fi
 }
 
 print_header
@@ -4240,7 +4295,7 @@ fi
 if [ "$INSTALL_WEB_UI" = "Y" ]; then
     print_detail "Web UI: http://localhost:${MN_WEB_UI_PORT:-55173}"
 fi
-printf 'Next: mn node list\n' >&3
+mn_print_next_shell_command "mn node list"
 print_detail "Rebuild after Elixir changes: ${SCRIPT_DIR}/install.sh --mode local --no-web-ui --no-skills"
 
 if [ "$START_NOW" = "Y" ]; then
@@ -4348,6 +4403,7 @@ MN_SYNCTHING_SYNC_PORT="${MN_SYNCTHING_SYNC_PORT:-22000}"
 MN_HOST_OPENSHELL_CONFIG_DIR="${OPENSHELL_CONTAINER_CONFIG_DIR:-${HOME}/.config/openshell-mirror-neuron}"
 MN_HOST_OPENSHELL_STATE_DIR="${MN_HOST_OPENSHELL_STATE_DIR:-${INSTALL_DIR}/openshell-state}"
 OPENSHELL_GATEWAY_USER="${OPENSHELL_GATEWAY_USER:-$(id -u):$(id -g)}"
+mn_print_docker_desktop_permission_notice
 DOCKER_HOST_SOCKET="${DOCKER_HOST_SOCKET:-$(mn_resolve_docker_host_socket)}"
 if [ -z "${OPENSHELL_GATEWAY_DOCKER_GROUP:-}" ] && [ "$(uname -s)" = "Darwin" ]; then
     OPENSHELL_GATEWAY_DOCKER_GROUP="0"
@@ -6255,6 +6311,8 @@ function add_shell_profile_exports() {
     local needs_path="N"
     local needs_runtime_home="Y"
     local default_home="${HOME}/.mn"
+    local shell_profile
+    local profile_updated="N"
 
     if [ "$include_path" = "Y" ]; then
         [[ ":$PATH:" != *":$BIN_DIR:"* ]] && needs_path="Y"
@@ -6271,15 +6329,8 @@ function add_shell_profile_exports() {
         print_detail "Persisting MN_HOME=${INSTALL_DIR} for future terminal sessions."
     fi
 
-    local detected_profiles=()
-    [ -f "$HOME/.zshrc" ] && detected_profiles+=("$HOME/.zshrc")
-    [ -f "$HOME/.bashrc" ] && detected_profiles+=("$HOME/.bashrc")
-    [ -f "$HOME/.bash_profile" ] && detected_profiles+=("$HOME/.bash_profile")
-    [ -f "$HOME/.profile" ] && detected_profiles+=("$HOME/.profile")
-
-    if [ ${#detected_profiles[@]} -eq 0 ]; then
-        detected_profiles+=("$HOME/.profile")
-    fi
+    shell_profile="$(mn_preferred_shell_profile)"
+    local detected_profiles=("$shell_profile")
 
     local profile path_line home_line wrote_header wrote_profile
     path_line="export PATH=\"$BIN_DIR:\$PATH\""
@@ -6304,10 +6355,18 @@ function add_shell_profile_exports() {
         fi
         if [ "$wrote_profile" = "Y" ]; then
             print_detail "Updated shell exports: ${profile}"
+            profile_updated="Y"
         fi
     done
 
-    print_warning "Restart your terminal to use the updated MirrorNeuron environment."
+    if [ "$needs_path" = "Y" ]; then
+        export PATH="${BIN_DIR}:${PATH}"
+    fi
+    if [ "$profile_updated" = "Y" ]; then
+        MN_SHELL_PROFILE_RELOAD_REQUIRED="Y"
+        MN_SHELL_PROFILE_PATH="$shell_profile"
+        print_warning "Open a new terminal, or run: source $(shell_escape_value "$shell_profile")"
+    fi
 }
 
 print_header
@@ -6421,11 +6480,11 @@ if [ "$INSTALL_API" = "Y" ]; then
 fi
 if [ "$INSTALL_CLI" = "Y" ]; then
     if [ "$START_NOW" = "Y" ]; then
-        printf 'Next: mn node list\n' >&3
+        mn_print_next_shell_command "mn node list"
     elif [ "$START_AS_WORKER" = "Y" ]; then
-        printf 'Next: mn runtime start --worker-node\n' >&3
+        mn_print_next_shell_command "mn runtime start --worker-node"
     else
-        printf 'Next: mn runtime start\n' >&3
+        mn_print_next_shell_command "mn runtime start"
     fi
 fi
 }

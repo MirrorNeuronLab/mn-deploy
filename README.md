@@ -69,6 +69,9 @@ Clear runtime Redis state:
   profile export for both MirrorNeuron and OtterDesk:
   `export MN_HOME="$HOME/.mn"`.
 - Generated Compose settings are stored in `~/.mn/docker-compose.env`.
+- The `mn` and `mn-api` commands are linked under `~/.local/bin`. The installer
+  adds that directory to the active zsh or bash startup file; open a new terminal
+  after the first install, or run the reload command printed by the installer.
 - Redis defaults to the Docker Official Image `redis:8`, which includes Redis
   Query Engine support for vector search. Set `MN_REDIS_IMAGE` before install
   or in `~/.mn/docker-compose.env` to pin a specific Redis 8+ tag or digest.
