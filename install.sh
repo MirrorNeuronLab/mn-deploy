@@ -217,6 +217,44 @@ function mn_preferred_shell_profile() {
     esac
 }
 
+function mn_deduplicate_profile_line() {
+    local profile="$1"
+    local target_line="$2"
+    local line_count
+    local temporary_profile
+
+    [ -f "$profile" ] || return 0
+    line_count="$(grep -Fxc -- "$target_line" "$profile" 2>/dev/null || true)"
+    [ "${line_count:-0}" -gt 1 ] || return 0
+
+    temporary_profile="$(mktemp "${profile}.mn.XXXXXX")"
+    if ! MN_PROFILE_TARGET_LINE="$target_line" awk '
+        $0 == ENVIRON["MN_PROFILE_TARGET_LINE"] {
+            if (found) next
+            found = 1
+        }
+        { print }
+    ' "$profile" > "$temporary_profile"; then
+        rm -f "$temporary_profile"
+        return 1
+    fi
+    if ! cat "$temporary_profile" > "$profile"; then
+        rm -f "$temporary_profile"
+        return 1
+    fi
+    rm -f "$temporary_profile"
+}
+
+function mn_deduplicate_generated_profile_exports() {
+    local profile="$1"
+    local path_line="$2"
+    local home_line="$3"
+
+    mn_deduplicate_profile_line "$profile" "# MN and OTTERDESK"
+    mn_deduplicate_profile_line "$profile" "$path_line"
+    mn_deduplicate_profile_line "$profile" "$home_line"
+}
+
 function mn_print_next_shell_command() {
     local command_text="$1"
 
@@ -2411,6 +2449,7 @@ function ensure_shell_profile_exports() {
     for profile in "${detected_profiles[@]}"; do
         wrote_header="N"
         wrote_profile="N"
+        mn_deduplicate_generated_profile_exports "$profile" "$path_line" "$home_line"
         if [ "$needs_path" = "Y" ] && ! profile_has_bin_path "$profile"; then
             [ "$wrote_header" = "N" ] && echo -e "\n# MN and OTTERDESK" >> "$profile" && wrote_header="Y"
             echo "$path_line" >> "$profile"
@@ -2430,7 +2469,7 @@ function ensure_shell_profile_exports() {
     if [ "$needs_path" = "Y" ]; then
         export PATH="${BIN_DIR}:${PATH}"
     fi
-    if [ "$profile_updated" = "Y" ]; then
+    if [ "$needs_path" = "Y" ] || [ "$profile_updated" = "Y" ]; then
         MN_SHELL_PROFILE_RELOAD_REQUIRED="Y"
         MN_SHELL_PROFILE_PATH="$shell_profile"
         print_warning "Open a new terminal, or run: source $(shell_escape_value "$shell_profile")"
@@ -4060,6 +4099,7 @@ function ensure_shell_profile_exports() {
     for profile in "${detected_profiles[@]}"; do
         wrote_header="N"
         wrote_profile="N"
+        mn_deduplicate_generated_profile_exports "$profile" "$path_line" "$home_line"
         if [ "$needs_path" = "Y" ] && ! profile_has_bin_path "$profile"; then
             [ "$wrote_header" = "N" ] && echo "" >> "$profile" && echo "# MN and OTTERDESK" >> "$profile" && wrote_header="Y"
             echo "$path_line" >> "$profile"
@@ -4079,7 +4119,7 @@ function ensure_shell_profile_exports() {
     if [ "$needs_path" = "Y" ]; then
         export PATH="${BIN_DIR}:${PATH}"
     fi
-    if [ "$profile_updated" = "Y" ]; then
+    if [ "$needs_path" = "Y" ] || [ "$profile_updated" = "Y" ]; then
         MN_SHELL_PROFILE_RELOAD_REQUIRED="Y"
         MN_SHELL_PROFILE_PATH="$shell_profile"
         print_warning "Open a new terminal, or run: source $(shell_escape_value "$shell_profile")"
@@ -6343,6 +6383,7 @@ function add_shell_profile_exports() {
     for profile in "${detected_profiles[@]}"; do
         wrote_header="N"
         wrote_profile="N"
+        mn_deduplicate_generated_profile_exports "$profile" "$path_line" "$home_line"
         if [ "$needs_path" = "Y" ] && ! profile_has_bin_path "$profile"; then
             [ "$wrote_header" = "N" ] && echo -e "\n# MN and OTTERDESK" >> "$profile" && wrote_header="Y"
             echo "$path_line" >> "$profile"
@@ -6362,7 +6403,7 @@ function add_shell_profile_exports() {
     if [ "$needs_path" = "Y" ]; then
         export PATH="${BIN_DIR}:${PATH}"
     fi
-    if [ "$profile_updated" = "Y" ]; then
+    if [ "$needs_path" = "Y" ] || [ "$profile_updated" = "Y" ]; then
         MN_SHELL_PROFILE_RELOAD_REQUIRED="Y"
         MN_SHELL_PROFILE_PATH="$shell_profile"
         print_warning "Open a new terminal, or run: source $(shell_escape_value "$shell_profile")"
