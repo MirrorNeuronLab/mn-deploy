@@ -1322,84 +1322,50 @@ function compose_profiles() {
     printf '%s' "${profiles[*]}"
 }
 
-function openssl_supports_ed25519() {
-    local bin="$1"
-    local tmp_file
-    tmp_file="$(mktemp "${TMPDIR:-/tmp}/mn-ed25519-test.XXXXXX")"
-    if "$bin" genpkey -algorithm ED25519 -out "$tmp_file" >/dev/null 2>&1; then
-        rm -f "$tmp_file"
-        return 0
-    fi
-    rm -f "$tmp_file"
-    return 1
-}
+function generate_openshell_jwt_keys() {
+    local jwt_dir="$1"
+    local gateway_image="${OPENSHELL_GATEWAY_IMAGE:-ghcr.io/nvidia/openshell/gateway:0.0.47}"
+    local bootstrap_dir name
 
-function resolve_ed25519_openssl() {
-    local candidates=()
-    local candidate resolved
-
-    if [ -n "${OPENSSL_BIN:-}" ]; then
-        if resolved="$(command -v "$OPENSSL_BIN" 2>/dev/null)" && [ -n "$resolved" ] && [ -x "$resolved" ] && openssl_supports_ed25519 "$resolved"; then
-            printf '%s\n' "$resolved"
-            return 0
-        fi
-        print_error "OPENSSL_BIN=${OPENSSL_BIN} does not support ED25519 key generation."
-        print_error "Set OPENSSL_BIN to an OpenSSL 3 binary, for example /opt/homebrew/bin/openssl."
+    bootstrap_dir="$(mktemp -d "${MN_HOST_OPENSHELL_STATE_DIR}/.jwt-bootstrap.XXXXXX")"
+    if ! docker run --rm \
+        --user "$OPENSHELL_GATEWAY_USER" \
+        --env HOME=/tmp/openshell-bootstrap \
+        --volume "${bootstrap_dir}:/bootstrap" \
+        "$gateway_image" \
+        generate-certs \
+        --output-dir /bootstrap/output \
+        --server-san host.openshell.internal >/dev/null; then
+        print_error "Failed to create OpenShell sandbox JWT keys with ${gateway_image}."
+        print_error "Check that Docker is running and can pull the OpenShell gateway image, then retry."
+        rm -rf "$bootstrap_dir"
         exit 1
     fi
-    if resolved="$(command -v openssl 2>/dev/null)" && [ -n "$resolved" ]; then
-        candidates+=("$resolved")
-    fi
-    candidates+=(
-        /opt/homebrew/bin/openssl
-        /usr/local/bin/openssl
-        /usr/local/opt/openssl@3/bin/openssl
-        /opt/local/bin/openssl
-    )
 
-    for candidate in "${candidates[@]}"; do
-        [ -x "$candidate" ] || continue
-        if openssl_supports_ed25519 "$candidate"; then
-            printf '%s\n' "$candidate"
-            return 0
+    for name in signing.pem public.pem kid; do
+        if [ ! -s "${bootstrap_dir}/output/jwt/${name}" ]; then
+            print_error "OpenShell certificate bootstrap did not create jwt/${name}."
+            print_error "Check that ${gateway_image} supports the generate-certs command, then retry."
+            rm -rf "$bootstrap_dir"
+            exit 1
         fi
     done
 
-    print_error "An ED25519-capable OpenSSL is required to create OpenShell sandbox JWT keys."
-    print_error "Install OpenSSL 3, put it on PATH, or set OPENSSL_BIN=/path/to/openssl."
-    exit 1
+    mv "${bootstrap_dir}/output/jwt/signing.pem" "${jwt_dir}/signing.pem"
+    mv "${bootstrap_dir}/output/jwt/public.pem" "${jwt_dir}/public.pem"
+    mv "${bootstrap_dir}/output/jwt/kid" "${jwt_dir}/kid"
+    rm -rf "$bootstrap_dir"
+    chmod 600 "${jwt_dir}/signing.pem" 2>/dev/null || true
+    chmod 644 "${jwt_dir}/public.pem" "${jwt_dir}/kid" 2>/dev/null || true
 }
 
 function write_openshell_compose_config() {
     local gateway_dir="${MN_HOST_OPENSHELL_CONFIG_DIR}/gateways/openshell"
     local jwt_dir="${MN_HOST_OPENSHELL_STATE_DIR}/jwt"
-    local openssl_bin tmp_dir
     mkdir -p "$gateway_dir"
     mkdir -p "$jwt_dir"
     if [ ! -s "${jwt_dir}/signing.pem" ] || [ ! -s "${jwt_dir}/public.pem" ] || [ ! -s "${jwt_dir}/kid" ]; then
-        openssl_bin="$(resolve_ed25519_openssl)"
-        tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/mn-openshell-jwt.XXXXXX")"
-        if ! "$openssl_bin" genpkey -algorithm ED25519 -out "${tmp_dir}/signing.pem" >/dev/null; then
-            print_error "Failed to create OpenShell JWT signing key with ${openssl_bin}."
-            rm -rf "$tmp_dir"
-            exit 1
-        fi
-        if ! "$openssl_bin" pkey -in "${tmp_dir}/signing.pem" -pubout -out "${tmp_dir}/public.pem" >/dev/null; then
-            print_error "Failed to create OpenShell JWT public key with ${openssl_bin}."
-            rm -rf "$tmp_dir"
-            exit 1
-        fi
-        if ! "$openssl_bin" rand -hex 8 > "${tmp_dir}/kid"; then
-            print_error "Failed to create OpenShell JWT key id with ${openssl_bin}."
-            rm -rf "$tmp_dir"
-            exit 1
-        fi
-        mv "${tmp_dir}/signing.pem" "${jwt_dir}/signing.pem"
-        mv "${tmp_dir}/public.pem" "${jwt_dir}/public.pem"
-        mv "${tmp_dir}/kid" "${jwt_dir}/kid"
-        rm -rf "$tmp_dir"
-        chmod 600 "${jwt_dir}/signing.pem" 2>/dev/null || true
-        chmod 644 "${jwt_dir}/public.pem" "${jwt_dir}/kid" 2>/dev/null || true
+        generate_openshell_jwt_keys "$jwt_dir"
     fi
     printf 'openshell\n' > "${MN_HOST_OPENSHELL_CONFIG_DIR}/active_gateway"
     cat > "${gateway_dir}/metadata.json" <<EOF
@@ -3019,52 +2985,41 @@ function replace_symlink() {
     ln -s "$source" "$target"
 }
 
-function openssl_supports_ed25519() {
-    local bin="$1"
-    local tmp_file
-    tmp_file="$(mktemp "${TMPDIR:-/tmp}/mn-ed25519-test.XXXXXX")"
-    if "$bin" genpkey -algorithm ED25519 -out "$tmp_file" >/dev/null 2>&1; then
-        rm -f "$tmp_file"
-        return 0
-    fi
-    rm -f "$tmp_file"
-    return 1
-}
+function generate_openshell_jwt_keys() {
+    local jwt_dir="$1"
+    local gateway_image="${OPENSHELL_GATEWAY_IMAGE:-ghcr.io/nvidia/openshell/gateway:0.0.47}"
+    local bootstrap_dir name
 
-function resolve_ed25519_openssl() {
-    local candidates=()
-    local candidate resolved
-
-    if [ -n "${OPENSSL_BIN:-}" ]; then
-        if resolved="$(command -v "$OPENSSL_BIN" 2>/dev/null)" && [ -n "$resolved" ] && [ -x "$resolved" ] && openssl_supports_ed25519 "$resolved"; then
-            printf '%s\n' "$resolved"
-            return 0
-        fi
-        print_error "OPENSSL_BIN=${OPENSSL_BIN} does not support ED25519 key generation."
-        print_error "Set OPENSSL_BIN to an OpenSSL 3 binary, for example /opt/homebrew/bin/openssl."
+    bootstrap_dir="$(mktemp -d "${MN_HOST_OPENSHELL_STATE_DIR}/.jwt-bootstrap.XXXXXX")"
+    if ! docker run --rm \
+        --user "$OPENSHELL_GATEWAY_USER" \
+        --env HOME=/tmp/openshell-bootstrap \
+        --volume "${bootstrap_dir}:/bootstrap" \
+        "$gateway_image" \
+        generate-certs \
+        --output-dir /bootstrap/output \
+        --server-san host.openshell.internal >/dev/null; then
+        print_error "Failed to create OpenShell sandbox JWT keys with ${gateway_image}."
+        print_error "Check that Docker is running and can pull the OpenShell gateway image, then retry."
+        rm -rf "$bootstrap_dir"
         exit 1
     fi
-    if resolved="$(command -v openssl 2>/dev/null)" && [ -n "$resolved" ]; then
-        candidates+=("$resolved")
-    fi
-    candidates+=(
-        /opt/homebrew/bin/openssl
-        /usr/local/bin/openssl
-        /usr/local/opt/openssl@3/bin/openssl
-        /opt/local/bin/openssl
-    )
 
-    for candidate in "${candidates[@]}"; do
-        [ -x "$candidate" ] || continue
-        if openssl_supports_ed25519 "$candidate"; then
-            printf '%s\n' "$candidate"
-            return 0
+    for name in signing.pem public.pem kid; do
+        if [ ! -s "${bootstrap_dir}/output/jwt/${name}" ]; then
+            print_error "OpenShell certificate bootstrap did not create jwt/${name}."
+            print_error "Check that ${gateway_image} supports the generate-certs command, then retry."
+            rm -rf "$bootstrap_dir"
+            exit 1
         fi
     done
 
-    print_error "An ED25519-capable OpenSSL is required to create OpenShell sandbox JWT keys."
-    print_error "Install OpenSSL 3, put it on PATH, or set OPENSSL_BIN=/path/to/openssl."
-    exit 1
+    mv "${bootstrap_dir}/output/jwt/signing.pem" "${jwt_dir}/signing.pem"
+    mv "${bootstrap_dir}/output/jwt/public.pem" "${jwt_dir}/public.pem"
+    mv "${bootstrap_dir}/output/jwt/kid" "${jwt_dir}/kid"
+    rm -rf "$bootstrap_dir"
+    chmod 600 "${jwt_dir}/signing.pem" 2>/dev/null || true
+    chmod 644 "${jwt_dir}/public.pem" "${jwt_dir}/kid" 2>/dev/null || true
 }
 
 function write_local_install_metadata() {
@@ -3432,33 +3387,10 @@ function compose_profiles() {
 function write_openshell_compose_config() {
     local gateway_dir="${MN_HOST_OPENSHELL_CONFIG_DIR}/gateways/openshell"
     local jwt_dir="${MN_HOST_OPENSHELL_STATE_DIR}/jwt"
-    local openssl_bin tmp_dir
     mkdir -p "$gateway_dir"
     mkdir -p "$jwt_dir"
     if [ ! -s "${jwt_dir}/signing.pem" ] || [ ! -s "${jwt_dir}/public.pem" ] || [ ! -s "${jwt_dir}/kid" ]; then
-        openssl_bin="$(resolve_ed25519_openssl)"
-        tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/mn-openshell-jwt.XXXXXX")"
-        if ! "$openssl_bin" genpkey -algorithm ED25519 -out "${tmp_dir}/signing.pem" >/dev/null; then
-            print_error "Failed to create OpenShell JWT signing key with ${openssl_bin}."
-            rm -rf "$tmp_dir"
-            exit 1
-        fi
-        if ! "$openssl_bin" pkey -in "${tmp_dir}/signing.pem" -pubout -out "${tmp_dir}/public.pem" >/dev/null; then
-            print_error "Failed to create OpenShell JWT public key with ${openssl_bin}."
-            rm -rf "$tmp_dir"
-            exit 1
-        fi
-        if ! "$openssl_bin" rand -hex 8 > "${tmp_dir}/kid"; then
-            print_error "Failed to create OpenShell JWT key id with ${openssl_bin}."
-            rm -rf "$tmp_dir"
-            exit 1
-        fi
-        mv "${tmp_dir}/signing.pem" "${jwt_dir}/signing.pem"
-        mv "${tmp_dir}/public.pem" "${jwt_dir}/public.pem"
-        mv "${tmp_dir}/kid" "${jwt_dir}/kid"
-        rm -rf "$tmp_dir"
-        chmod 600 "${jwt_dir}/signing.pem" 2>/dev/null || true
-        chmod 644 "${jwt_dir}/public.pem" "${jwt_dir}/kid" 2>/dev/null || true
+        generate_openshell_jwt_keys "$jwt_dir"
     fi
     printf 'openshell\n' > "${MN_HOST_OPENSHELL_CONFIG_DIR}/active_gateway"
     cat > "${gateway_dir}/metadata.json" <<EOF
@@ -5465,84 +5397,50 @@ function compose_profiles() {
     printf '%s' "${profiles[*]}"
 }
 
-function openssl_supports_ed25519() {
-    local bin="$1"
-    local tmp_file
-    tmp_file="$(mktemp "${TMPDIR:-/tmp}/mn-ed25519-test.XXXXXX")"
-    if "$bin" genpkey -algorithm ED25519 -out "$tmp_file" >/dev/null 2>&1; then
-        rm -f "$tmp_file"
-        return 0
-    fi
-    rm -f "$tmp_file"
-    return 1
-}
+function generate_openshell_jwt_keys() {
+    local jwt_dir="$1"
+    local gateway_image="${OPENSHELL_GATEWAY_IMAGE:-ghcr.io/nvidia/openshell/gateway:0.0.47}"
+    local bootstrap_dir name
 
-function resolve_ed25519_openssl() {
-    local candidates=()
-    local candidate resolved
-
-    if [ -n "${OPENSSL_BIN:-}" ]; then
-        if resolved="$(command -v "$OPENSSL_BIN" 2>/dev/null)" && [ -n "$resolved" ] && [ -x "$resolved" ] && openssl_supports_ed25519 "$resolved"; then
-            printf '%s\n' "$resolved"
-            return 0
-        fi
-        print_error "OPENSSL_BIN=${OPENSSL_BIN} does not support ED25519 key generation."
-        print_error "Set OPENSSL_BIN to an OpenSSL 3 binary, for example /opt/homebrew/bin/openssl."
+    bootstrap_dir="$(mktemp -d "${MN_HOST_OPENSHELL_STATE_DIR}/.jwt-bootstrap.XXXXXX")"
+    if ! docker run --rm \
+        --user "$OPENSHELL_GATEWAY_USER" \
+        --env HOME=/tmp/openshell-bootstrap \
+        --volume "${bootstrap_dir}:/bootstrap" \
+        "$gateway_image" \
+        generate-certs \
+        --output-dir /bootstrap/output \
+        --server-san host.openshell.internal >/dev/null; then
+        print_error "Failed to create OpenShell sandbox JWT keys with ${gateway_image}."
+        print_error "Check that Docker is running and can pull the OpenShell gateway image, then retry."
+        rm -rf "$bootstrap_dir"
         exit 1
     fi
-    if resolved="$(command -v openssl 2>/dev/null)" && [ -n "$resolved" ]; then
-        candidates+=("$resolved")
-    fi
-    candidates+=(
-        /opt/homebrew/bin/openssl
-        /usr/local/bin/openssl
-        /usr/local/opt/openssl@3/bin/openssl
-        /opt/local/bin/openssl
-    )
 
-    for candidate in "${candidates[@]}"; do
-        [ -x "$candidate" ] || continue
-        if openssl_supports_ed25519 "$candidate"; then
-            printf '%s\n' "$candidate"
-            return 0
+    for name in signing.pem public.pem kid; do
+        if [ ! -s "${bootstrap_dir}/output/jwt/${name}" ]; then
+            print_error "OpenShell certificate bootstrap did not create jwt/${name}."
+            print_error "Check that ${gateway_image} supports the generate-certs command, then retry."
+            rm -rf "$bootstrap_dir"
+            exit 1
         fi
     done
 
-    print_error "An ED25519-capable OpenSSL is required to create OpenShell sandbox JWT keys."
-    print_error "Install OpenSSL 3, put it on PATH, or set OPENSSL_BIN=/path/to/openssl."
-    exit 1
+    mv "${bootstrap_dir}/output/jwt/signing.pem" "${jwt_dir}/signing.pem"
+    mv "${bootstrap_dir}/output/jwt/public.pem" "${jwt_dir}/public.pem"
+    mv "${bootstrap_dir}/output/jwt/kid" "${jwt_dir}/kid"
+    rm -rf "$bootstrap_dir"
+    chmod 600 "${jwt_dir}/signing.pem" 2>/dev/null || true
+    chmod 644 "${jwt_dir}/public.pem" "${jwt_dir}/kid" 2>/dev/null || true
 }
 
 function write_openshell_compose_config() {
     local gateway_dir="${MN_HOST_OPENSHELL_CONFIG_DIR}/gateways/openshell"
     local jwt_dir="${MN_HOST_OPENSHELL_STATE_DIR}/jwt"
-    local openssl_bin tmp_dir
     mkdir -p "$gateway_dir"
     mkdir -p "$jwt_dir"
     if [ ! -s "${jwt_dir}/signing.pem" ] || [ ! -s "${jwt_dir}/public.pem" ] || [ ! -s "${jwt_dir}/kid" ]; then
-        openssl_bin="$(resolve_ed25519_openssl)"
-        tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/mn-openshell-jwt.XXXXXX")"
-        if ! "$openssl_bin" genpkey -algorithm ED25519 -out "${tmp_dir}/signing.pem" >/dev/null; then
-            print_error "Failed to create OpenShell JWT signing key with ${openssl_bin}."
-            rm -rf "$tmp_dir"
-            exit 1
-        fi
-        if ! "$openssl_bin" pkey -in "${tmp_dir}/signing.pem" -pubout -out "${tmp_dir}/public.pem" >/dev/null; then
-            print_error "Failed to create OpenShell JWT public key with ${openssl_bin}."
-            rm -rf "$tmp_dir"
-            exit 1
-        fi
-        if ! "$openssl_bin" rand -hex 8 > "${tmp_dir}/kid"; then
-            print_error "Failed to create OpenShell JWT key id with ${openssl_bin}."
-            rm -rf "$tmp_dir"
-            exit 1
-        fi
-        mv "${tmp_dir}/signing.pem" "${jwt_dir}/signing.pem"
-        mv "${tmp_dir}/public.pem" "${jwt_dir}/public.pem"
-        mv "${tmp_dir}/kid" "${jwt_dir}/kid"
-        rm -rf "$tmp_dir"
-        chmod 600 "${jwt_dir}/signing.pem" 2>/dev/null || true
-        chmod 644 "${jwt_dir}/public.pem" "${jwt_dir}/kid" 2>/dev/null || true
+        generate_openshell_jwt_keys "$jwt_dir"
     fi
     printf 'openshell\n' > "${MN_HOST_OPENSHELL_CONFIG_DIR}/active_gateway"
     cat > "${gateway_dir}/metadata.json" <<EOF
