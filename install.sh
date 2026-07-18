@@ -4464,7 +4464,7 @@ MN_AGENTS_ROOT="${MN_AGENTS_ROOT:-}"
 PACKAGE_INDEX_FILE="${MN_PACKAGE_INDEX_FILE:-}"
 MN_GAR_PROJECT="${MN_GAR_PROJECT:-}"
 MN_GAR_LOCATION="${MN_GAR_LOCATION:-us-central1}"
-MN_GAR_REPOSITORY="${MN_GAR_REPOSITORY:-mirrorneuron-python}"
+MN_GAR_REPOSITORY="${MN_GAR_REPOSITORY:-agent-skills}"
 MN_DEFAULT_PIP_INDEX_URL="${MN_DEFAULT_PIP_INDEX_URL:-https://us-central1-python.pkg.dev/mirrorneuron-public-packages/agent-skills/simple/}"
 MN_PIP_INDEX_URL="${MN_PIP_INDEX_URL:-${MN_PYTHON_INDEX_URL:-}}"
 MN_PIP_EXTRA_INDEX_URL="${MN_PIP_EXTRA_INDEX_URL:-${MN_PYTHON_EXTRA_INDEX_URL:-https://pypi.org/simple}}"
@@ -4569,7 +4569,7 @@ Release/source options:
   --core-asset-url URL          Same as MN_CORE_ASSET_URL.
   --gar-project PROJECT         Same as MN_GAR_PROJECT. Overrides the default public package index.
   --gar-location LOCATION       Same as MN_GAR_LOCATION. Default: us-central1.
-  --gar-repository NAME         Same as MN_GAR_REPOSITORY. Default: mirrorneuron-python.
+  --gar-repository NAME         Same as MN_GAR_REPOSITORY. Default: agent-skills.
   --python-index-url URL        Same as MN_PIP_INDEX_URL. Default: ${MN_DEFAULT_PIP_INDEX_URL}
   --python-extra-index-url URL  Same as MN_PIP_EXTRA_INDEX_URL. Default: https://pypi.org/simple.
   --python PATH                 Same as MN_PYTHON. Must be Python 3.11+.
@@ -4587,8 +4587,8 @@ Examples:
   ./$script_name --version v1.2.27
   ./$script_name --interactive
   ./$script_name --no-web-ui --python-components sdk,api
-  ./$script_name --gar-project my-gcp-project --gar-repository mirrorneuron-python
-  ./$script_name --python-index-url https://us-central1-python.pkg.dev/my-gcp-project/mirrorneuron-python/simple/
+  ./$script_name --gar-project my-gcp-project --gar-repository agent-skills
+  ./$script_name --python-index-url https://us-central1-python.pkg.dev/my-gcp-project/agent-skills/simple/
   MN_PYTHON=/opt/homebrew/bin/python3.11 ./$script_name
   ./$script_name --version v1.2.27 --no-web-ui
   ./$script_name --core-version v1.2.27 --python-sdk-version v1.2.27 --cli-version v1.2.27 --api-version v1.2.27 --web-ui-version v1.2.27

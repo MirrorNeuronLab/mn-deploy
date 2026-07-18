@@ -5,7 +5,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT="${MN_GAR_PROJECT:-}"
 LOCATION="${MN_GAR_LOCATION:-us-central1}"
-REPOSITORY="${MN_GAR_REPOSITORY:-mirrorneuron-python}"
+REPOSITORY="${MN_GAR_REPOSITORY:-agent-skills}"
 VENV_DIR="${MN_GAR_PUBLISH_VENV:-${SCRIPT_DIR}/.venv-gar-publish}"
 PYTHON_BIN="${MN_GAR_SETUP_PYTHON:-python3}"
 
@@ -18,7 +18,7 @@ Prepare Google Artifact Registry for MirrorNeuron Python packages.
 Options:
   --project PROJECT       Google Cloud project ID. Env: MN_GAR_PROJECT.
   --location LOCATION     GAR location. Env: MN_GAR_LOCATION. Default: us-central1.
-  --repository NAME       GAR Python repository. Env: MN_GAR_REPOSITORY. Default: mirrorneuron-python.
+  --repository NAME       GAR Python repository. Env: MN_GAR_REPOSITORY. Default: agent-skills.
   --venv PATH             Local publishing venv. Env: MN_GAR_PUBLISH_VENV.
   --python PATH           Python used to create the publishing venv.
   -h, --help              Show this help.

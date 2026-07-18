@@ -7,7 +7,7 @@ WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 INDEX_FILE="${MN_PACKAGE_INDEX_FILE:-${SCRIPT_DIR}/package-index/python-packages.toml}"
 PROJECT="${MN_GAR_PROJECT:-}"
 LOCATION="${MN_GAR_LOCATION:-us-central1}"
-REPOSITORY="${MN_GAR_REPOSITORY:-mirrorneuron-python}"
+REPOSITORY="${MN_GAR_REPOSITORY:-agent-skills}"
 PUBLISH_VENV="${MN_GAR_PUBLISH_VENV:-${SCRIPT_DIR}/.venv-gar-publish}"
 if [ -x "${PUBLISH_VENV}/bin/python" ]; then
     PYTHON_BIN="${MN_PUBLISH_PYTHON:-${PUBLISH_VENV}/bin/python}"
@@ -34,7 +34,7 @@ Options:
   --no-prune             Upload packages without deleting unrelated GAR package names.
   --project PROJECT      Google Cloud project ID. Env: MN_GAR_PROJECT.
   --location LOCATION    GAR location. Env: MN_GAR_LOCATION. Default: us-central1.
-  --repository NAME      GAR Python repository. Env: MN_GAR_REPOSITORY. Default: mirrorneuron-python.
+  --repository NAME      GAR Python repository. Env: MN_GAR_REPOSITORY. Default: agent-skills.
   --index-file PATH      Local package index. Env: MN_PACKAGE_INDEX_FILE.
   --dist-dir PATH        Distribution output dir. Env: MN_PYTHON_DIST_DIR.
   --local-index-dir PATH Local PEP 503 simple index dir. Env: MN_LOCAL_PYTHON_INDEX_DIR.

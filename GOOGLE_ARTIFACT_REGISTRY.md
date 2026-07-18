@@ -5,14 +5,67 @@ This runbook publishes every package listed in
 index is the source of truth for publishable Python packages, including
 `mn-skills/*`, Membrane packages, and Synapse packages.
 
+Python distributions, Docker images, and generic release archives use
+different GAR repository formats. A single GAR repository cannot serve more
+than one of those formats.
+
 ## Current Registry
 
 - Project: `mirrorneuron-public-packages`
-- Repository: `agent-skills`
 - Location: `us-central1`
-- Repository format: Python
-- Public simple index:
+- `agent-skills` (Python): the current public simple index for all indexed
+  Python distributions:
   `https://us-central1-python.pkg.dev/mirrorneuron-public-packages/agent-skills/simple/`
+- `mirrorneuron-runtime` (Docker): the public runtime-image repository. The
+  Membrane engine must publish here as
+  `us-central1-docker.pkg.dev/mirrorneuron-public-packages/mirrorneuron-runtime/membrane-context-engine:<tag>`.
+- `mirrorneuron-binaries` (Generic): public binary release archives.
+
+The normal binary installer downloads the Python SDK, CLI, API, Membrane Python
+SDK, agents, and skills from `agent-skills`; it pulls the Membrane engine image
+from `mirrorneuron-runtime`. The Web UI is published to npm, and Core release
+archives are published through GitHub Releases.
+
+## Runtime Image Release Contract
+
+For release tag `v1.2.27`, the Membrane workflow publishes these immutable and
+convenience tags to the **Docker** `mirrorneuron-runtime` repository:
+
+```text
+us-central1-docker.pkg.dev/mirrorneuron-public-packages/mirrorneuron-runtime/membrane-context-engine:v1.2.27
+us-central1-docker.pkg.dev/mirrorneuron-public-packages/mirrorneuron-runtime/membrane-context-engine:1.2.27
+us-central1-docker.pkg.dev/mirrorneuron-public-packages/mirrorneuron-runtime/membrane-context-engine:latest
+```
+
+Binary installs select the release tag form (`:v1.2.27`). Do not point a
+runtime image at the Python `agent-skills` repository.
+
+Verify a published release with:
+
+```bash
+$HOME/google-cloud-sdk/bin/gcloud artifacts docker tags list \
+  us-central1-docker.pkg.dev/mirrorneuron-public-packages/mirrorneuron-runtime/membrane-context-engine \
+  --format='table(tag,version,updateTime)' \
+  --sort-by='~updateTime'
+```
+
+## Requested Python Namespace Split
+
+`mirrorneuron-runtime` already exists as a Docker repository, so GAR cannot
+also use that exact name for Python distributions. The proposed separate
+Python repositories are therefore:
+
+| Package family | Python GAR repository | Notes |
+| --- | --- | --- |
+| Core-adjacent runtime packages: `mirrorneuron-python-sdk`, `mirrorneuron-cli`, `mirrorneuron-api`, and the Membrane Python SDK | `mirrorneuron-runtime-python` | The Core executable itself remains a GitHub Release archive; the Membrane engine remains the Docker image in `mirrorneuron-runtime`. |
+| `mn-skills/*` packages | `mirrorneuron-skills` | Python repository. |
+| `mn-agents/*` packages | `mirrorneuron-agents` | Python repository. |
+
+This is a planned migration, not the current production layout. The installer
+and package index currently address the single `agent-skills` Python repository.
+Before creating or switching to the three repositories, update the publisher
+and installer to resolve an index entry's repository by package family, publish
+each group, and validate installs against all three public simple indexes.
 
 The repository is intended to be public read-only. The project has a
 project-level domain-restriction exception, and the repository IAM policy grants
