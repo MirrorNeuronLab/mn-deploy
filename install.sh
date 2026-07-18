@@ -9,7 +9,7 @@ MN_INSTALL_MODE="${MN_INSTALL_MODE:-binary}"
 MN_INSTALL_MODE_EXPLICIT="N"
 MN_INSTALL_HELP_REQUESTED="N"
 MN_INSTALL_VERBOSE="${MN_INSTALL_VERBOSE:-N}"
-LATEST="v1.2.25"
+LATEST="v1.2.27"
 MN_DEFAULT_INSTALL_VERSION="${MN_DEFAULT_INSTALL_VERSION:-$LATEST}"
 MN_INSTALL_VERSION="${MN_INSTALL_VERSION:-}"
 MN_INSTALL_SCRIPT_NAME="$(basename "$0")"
@@ -27,7 +27,7 @@ Modes:
   binary   Install released artifacts/packages. This is the default.
 
 Common options:
-  --version TAG                 Install this release version, for example v.1.2.25.
+  --version TAG                 Install this release version, for example v1.2.27.
   --yes, -y                     Run non-interactively with defaults and flags. This is the default.
   --interactive                 Ask each install question before proceeding.
   -v, --verbose                 Show installation details and command paths.
@@ -62,9 +62,9 @@ Examples:
   ./$MN_INSTALL_SCRIPT_NAME --interactive
   ./$MN_INSTALL_SCRIPT_NAME --mode github
   ./$MN_INSTALL_SCRIPT_NAME --mode local --no-web-ui --no-skills
-  ./$MN_INSTALL_SCRIPT_NAME --version v.1.2.25
-  ./$MN_INSTALL_SCRIPT_NAME --mode github --version v.1.2.25
-  ./$MN_INSTALL_SCRIPT_NAME --core-version v.1.2.25 --python-sdk-version v.1.2.25 --cli-version v.1.2.25 --api-version v.1.2.25 --web-ui-version v.1.2.25
+  ./$MN_INSTALL_SCRIPT_NAME --version v1.2.27
+  ./$MN_INSTALL_SCRIPT_NAME --mode github --version v1.2.27
+  ./$MN_INSTALL_SCRIPT_NAME --core-version v1.2.27 --python-sdk-version v1.2.27 --cli-version v1.2.27 --api-version v1.2.27 --web-ui-version v1.2.27
 EOF
 }
 
@@ -245,12 +245,36 @@ function mn_deduplicate_profile_line() {
     rm -f "$temporary_profile"
 }
 
+function mn_remove_profile_line() {
+    local profile="$1"
+    local target_line="$2"
+    local temporary_profile
+
+    [ -f "$profile" ] || return 0
+    grep -Fqx -- "$target_line" "$profile" 2>/dev/null || return 0
+
+    temporary_profile="$(mktemp "${profile}.mn.XXXXXX")"
+    if ! MN_PROFILE_TARGET_LINE="$target_line" awk '
+        $0 != ENVIRON["MN_PROFILE_TARGET_LINE"] { print }
+    ' "$profile" > "$temporary_profile"; then
+        rm -f "$temporary_profile"
+        return 1
+    fi
+    if ! cat "$temporary_profile" > "$profile"; then
+        rm -f "$temporary_profile"
+        return 1
+    fi
+    rm -f "$temporary_profile"
+}
+
 function mn_deduplicate_generated_profile_exports() {
     local profile="$1"
     local path_line="$2"
     local home_line="$3"
+    local legacy_path_line="$4"
 
     mn_deduplicate_profile_line "$profile" "# MN and OTTERDESK"
+    mn_remove_profile_line "$profile" "$legacy_path_line"
     mn_deduplicate_profile_line "$profile" "$path_line"
     mn_deduplicate_profile_line "$profile" "$home_line"
 }
@@ -263,6 +287,12 @@ function mn_print_next_shell_command() {
     else
         printf 'Next: %s\n' "$command_text" >&3
     fi
+}
+
+function mn_print_cli_verification_prompt() {
+    [ "${INSTALL_CLI:-N}" = "Y" ] || return 0
+
+    printf 'Next: Open a new terminal session, then run mn --help to confirm the CLI is available.\n' >&3
 }
 
 while [ "$#" -gt 0 ]; do
@@ -284,7 +314,7 @@ while [ "$#" -gt 0 ]; do
         --version)
             shift
             if [ "$#" -eq 0 ]; then
-                echo "install.sh: --version requires a release tag such as v.1.2.25." >&3
+                echo "install.sh: --version requires a release tag such as v1.2.27." >&3
                 print_unified_usage
                 exit 1
             fi
@@ -1063,7 +1093,7 @@ Options:
 
 Examples:
   ./$script_name --mode github --no-web-ui
-  ./$script_name --mode github --version v.1.2.25
+  ./$script_name --mode github --version v1.2.27
   ./$script_name --mode github --interactive
   ./$script_name --mode github --python-components sdk,api
   MN_PYTHON=/opt/homebrew/bin/python3.11 ./$script_name --mode github
@@ -1144,7 +1174,7 @@ while [ "$#" -gt 0 ]; do
         --version)
             shift
             if [ "$#" -eq 0 ]; then
-                print_error "--version requires a release tag such as v.1.2.25."
+                print_error "--version requires a release tag such as v1.2.27."
                 github_usage
                 exit 1
             fi
@@ -1908,7 +1938,7 @@ function write_runtime_compose_files() {
     runtime_skills_root="${MN_SKILLS_ROOT:-${MN_HOST_HOME_DIR}/skills}"
     runtime_agents_root="$(ensure_agent_catalog_root)"
     runtime_package_index="${MN_PACKAGE_INDEX_FILE:-}"
-    membrane_engine_tag="${MN_MEMBRANE_ENGINE_IMAGE_TAG:-${INSTALL_VERSION:-v${MN_PACKAGE_VERSION:-1.2.25}}}"
+    membrane_engine_tag="${MN_MEMBRANE_ENGINE_IMAGE_TAG:-${INSTALL_VERSION:-v${MN_PACKAGE_VERSION:-1.2.27}}}"
     if [[ "$membrane_engine_tag" != v* ]]; then
         membrane_engine_tag="v${membrane_engine_tag}"
     fi
@@ -2395,7 +2425,7 @@ function profile_has_bin_path() {
     local line
     while IFS= read -r line; do
         [[ "$line" =~ ^[[:space:]]*# ]] && continue
-        if [[ "$line" == *"PATH"* && "$line" == *"$BIN_DIR"* ]]; then
+        if [[ "$line" == *'PATH'* && "$line" == *'$MN_HOME/bin'* ]]; then
             return 0
         fi
     done < "$profile"
@@ -2438,26 +2468,27 @@ function ensure_shell_profile_exports() {
     shell_profile="$(mn_preferred_shell_profile)"
     local detected_profiles=("$shell_profile")
 
-    local profile path_line home_line wrote_header wrote_profile
-    path_line="export PATH=\"$BIN_DIR:\$PATH\""
+    local profile path_line legacy_path_line home_line wrote_header wrote_profile
     if [ "$INSTALL_DIR" = "$default_home" ]; then
         home_line='export MN_HOME="$HOME/.mn"'
     else
         home_line="export MN_HOME=$(shell_escape_value "$INSTALL_DIR")"
     fi
+    path_line='export PATH="$MN_HOME/bin:$PATH"'
+    legacy_path_line="export PATH=\"$BIN_DIR:\$PATH\""
 
     for profile in "${detected_profiles[@]}"; do
         wrote_header="N"
         wrote_profile="N"
-        mn_deduplicate_generated_profile_exports "$profile" "$path_line" "$home_line"
-        if [ "$needs_path" = "Y" ] && ! profile_has_bin_path "$profile"; then
-            [ "$wrote_header" = "N" ] && echo -e "\n# MN and OTTERDESK" >> "$profile" && wrote_header="Y"
-            echo "$path_line" >> "$profile"
-            wrote_profile="Y"
-        fi
+        mn_deduplicate_generated_profile_exports "$profile" "$path_line" "$home_line" "$legacy_path_line"
         if [ "$needs_runtime_home" = "Y" ] && ! profile_has_runtime_home "$profile"; then
             [ "$wrote_header" = "N" ] && echo -e "\n# MN and OTTERDESK" >> "$profile" && wrote_header="Y"
             echo "$home_line" >> "$profile"
+            wrote_profile="Y"
+        fi
+        if [ "$needs_path" = "Y" ] && ! profile_has_bin_path "$profile"; then
+            [ "$wrote_header" = "N" ] && echo -e "\n# MN and OTTERDESK" >> "$profile" && wrote_header="Y"
+            echo "$path_line" >> "$profile"
             wrote_profile="Y"
         fi
         if [ "$wrote_profile" = "Y" ]; then
@@ -2505,6 +2536,8 @@ if [ "$START_NOW" = "Y" ]; then
         fi
     fi
 fi
+
+mn_print_cli_verification_prompt
 }
 
 run_install_local() {
@@ -3758,7 +3791,7 @@ function write_runtime_compose_files() {
     runtime_skills_root="${MN_SKILLS_ROOT:-${MN_HOST_HOME_DIR}/skills}"
     runtime_agents_root="$(ensure_agent_catalog_root)"
     runtime_package_index="${MN_PACKAGE_INDEX_FILE:-}"
-    membrane_engine_tag="${MN_MEMBRANE_ENGINE_IMAGE_TAG:-${INSTALL_VERSION:-v${MN_PACKAGE_VERSION:-1.2.25}}}"
+    membrane_engine_tag="${MN_MEMBRANE_ENGINE_IMAGE_TAG:-${INSTALL_VERSION:-v${MN_PACKAGE_VERSION:-1.2.27}}}"
     if [[ "$membrane_engine_tag" != v* ]]; then
         membrane_engine_tag="v${membrane_engine_tag}"
     fi
@@ -4045,7 +4078,7 @@ function profile_has_bin_path() {
     local line
     while IFS= read -r line; do
         [[ "$line" =~ ^[[:space:]]*# ]] && continue
-        if [[ "$line" == *"PATH"* && "$line" == *"$BIN_DIR"* ]]; then
+        if [[ "$line" == *'PATH'* && "$line" == *'$MN_HOME/bin'* ]]; then
             return 0
         fi
     done < "$profile"
@@ -4088,26 +4121,27 @@ function ensure_shell_profile_exports() {
     shell_profile="$(mn_preferred_shell_profile)"
     local detected_profiles=("$shell_profile")
 
-    local profile path_line home_line wrote_header wrote_profile
-    path_line="export PATH=\"$BIN_DIR:\$PATH\""
+    local profile path_line legacy_path_line home_line wrote_header wrote_profile
     if [ "$INSTALL_DIR" = "$default_home" ]; then
         home_line='export MN_HOME="$HOME/.mn"'
     else
         home_line="export MN_HOME=$(shell_escape_value "$INSTALL_DIR")"
     fi
+    path_line='export PATH="$MN_HOME/bin:$PATH"'
+    legacy_path_line="export PATH=\"$BIN_DIR:\$PATH\""
 
     for profile in "${detected_profiles[@]}"; do
         wrote_header="N"
         wrote_profile="N"
-        mn_deduplicate_generated_profile_exports "$profile" "$path_line" "$home_line"
-        if [ "$needs_path" = "Y" ] && ! profile_has_bin_path "$profile"; then
-            [ "$wrote_header" = "N" ] && echo "" >> "$profile" && echo "# MN and OTTERDESK" >> "$profile" && wrote_header="Y"
-            echo "$path_line" >> "$profile"
-            wrote_profile="Y"
-        fi
+        mn_deduplicate_generated_profile_exports "$profile" "$path_line" "$home_line" "$legacy_path_line"
         if [ "$needs_runtime_home" = "Y" ] && ! profile_has_runtime_home "$profile"; then
             [ "$wrote_header" = "N" ] && echo "" >> "$profile" && echo "# MN and OTTERDESK" >> "$profile" && wrote_header="Y"
             echo "$home_line" >> "$profile"
+            wrote_profile="Y"
+        fi
+        if [ "$needs_path" = "Y" ] && ! profile_has_bin_path "$profile"; then
+            [ "$wrote_header" = "N" ] && echo "" >> "$profile" && echo "# MN and OTTERDESK" >> "$profile" && wrote_header="Y"
+            echo "$path_line" >> "$profile"
             wrote_profile="Y"
         fi
         if [ "$wrote_profile" = "Y" ]; then
@@ -4354,6 +4388,8 @@ if [ "$START_NOW" = "Y" ]; then
         fi
     fi
 fi
+
+mn_print_cli_verification_prompt
 }
 
 run_install_binary() {
@@ -4411,10 +4447,10 @@ PYTHON_SDK_INSTALL_VERSION="${MN_PYTHON_SDK_VERSION:-}"
 CLI_INSTALL_VERSION="${MN_CLI_VERSION:-}"
 API_INSTALL_VERSION="${MN_API_VERSION:-}"
 WEB_UI_INSTALL_VERSION="${MN_WEB_UI_VERSION:-}"
-DEFAULT_PYTHON_SDK_INSTALL_VERSION="${MN_DEFAULT_PYTHON_SDK_VERSION:-v1.2.25}"
-DEFAULT_CLI_INSTALL_VERSION="${MN_DEFAULT_CLI_VERSION:-v1.2.26}"
-DEFAULT_API_INSTALL_VERSION="${MN_DEFAULT_API_VERSION:-v1.2.25}"
-DEFAULT_WEB_UI_INSTALL_VERSION="${MN_DEFAULT_WEB_UI_VERSION:-v1.2.26}"
+DEFAULT_PYTHON_SDK_INSTALL_VERSION="${MN_DEFAULT_PYTHON_SDK_VERSION:-v1.2.27}"
+DEFAULT_CLI_INSTALL_VERSION="${MN_DEFAULT_CLI_VERSION:-v1.2.27}"
+DEFAULT_API_INSTALL_VERSION="${MN_DEFAULT_API_VERSION:-v1.2.27}"
+DEFAULT_WEB_UI_INSTALL_VERSION="${MN_DEFAULT_WEB_UI_VERSION:-v1.2.27}"
 CORE_ASSET_URL="${MN_CORE_ASSET_URL:-}"
 MN_PACKAGE_VERSION=""
 MN_PYTHON_SDK_PACKAGE_VERSION=""
@@ -4548,14 +4584,14 @@ Release/source options:
 
 Examples:
   ./$script_name --no-web-ui
-  ./$script_name --version v.1.2.25
+  ./$script_name --version v1.2.27
   ./$script_name --interactive
   ./$script_name --no-web-ui --python-components sdk,api
   ./$script_name --gar-project my-gcp-project --gar-repository mirrorneuron-python
   ./$script_name --python-index-url https://us-central1-python.pkg.dev/my-gcp-project/mirrorneuron-python/simple/
   MN_PYTHON=/opt/homebrew/bin/python3.11 ./$script_name
-  ./$script_name --version v.1.2.25 --no-web-ui
-  ./$script_name --core-version v.1.2.25 --python-sdk-version v.1.2.25 --cli-version v.1.2.25 --api-version v.1.2.25 --web-ui-version v.1.2.25
+  ./$script_name --version v1.2.27 --no-web-ui
+  ./$script_name --core-version v1.2.27 --python-sdk-version v1.2.27 --cli-version v1.2.27 --api-version v1.2.27 --web-ui-version v1.2.27
 EOF
 }
 
@@ -4636,7 +4672,7 @@ while [ "$#" -gt 0 ]; do
         --version)
             shift
             if [ "$#" -eq 0 ]; then
-                print_error "--version requires a release tag such as v.1.2.25."
+                print_error "--version requires a release tag such as v1.2.27."
                 usage
                 exit 1
             fi
@@ -4650,7 +4686,7 @@ while [ "$#" -gt 0 ]; do
         --core-version)
             shift
             if [ "$#" -eq 0 ]; then
-                print_error "--core-version requires a release tag such as v.1.2.25."
+                print_error "--core-version requires a release tag such as v1.2.27."
                 usage
                 exit 1
             fi
@@ -4662,7 +4698,7 @@ while [ "$#" -gt 0 ]; do
         --python-sdk-version)
             shift
             if [ "$#" -eq 0 ]; then
-                print_error "--python-sdk-version requires a release tag such as v.1.2.25."
+                print_error "--python-sdk-version requires a release tag such as v1.2.27."
                 usage
                 exit 1
             fi
@@ -4674,7 +4710,7 @@ while [ "$#" -gt 0 ]; do
         --cli-version)
             shift
             if [ "$#" -eq 0 ]; then
-                print_error "--cli-version requires a release tag such as v.1.2.25."
+                print_error "--cli-version requires a release tag such as v1.2.27."
                 usage
                 exit 1
             fi
@@ -4686,7 +4722,7 @@ while [ "$#" -gt 0 ]; do
         --api-version)
             shift
             if [ "$#" -eq 0 ]; then
-                print_error "--api-version requires a release tag such as v.1.2.25."
+                print_error "--api-version requires a release tag such as v1.2.27."
                 usage
                 exit 1
             fi
@@ -4698,7 +4734,7 @@ while [ "$#" -gt 0 ]; do
         --web-ui-version)
             shift
             if [ "$#" -eq 0 ]; then
-                print_error "--web-ui-version requires a release tag such as v.1.2.25."
+                print_error "--web-ui-version requires a release tag such as v1.2.27."
                 usage
                 exit 1
             fi
@@ -5309,7 +5345,7 @@ function resolve_core_release_tag() {
     if [ -z "$tag" ] || [ "$tag" = "$effective_url" ]; then
         local script_name="${MN_INSTALL_SCRIPT_NAME:-$(basename "$0")}"
         print_error "Could not resolve the latest MirrorNeuron release tag from $effective_url."
-        print_error "Set MN_CORE_RELEASE_TAG explicitly, for example: MN_CORE_RELEASE_TAG=v.1.2.25 ./$script_name"
+        print_error "Set MN_CORE_RELEASE_TAG explicitly, for example: MN_CORE_RELEASE_TAG=v1.2.27 ./$script_name"
         exit 1
     fi
 
@@ -6042,7 +6078,7 @@ function write_runtime_compose_files() {
     runtime_skills_root="${MN_SKILLS_ROOT:-${MN_HOST_HOME_DIR}/skills}"
     runtime_agents_root="${MN_AGENTS_ROOT:-}"
     runtime_package_index="${MN_PACKAGE_INDEX_FILE:-}"
-    membrane_engine_tag="${MN_MEMBRANE_ENGINE_IMAGE_TAG:-${INSTALL_VERSION:-v${MN_PACKAGE_VERSION:-1.2.25}}}"
+    membrane_engine_tag="${MN_MEMBRANE_ENGINE_IMAGE_TAG:-${INSTALL_VERSION:-v${MN_PACKAGE_VERSION:-1.2.27}}}"
     if [[ "$membrane_engine_tag" != v* ]]; then
         membrane_engine_tag="v${membrane_engine_tag}"
     fi
@@ -6326,7 +6362,7 @@ function profile_has_bin_path() {
     local line
     while IFS= read -r line; do
         [[ "$line" =~ ^[[:space:]]*# ]] && continue
-        if [[ "$line" == *"PATH"* && "$line" == *"$BIN_DIR"* ]]; then
+        if [[ "$line" == *'PATH'* && "$line" == *'$MN_HOME/bin'* ]]; then
             return 0
         fi
     done < "$profile"
@@ -6372,26 +6408,27 @@ function add_shell_profile_exports() {
     shell_profile="$(mn_preferred_shell_profile)"
     local detected_profiles=("$shell_profile")
 
-    local profile path_line home_line wrote_header wrote_profile
-    path_line="export PATH=\"$BIN_DIR:\$PATH\""
+    local profile path_line legacy_path_line home_line wrote_header wrote_profile
     if [ "$INSTALL_DIR" = "$default_home" ]; then
         home_line='export MN_HOME="$HOME/.mn"'
     else
         home_line="export MN_HOME=$(shell_escape_value "$INSTALL_DIR")"
     fi
+    path_line='export PATH="$MN_HOME/bin:$PATH"'
+    legacy_path_line="export PATH=\"$BIN_DIR:\$PATH\""
 
     for profile in "${detected_profiles[@]}"; do
         wrote_header="N"
         wrote_profile="N"
-        mn_deduplicate_generated_profile_exports "$profile" "$path_line" "$home_line"
-        if [ "$needs_path" = "Y" ] && ! profile_has_bin_path "$profile"; then
-            [ "$wrote_header" = "N" ] && echo -e "\n# MN and OTTERDESK" >> "$profile" && wrote_header="Y"
-            echo "$path_line" >> "$profile"
-            wrote_profile="Y"
-        fi
+        mn_deduplicate_generated_profile_exports "$profile" "$path_line" "$home_line" "$legacy_path_line"
         if [ "$needs_runtime_home" = "Y" ] && ! profile_has_runtime_home "$profile"; then
             [ "$wrote_header" = "N" ] && echo -e "\n# MN and OTTERDESK" >> "$profile" && wrote_header="Y"
             echo "$home_line" >> "$profile"
+            wrote_profile="Y"
+        fi
+        if [ "$needs_path" = "Y" ] && ! profile_has_bin_path "$profile"; then
+            [ "$wrote_header" = "N" ] && echo -e "\n# MN and OTTERDESK" >> "$profile" && wrote_header="Y"
+            echo "$path_line" >> "$profile"
             wrote_profile="Y"
         fi
         if [ "$wrote_profile" = "Y" ]; then
@@ -6527,6 +6564,7 @@ if [ "$INSTALL_CLI" = "Y" ]; then
         mn_print_next_shell_command "mn runtime start"
     fi
 fi
+mn_print_cli_verification_prompt
 }
 
 if [ "${#MN_INSTALL_ARGS[@]}" -eq 0 ]; then
