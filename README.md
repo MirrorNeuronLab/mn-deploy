@@ -75,6 +75,10 @@ Clear runtime Redis state:
 - The installer can set up the core, SDK, CLI, API, Web UI, Redis, and
   OpenShell depending on selected options. The Membrane context engine is
   provisioned lazily when a blueprint that requires context memory runs.
+- The Web UI is a Docker Compose service published on port `55173` by default;
+  installing it does not require npm on the host. Binary installs fetch the
+  selected `mirrorneuron-web-ui` package version inside the service, while
+  local installs mount and build the `mn-web-ui` checkout inside the service.
 - Installs are non-interactive by default and use yes/default selections. Use
   `--interactive` for the prompt-driven setup flow.
 - Use `./install.sh` or `./install.sh --mode binary` for release/package installs,

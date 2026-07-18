@@ -1,6 +1,147 @@
 name: mirror-neuron
 
 services:
+  web-ui:
+    image: ${MN_WEB_UI_IMAGE:-node:22-alpine}
+    container_name: mirror-neuron-web-ui
+    profiles:
+      - web-ui
+    restart: unless-stopped
+    working_dir: /work
+    environment:
+      MN_WEB_UI_SOURCE_MODE: ${MN_WEB_UI_SOURCE_MODE:-package}
+      MN_WEB_UI_PACKAGE_VERSION: ${MN_WEB_UI_PACKAGE_VERSION:-1.2.26}
+      MN_WEB_UI_API_HOST: ${MN_WEB_UI_API_HOST:-host.docker.internal}
+      MN_API_PORT: ${MN_API_PORT:-54001}
+      MN_WEB_UI_PORT: ${MN_WEB_UI_PORT:-55173}
+      MN_WEB_UI_SITE_DIR: /work/site
+      npm_config_cache: /root/.npm
+    ports:
+      - "${MN_WEB_UI_BIND_HOST:-127.0.0.1}:${MN_WEB_UI_PORT:-55173}:${MN_WEB_UI_PORT:-55173}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ${MN_WEB_UI_SOURCE_MOUNT:-./web-ui-source}:/mnt/mn-web-ui-source:ro
+      - web-ui-npm-cache:/root/.npm
+    command:
+      - /bin/sh
+      - -ec
+      - |
+          set -eu
+          workdir=/work
+          site_dir="$$MN_WEB_UI_SITE_DIR"
+          rm -rf "$$workdir/package" "$$workdir/source" "$$site_dir"
+          mkdir -p "$$site_dir"
+          if [ "$$MN_WEB_UI_SOURCE_MODE" = "source" ]; then
+            test -f /mnt/mn-web-ui-source/package.json
+            mkdir -p "$$workdir/source"
+            cp -a /mnt/mn-web-ui-source/. "$$workdir/source/"
+            cd "$$workdir/source"
+            if [ -f package-lock.json ]; then
+              npm ci
+            else
+              npm install
+            fi
+            npm run build
+            cp -a dist/. "$$site_dir/"
+          else
+            mkdir -p "$$workdir/package"
+            cd "$$workdir/package"
+            npm init -y >/dev/null 2>&1
+            npm install --omit=dev "mirrorneuron-web-ui@$$MN_WEB_UI_PACKAGE_VERSION"
+            cp -a node_modules/mirrorneuron-web-ui/dist/. "$$site_dir/"
+          fi
+          cat > "$$workdir/server.mjs" <<'NODE'
+          import http from "node:http";
+          import { createReadStream, existsSync, statSync } from "node:fs";
+          import { extname, join, relative, resolve } from "node:path";
+
+          const siteDir = resolve(process.env.MN_WEB_UI_SITE_DIR || "/work/site");
+          const apiHost = process.env.MN_WEB_UI_API_HOST || "host.docker.internal";
+          const apiPort = Number(process.env.MN_API_PORT || "54001");
+          const port = Number(process.env.MN_WEB_UI_PORT || "55173");
+          const contentTypes = {
+            ".css": "text/css; charset=utf-8",
+            ".html": "text/html; charset=utf-8",
+            ".ico": "image/x-icon",
+            ".js": "text/javascript; charset=utf-8",
+            ".json": "application/json; charset=utf-8",
+            ".map": "application/json; charset=utf-8",
+            ".png": "image/png",
+            ".svg": "image/svg+xml",
+            ".woff2": "font/woff2",
+          };
+
+          function serveFile(response, file) {
+            response.writeHead(200, {
+              "Content-Type": contentTypes[extname(file)] || "application/octet-stream",
+              "Cache-Control": file.endsWith("index.html") ? "no-cache" : "public, max-age=31536000, immutable",
+            });
+            createReadStream(file).pipe(response);
+          }
+
+          function proxyApi(request, response) {
+            const headers = { ...request.headers, host: apiHost + ":" + apiPort };
+            const upstream = http.request(
+              { hostname: apiHost, port: apiPort, path: request.url, method: request.method, headers },
+              (upstreamResponse) => {
+                response.writeHead(upstreamResponse.statusCode || 502, upstreamResponse.headers);
+                upstreamResponse.pipe(response);
+              },
+            );
+            upstream.on("error", (error) => {
+              if (!response.headersSent) {
+                response.writeHead(502, { "Content-Type": "application/json" });
+              }
+              response.end(JSON.stringify({ detail: "API proxy unavailable", error: error.message }));
+            });
+            request.pipe(upstream);
+          }
+
+          http.createServer((request, response) => {
+            const pathName = new URL(request.url || "/", "http://localhost").pathname;
+            if (pathName === "/health") {
+              response.writeHead(200, { "Content-Type": "application/json" });
+              response.end(JSON.stringify({ status: "ok", component: "web-ui" }));
+              return;
+            }
+            if (pathName === "/api" || pathName.startsWith("/api/")) {
+              proxyApi(request, response);
+              return;
+            }
+            let requested;
+            try {
+              requested = resolve(siteDir, "." + decodeURIComponent(pathName));
+            } catch {
+              response.writeHead(400);
+              response.end();
+              return;
+            }
+            if (relative(siteDir, requested).startsWith("..")) {
+              response.writeHead(403);
+              response.end();
+              return;
+            }
+            const file = existsSync(requested) && statSync(requested).isFile()
+              ? requested
+              : join(siteDir, "index.html");
+            serveFile(response, file);
+          }).listen(port, "0.0.0.0", () => {
+            console.log("MirrorNeuron Web UI listening on " + port);
+          });
+          NODE
+          exec node "$$workdir/server.mjs"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - node -e "fetch('http://127.0.0.1:' + process.env.MN_WEB_UI_PORT + '/health').then((response) => { if (!response.ok) process.exit(1) }).catch(() => process.exit(1))"
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 30s
+    networks:
+      - runtime
+
   redis:
     image: ${MN_REDIS_IMAGE:-redis:8}
     container_name: mirror-neuron-redis
@@ -389,3 +530,4 @@ networks:
 volumes:
   redis-data:
   context-debug:
+  web-ui-npm-cache:

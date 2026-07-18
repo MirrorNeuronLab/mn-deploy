@@ -87,7 +87,7 @@ function mn_package_version_from_tag() {
     printf '%s' "$version"
 }
 
-function mn_npm_version_from_tag() {
+function mn_web_ui_package_version_from_tag() {
     local tag="$1"
     printf '%s' "${tag#v}"
 }
@@ -831,6 +831,9 @@ RUNTIME_COMPOSE_TEMPLATE="${MN_RUNTIME_COMPOSE_TEMPLATE:-}"
 RUNTIME_COMPOSE_FILE="${INSTALL_DIR}/docker-compose.yml"
 RUNTIME_COMPOSE_ENV="${INSTALL_DIR}/docker-compose.env"
 LEGACY_UI_DIR="${INSTALL_DIR}_ui"
+MN_WEB_UI_SOURCE_MODE="${MN_WEB_UI_SOURCE_MODE:-source}"
+MN_WEB_UI_SOURCE_MOUNT="${MN_WEB_UI_SOURCE_MOUNT:-${INSTALL_DIR}/webui}"
+MN_WEB_UI_PACKAGE_VERSION="${MN_WEB_UI_PACKAGE_VERSION:-}"
 INSTALL_CONTEXT_ENGINE="N"
 MEMBRANE_REPO="${MN_MEMBRANE_REPO:-MirrorNeuronLab/Membrane}"
 MEMBRANE_GIT_URL="${MN_MEMBRANE_GIT_URL:-}"
@@ -880,7 +883,6 @@ INSTALL_VERSION="${MN_INSTALL_VERSION:-}"
 INSTALL_VERSION_EXPLICIT="N"
 [ -n "$INSTALL_VERSION" ] && INSTALL_VERSION_EXPLICIT="Y"
 MN_PACKAGE_VERSION=""
-MN_NPM_PACKAGE_VERSION=""
 CORE_REPO="${MN_CORE_REPO:-MirrorNeuronLab/MirrorNeuron}"
 SKILLS_REPO="${MN_SKILLS_REPO:-MirrorNeuronLab/mn-skills}"
 MN_SKILLS_GIT_URL="${MN_SKILLS_GIT_URL:-}"
@@ -1106,7 +1108,6 @@ function finalize_github_install_version() {
         MN_INSTALL_VERSION="$INSTALL_VERSION"
         CORE_RELEASE_TAG="$INSTALL_VERSION"
         MN_PACKAGE_VERSION="$(mn_package_version_from_tag "$INSTALL_VERSION")"
-        MN_NPM_PACKAGE_VERSION="$(mn_npm_version_from_tag "$INSTALL_VERSION")"
         RUNTIME_COMPOSE_TEMPLATE="${RUNTIME_COMPOSE_TEMPLATE:-${SCRIPT_DIR}/install_support/${INSTALL_VERSION}/docker-compose.yml}"
     else
         MN_INSTALL_VERSION=""
@@ -1310,6 +1311,7 @@ function setup_context_engine() {
 
 function compose_profiles() {
     local profiles=()
+    [ "$INSTALL_WEB_UI" = "Y" ] && profiles+=("web-ui")
     [ "$INSTALL_OPENSHELL" = "Y" ] && profiles+=("openshell")
     [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] && profiles+=("context")
     if [ "${#profiles[@]}" -eq 0 ]; then
@@ -1757,12 +1759,20 @@ function prepare_litellm_gateway_config() {
 }
 
 function write_runtime_compose_files() {
-    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_agents_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image litellm_gateway_bind_host openshell_gateway_bind_host
+    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_agents_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image litellm_gateway_bind_host openshell_gateway_bind_host api_host
     if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
         context_engine_source_dir >/dev/null
     fi
     model_runner_model="${MN_CONTEXT_MODEL_RUNNER_MODEL:-hf.co/homerquan/mn-context-engine-model-v-Q4_K_M}"
     profiles="$(compose_profiles)"
+    api_host="${MN_API_HOST:-}"
+    if [ -z "$api_host" ]; then
+        if [ "$INSTALL_WEB_UI" = "Y" ]; then
+            api_host="0.0.0.0"
+        else
+            api_host="localhost"
+        fi
+    fi
     litellm_gateway_bind_host="${MN_LITELLM_GATEWAY_BIND_HOST:-127.0.0.1}"
     if [ "${START_AS_WORKER:-N}" = "Y" ] && [ -z "${MN_LITELLM_GATEWAY_BIND_HOST:-}" ]; then
         litellm_gateway_bind_host="0.0.0.0"
@@ -1842,11 +1852,17 @@ MN_NATIVE_SDK_GRPC_PROXY_TARGET_PORT=${MN_NATIVE_SDK_GRPC_PROXY_TARGET_PORT:-${M
 MN_LITELLM_GATEWAY_BIND_HOST=${litellm_gateway_bind_host}
 MN_LITELLM_GATEWAY_PORT=${MN_LITELLM_GATEWAY_PORT:-4000}
 MN_LITELLM_GATEWAY_INTERNAL_API_BASE=${MN_LITELLM_GATEWAY_INTERNAL_API_BASE:-http://mn-litellm-proxy:4000/v1}
-MN_API_HOST=${MN_API_HOST:-localhost}
+MN_API_HOST=${api_host}
 MN_API_PORT=${MN_API_PORT:-54001}
 MN_DIST_PORT=${MN_DIST_PORT:-54370}
 MN_WEB_UI_HOST=${MN_WEB_UI_HOST:-localhost}
 MN_WEB_UI_PORT=${MN_WEB_UI_PORT:-55173}
+MN_WEB_UI_BIND_HOST=${MN_WEB_UI_BIND_HOST:-127.0.0.1}
+MN_WEB_UI_IMAGE=${MN_WEB_UI_IMAGE:-node:22-alpine}
+MN_WEB_UI_SOURCE_MODE=${MN_WEB_UI_SOURCE_MODE}
+MN_WEB_UI_SOURCE_MOUNT=${MN_WEB_UI_SOURCE_MOUNT}
+MN_WEB_UI_PACKAGE_VERSION=${MN_WEB_UI_PACKAGE_VERSION}
+MN_WEB_UI_API_HOST=${MN_WEB_UI_API_HOST:-host.docker.internal}
 MN_BLUEPRINT_WEB_UI_BIND_HOST=${MN_BLUEPRINT_WEB_UI_BIND_HOST:-0.0.0.0}
 MN_BLUEPRINT_WEB_UI_PUBLIC_HOST=${MN_BLUEPRINT_WEB_UI_PUBLIC_HOST:-localhost}
 MN_BLUEPRINT_WEB_UI_PORT_START=${MN_BLUEPRINT_WEB_UI_PORT_START:-61000}
@@ -1919,6 +1935,7 @@ function runtime_compose() {
 function runtime_container_name_for_service() {
     case "$1" in
         redis) echo "mirror-neuron-redis" ;;
+        web-ui) echo "mirror-neuron-web-ui" ;;
         openshell) echo "openshell-cluster-openshell" ;;
         context-engine-model) echo "mirror-neuron-context-engine-model" ;;
         membrane-context-engine) echo "mirror-neuron-context-engine" ;;
@@ -1949,6 +1966,7 @@ function remove_stale_runtime_containers_for_services() {
         name="$(runtime_container_name_for_service "$service" || true)"
         [ -n "$name" ] && remove_stale_runtime_container "$name"
     done
+    return 0
 }
 
 function ensure_docker_model_runner() {
@@ -2012,6 +2030,7 @@ function ensure_docker_model_runner() {
 function start_runtime_compose_sidecars() {
     local services=()
     [ "$INSTALL_REDIS" = "Y" ] && services+=("redis")
+    [ "$INSTALL_WEB_UI" = "Y" ] && services+=("web-ui")
     grep -q '^  mn-native-sdk-grpc:' "$RUNTIME_COMPOSE_FILE" 2>/dev/null && services+=("mn-native-sdk-grpc")
     grep -q '^  mn-litellm-proxy:' "$RUNTIME_COMPOSE_FILE" 2>/dev/null && services+=("mn-litellm-proxy")
     [ "$INSTALL_OPENSHELL" = "Y" ] && services+=("openshell")
@@ -2070,10 +2089,6 @@ require_cmd docker
 configure_github_git_auth
 if should_install_python_packages; then
     resolve_python_runtime
-fi
-
-if [ "$INSTALL_WEB_UI" = "Y" ]; then
-    require_cmd npm
 fi
 
 if ! docker info >/dev/null 2>&1; then
@@ -2179,7 +2194,7 @@ function require_github_command_targets() {
 }
 
 if [ "$INSTALL_WEB_UI" = "Y" ]; then
-    print_step "Installing Web UI"
+    print_step "Preparing Web UI source for Docker Compose"
     if [ -z "${INSTALL_VERSION:-}" ] && [ -n "$SOURCE_WORKSPACE" ] && [ -d "$SOURCE_WORKSPACE/mn-web-ui" ]; then
         print_detail "Using local Web UI source: $SOURCE_WORKSPACE/mn-web-ui"
     fi
@@ -2187,27 +2202,19 @@ if [ "$INSTALL_WEB_UI" = "Y" ]; then
         UI_DIR="${INSTALL_DIR}/webui"
         rm -rf "$LEGACY_UI_DIR"
         if [ -z "${INSTALL_VERSION:-}" ] && [ -n "$SOURCE_WORKSPACE" ] && [ -d "$SOURCE_WORKSPACE/mn-web-ui" ]; then
-            cd "$SOURCE_WORKSPACE/mn-web-ui"
-            run_quiet "web-ui-npm-install-local" npm install
-            run_quiet "web-ui-npm-build-local" npm run build
             rm -rf "$UI_DIR"
             ln -s "$SOURCE_WORKSPACE/mn-web-ui" "$UI_DIR"
         elif [ -d "$UI_DIR" ]; then
             cd "$UI_DIR"
             github_checkout_existing
-            run_quiet "web-ui-npm-install-existing" npm install
-            run_quiet "web-ui-npm-build-existing" npm run build
         else
             run_quiet "web-ui-git-clone" github_clone https://github.com/MirrorNeuronLab/mn-web-ui.git "$UI_DIR"
-            cd "$UI_DIR"
-            run_quiet "web-ui-npm-install-github" npm install
-            run_quiet "web-ui-npm-build-github" npm run build
         fi
     ) &
-    spinner $! "Cloning and building Web UI (React)"
+    spinner $! "Preparing Web UI source"
 fi
 
-if [ "$INSTALL_REDIS" = "Y" ] || [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] || [ "$INSTALL_OPENSHELL" = "Y" ]; then
+if [ "$INSTALL_REDIS" = "Y" ] || [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] || [ "$INSTALL_OPENSHELL" = "Y" ] || [ "$INSTALL_WEB_UI" = "Y" ]; then
     print_step "Setting up Docker runtime services with Compose"
     if [ "$INSTALL_OPENSHELL" = "Y" ]; then
         install_openshell_cli
@@ -2341,7 +2348,7 @@ else
     print_detail "Start the server: mn runtime start"
 fi
 if [ "$INSTALL_WEB_UI" = "Y" ]; then
-    print_detail "Start the Web UI: cd ${INSTALL_DIR}/webui && npm run dev"
+    print_detail "Web UI: http://localhost:${MN_WEB_UI_PORT:-55173}"
 fi
 if [ "$INSTALL_CLI" = "Y" ]; then
     printf 'Next: mn node list\n' >&3
@@ -2412,6 +2419,9 @@ CLI_DIR="${WORKSPACE_DIR}/mn-cli"
 API_DIR="${WORKSPACE_DIR}/mn-api"
 PY_SDK_DIR="${WORKSPACE_DIR}/mn-python-sdk"
 WEB_UI_DIR="${WORKSPACE_DIR}/mn-web-ui"
+MN_WEB_UI_SOURCE_MODE="${MN_WEB_UI_SOURCE_MODE:-source}"
+MN_WEB_UI_SOURCE_MOUNT="${MN_WEB_UI_SOURCE_MOUNT:-${WEB_UI_DIR}}"
+MN_WEB_UI_PACKAGE_VERSION="${MN_WEB_UI_PACKAGE_VERSION:-}"
 SKILLS_DIR="${WORKSPACE_DIR}/mn-skills"
 AGENTS_DIR="${WORKSPACE_DIR}/mn-agents"
 BLUEPRINT_SUPPORT_SKILL_DIR="${SKILLS_DIR}/blueprint_support_skill"
@@ -2717,8 +2727,8 @@ Options:
   --yes                 Run non-interactively with defaults. This is the default.
   --interactive         Ask each install question before proceeding.
   -v, --verbose         Show installation details and command paths.
-  --web-ui              Enable local Web UI npm install/build.
-  --no-web-ui           Skip local Web UI npm install/build.
+  --web-ui              Enable the local-source Web UI Compose service.
+  --no-web-ui           Skip the local-source Web UI Compose service.
   --redis               Enable Redis Docker setup.
   --no-redis            Skip Redis Docker setup.
   --context-engine      Install/start Membrane context engine.
@@ -3408,6 +3418,7 @@ function setup_context_engine() {
 
 function compose_profiles() {
     local profiles=()
+    [ "$INSTALL_WEB_UI" = "Y" ] && profiles+=("web-ui")
     [ "$INSTALL_OPENSHELL" = "Y" ] && profiles+=("openshell")
     [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] && profiles+=("context")
     if [ "${#profiles[@]}" -eq 0 ]; then
@@ -3600,9 +3611,17 @@ function prepare_litellm_gateway_config() {
 }
 
 function write_runtime_compose_files() {
-    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_agents_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image litellm_gateway_bind_host openshell_gateway_bind_host
+    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_agents_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image litellm_gateway_bind_host openshell_gateway_bind_host api_host
     model_runner_model="${MN_CONTEXT_MODEL_RUNNER_MODEL:-hf.co/homerquan/mn-context-engine-model-v-Q4_K_M}"
     profiles="$(compose_profiles)"
+    api_host="${MN_API_HOST:-}"
+    if [ -z "$api_host" ]; then
+        if [ "$INSTALL_WEB_UI" = "Y" ]; then
+            api_host="0.0.0.0"
+        else
+            api_host="localhost"
+        fi
+    fi
     litellm_gateway_bind_host="${MN_LITELLM_GATEWAY_BIND_HOST:-127.0.0.1}"
     if [ "${START_AS_WORKER:-N}" = "Y" ] && [ -z "${MN_LITELLM_GATEWAY_BIND_HOST:-}" ]; then
         litellm_gateway_bind_host="0.0.0.0"
@@ -3682,11 +3701,17 @@ MN_NATIVE_SDK_GRPC_PROXY_TARGET_PORT=${MN_NATIVE_SDK_GRPC_PROXY_TARGET_PORT:-${M
 MN_LITELLM_GATEWAY_BIND_HOST=${litellm_gateway_bind_host}
 MN_LITELLM_GATEWAY_PORT=${MN_LITELLM_GATEWAY_PORT:-4000}
 MN_LITELLM_GATEWAY_INTERNAL_API_BASE=${MN_LITELLM_GATEWAY_INTERNAL_API_BASE:-http://mn-litellm-proxy:4000/v1}
-MN_API_HOST=${MN_API_HOST:-localhost}
+MN_API_HOST=${api_host}
 MN_API_PORT=${MN_API_PORT:-54001}
 MN_DIST_PORT=${MN_DIST_PORT:-54370}
 MN_WEB_UI_HOST=${MN_WEB_UI_HOST:-localhost}
 MN_WEB_UI_PORT=${MN_WEB_UI_PORT:-55173}
+MN_WEB_UI_BIND_HOST=${MN_WEB_UI_BIND_HOST:-127.0.0.1}
+MN_WEB_UI_IMAGE=${MN_WEB_UI_IMAGE:-node:22-alpine}
+MN_WEB_UI_SOURCE_MODE=${MN_WEB_UI_SOURCE_MODE}
+MN_WEB_UI_SOURCE_MOUNT=${MN_WEB_UI_SOURCE_MOUNT}
+MN_WEB_UI_PACKAGE_VERSION=${MN_WEB_UI_PACKAGE_VERSION}
+MN_WEB_UI_API_HOST=${MN_WEB_UI_API_HOST:-host.docker.internal}
 MN_BLUEPRINT_WEB_UI_BIND_HOST=${MN_BLUEPRINT_WEB_UI_BIND_HOST:-0.0.0.0}
 MN_BLUEPRINT_WEB_UI_PUBLIC_HOST=${MN_BLUEPRINT_WEB_UI_PUBLIC_HOST:-localhost}
 MN_BLUEPRINT_WEB_UI_PORT_START=${MN_BLUEPRINT_WEB_UI_PORT_START:-61000}
@@ -3759,6 +3784,7 @@ function runtime_compose() {
 function runtime_container_name_for_service() {
     case "$1" in
         redis) echo "mirror-neuron-redis" ;;
+        web-ui) echo "mirror-neuron-web-ui" ;;
         openshell) echo "openshell-cluster-openshell" ;;
         context-engine-model) echo "mirror-neuron-context-engine-model" ;;
         membrane-context-engine) echo "mirror-neuron-context-engine" ;;
@@ -3789,6 +3815,7 @@ function remove_stale_runtime_containers_for_services() {
         name="$(runtime_container_name_for_service "$service" || true)"
         [ -n "$name" ] && remove_stale_runtime_container "$name"
     done
+    return 0
 }
 
 function ensure_docker_model_runner() {
@@ -3852,6 +3879,7 @@ function ensure_docker_model_runner() {
 function start_runtime_compose_sidecars() {
     local services=()
     [ "$INSTALL_REDIS" = "Y" ] && services+=("redis")
+    [ "$INSTALL_WEB_UI" = "Y" ] && services+=("web-ui")
     grep -q '^  mn-native-sdk-grpc:' "$RUNTIME_COMPOSE_FILE" 2>/dev/null && services+=("mn-native-sdk-grpc")
     grep -q '^  mn-litellm-proxy:' "$RUNTIME_COMPOSE_FILE" 2>/dev/null && services+=("mn-litellm-proxy")
     [ "$INSTALL_OPENSHELL" = "Y" ] && services+=("openshell")
@@ -3993,9 +4021,6 @@ print_step "Checking dependencies"
 require_cmd docker
 resolve_python_runtime
 
-if [ "$INSTALL_WEB_UI" = "Y" ]; then
-    require_cmd npm
-fi
 if [ "$INSTALL_OPENSHELL" = "Y" ] && ! command -v openshell >/dev/null 2>&1; then
     require_cmd curl
 fi
@@ -4112,13 +4137,7 @@ fi
 trap - EXIT
 
 if [ "$INSTALL_WEB_UI" = "Y" ]; then
-    print_step "Installing Web UI from local source"
-    (
-        cd "$WEB_UI_DIR"
-        run_quiet "web-ui-npm-install-local" npm install
-        run_quiet "web-ui-npm-build-local" npm run build
-    ) &
-    spinner $! "Installed and built local Web UI"
+    print_step "Preparing local Web UI source for Docker Compose"
     if [ -e "$LEGACY_UI_LINK_DIR" ] || [ -L "$LEGACY_UI_LINK_DIR" ]; then
         rm -rf "$LEGACY_UI_LINK_DIR"
     fi
@@ -4129,7 +4148,7 @@ if [ "$INSTALL_WEB_UI" = "Y" ]; then
     replace_symlink "$WEB_UI_DIR" "$INSTALL_DIR/web-ui-source"
 fi
 
-if [ "$INSTALL_REDIS" = "Y" ] || [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] || [ "$INSTALL_OPENSHELL" = "Y" ]; then
+if [ "$INSTALL_REDIS" = "Y" ] || [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] || [ "$INSTALL_OPENSHELL" = "Y" ] || [ "$INSTALL_WEB_UI" = "Y" ]; then
     print_step "Setting up Docker runtime services with Compose"
     if [ "$INSTALL_OPENSHELL" = "Y" ]; then
         install_openshell_cli
@@ -4163,7 +4182,7 @@ print_detail "CLI/API: editable installs from the local workspace"
 print_detail "State: ${INSTALL_DIR}"
 print_detail "Cookie: ${INSTALL_DIR}/erlang.cookie"
 if [ "$INSTALL_WEB_UI" = "Y" ]; then
-    print_detail "Web UI: ${UI_LINK_DIR} -> ${WEB_UI_DIR}"
+    print_detail "Web UI source: ${WEB_UI_DIR} (built inside Docker Compose)"
 fi
 if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
     print_detail "Membrane: ${MEMBRANE_DIR} (${MN_CONTEXT_ADDR:-localhost:50052})"
@@ -4175,7 +4194,7 @@ else
     print_detail "Start the server: mn runtime start"
 fi
 if [ "$INSTALL_WEB_UI" = "Y" ]; then
-    print_detail "Start the Web UI: cd ${UI_LINK_DIR} && npm run dev"
+    print_detail "Web UI: http://localhost:${MN_WEB_UI_PORT:-55173}"
 fi
 printf 'Next: mn node list\n' >&3
 print_detail "Rebuild after Elixir changes: ${SCRIPT_DIR}/install.sh --mode local --no-web-ui --no-skills"
@@ -4238,8 +4257,10 @@ SCRIPT_DIR="$(mn_script_dir)"
 INSTALL_DIR="${MN_HOME:-${HOME}/.mn}"
 BIN_DIR="${HOME}/.local/bin"
 VENV_DIR="${HOME}/.local/share/mn_venv"
-UI_DIR="${INSTALL_DIR}/webui"
 LEGACY_UI_DIR="${INSTALL_DIR}_ui"
+MN_WEB_UI_SOURCE_MODE="${MN_WEB_UI_SOURCE_MODE:-package}"
+MN_WEB_UI_SOURCE_MOUNT="${MN_WEB_UI_SOURCE_MOUNT:-${INSTALL_DIR}/web-ui-source}"
+MN_WEB_UI_PACKAGE_VERSION="${MN_WEB_UI_PACKAGE_VERSION:-}"
 RUNTIME_COMPOSE_TEMPLATE="${MN_RUNTIME_COMPOSE_TEMPLATE:-}"
 RUNTIME_COMPOSE_FILE="${INSTALL_DIR}/docker-compose.yml"
 RUNTIME_COMPOSE_ENV="${INSTALL_DIR}/docker-compose.env"
@@ -4262,7 +4283,6 @@ MN_PACKAGE_VERSION=""
 MN_PYTHON_SDK_PACKAGE_VERSION=""
 MN_CLI_PACKAGE_VERSION=""
 MN_API_PACKAGE_VERSION=""
-MN_WEB_UI_NPM_PACKAGE_VERSION=""
 SKILLS_REPO="${MN_SKILLS_REPO:-MirrorNeuronLab/mn-skills}"
 MEMBRANE_REPO="${MN_MEMBRANE_REPO:-MirrorNeuronLab/Membrane}"
 MEMBRANE_GIT_URL="${MN_MEMBRANE_GIT_URL:-}"
@@ -4355,7 +4375,7 @@ Options:
   --interactive                 Ask each install question before proceeding.
   -v, --verbose                 Show installation details and command paths.
   --no-reinstall                Keep an existing install instead of overwriting it.
-  --web-ui / --no-web-ui        Enable or skip the Web UI npm package.
+  --web-ui / --no-web-ui        Enable or skip the Web UI Compose service.
   --redis / --no-redis          Enable or skip Redis Docker setup.
   --context-engine / --no-context-engine
                                 Enable or skip Membrane context engine setup.
@@ -4774,7 +4794,7 @@ function finalize_binary_install_version() {
     MN_CLI_PACKAGE_VERSION="$(mn_package_version_from_tag "$CLI_INSTALL_VERSION")"
     MN_API_PACKAGE_VERSION="$(mn_package_version_from_tag "$API_INSTALL_VERSION")"
     MN_PACKAGE_VERSION="$MN_PYTHON_SDK_PACKAGE_VERSION"
-    MN_WEB_UI_NPM_PACKAGE_VERSION="$(mn_npm_version_from_tag "$WEB_UI_INSTALL_VERSION")"
+    MN_WEB_UI_PACKAGE_VERSION="${MN_WEB_UI_PACKAGE_VERSION:-$(mn_web_ui_package_version_from_tag "$WEB_UI_INSTALL_VERSION")}"
     RUNTIME_COMPOSE_TEMPLATE="${RUNTIME_COMPOSE_TEMPLATE:-${SCRIPT_DIR}/install_support/${INSTALL_VERSION}/docker-compose.yml}"
     PACKAGE_INDEX_FILE="${PACKAGE_INDEX_FILE:-${SCRIPT_DIR}/install_support/${INSTALL_VERSION}/package-index/python-packages.toml}"
     export MN_INSTALL_VERSION
@@ -5574,6 +5594,7 @@ function setup_context_engine() {
 
 function compose_profiles() {
     local profiles=()
+    [ "$INSTALL_WEB_UI" = "Y" ] && profiles+=("web-ui")
     [ "$INSTALL_OPENSHELL" = "Y" ] && profiles+=("openshell")
     [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] && profiles+=("context")
     if [ "${#profiles[@]}" -eq 0 ]; then
@@ -6021,9 +6042,17 @@ function prepare_litellm_gateway_config() {
 }
 
 function write_runtime_compose_files() {
-    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_agents_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image litellm_gateway_bind_host openshell_gateway_bind_host
+    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_agents_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image litellm_gateway_bind_host openshell_gateway_bind_host api_host
     model_runner_model="${MN_CONTEXT_MODEL_RUNNER_MODEL:-hf.co/homerquan/mn-context-engine-model-v-Q4_K_M}"
     profiles="$(compose_profiles)"
+    api_host="${MN_API_HOST:-}"
+    if [ -z "$api_host" ]; then
+        if [ "$INSTALL_WEB_UI" = "Y" ]; then
+            api_host="0.0.0.0"
+        else
+            api_host="localhost"
+        fi
+    fi
     litellm_gateway_bind_host="${MN_LITELLM_GATEWAY_BIND_HOST:-127.0.0.1}"
     if [ "${START_AS_WORKER:-N}" = "Y" ] && [ -z "${MN_LITELLM_GATEWAY_BIND_HOST:-}" ]; then
         litellm_gateway_bind_host="0.0.0.0"
@@ -6103,11 +6132,17 @@ MN_NATIVE_SDK_GRPC_PROXY_TARGET_PORT=${MN_NATIVE_SDK_GRPC_PROXY_TARGET_PORT:-${M
 MN_LITELLM_GATEWAY_BIND_HOST=${litellm_gateway_bind_host}
 MN_LITELLM_GATEWAY_PORT=${MN_LITELLM_GATEWAY_PORT:-4000}
 MN_LITELLM_GATEWAY_INTERNAL_API_BASE=${MN_LITELLM_GATEWAY_INTERNAL_API_BASE:-http://mn-litellm-proxy:4000/v1}
-MN_API_HOST=${MN_API_HOST:-localhost}
+MN_API_HOST=${api_host}
 MN_API_PORT=${MN_API_PORT:-54001}
 MN_DIST_PORT=${MN_DIST_PORT:-54370}
 MN_WEB_UI_HOST=${MN_WEB_UI_HOST:-localhost}
 MN_WEB_UI_PORT=${MN_WEB_UI_PORT:-55173}
+MN_WEB_UI_BIND_HOST=${MN_WEB_UI_BIND_HOST:-127.0.0.1}
+MN_WEB_UI_IMAGE=${MN_WEB_UI_IMAGE:-node:22-alpine}
+MN_WEB_UI_SOURCE_MODE=${MN_WEB_UI_SOURCE_MODE}
+MN_WEB_UI_SOURCE_MOUNT=${MN_WEB_UI_SOURCE_MOUNT}
+MN_WEB_UI_PACKAGE_VERSION=${MN_WEB_UI_PACKAGE_VERSION}
+MN_WEB_UI_API_HOST=${MN_WEB_UI_API_HOST:-host.docker.internal}
 MN_BLUEPRINT_WEB_UI_BIND_HOST=${MN_BLUEPRINT_WEB_UI_BIND_HOST:-0.0.0.0}
 MN_BLUEPRINT_WEB_UI_PUBLIC_HOST=${MN_BLUEPRINT_WEB_UI_PUBLIC_HOST:-localhost}
 MN_BLUEPRINT_WEB_UI_PORT_START=${MN_BLUEPRINT_WEB_UI_PORT_START:-61000}
@@ -6180,6 +6215,7 @@ function runtime_compose() {
 function runtime_container_name_for_service() {
     case "$1" in
         redis) echo "mirror-neuron-redis" ;;
+        web-ui) echo "mirror-neuron-web-ui" ;;
         openshell) echo "openshell-cluster-openshell" ;;
         context-engine-model) echo "mirror-neuron-context-engine-model" ;;
         membrane-context-engine) echo "mirror-neuron-context-engine" ;;
@@ -6210,6 +6246,7 @@ function remove_stale_runtime_containers_for_services() {
         name="$(runtime_container_name_for_service "$service" || true)"
         [ -n "$name" ] && remove_stale_runtime_container "$name"
     done
+    return 0
 }
 
 function ensure_docker_model_runner() {
@@ -6273,6 +6310,7 @@ function ensure_docker_model_runner() {
 function start_runtime_compose_sidecars() {
     local services=()
     [ "$INSTALL_REDIS" = "Y" ] && services+=("redis")
+    [ "$INSTALL_WEB_UI" = "Y" ] && services+=("web-ui")
     grep -q '^  mn-native-sdk-grpc:' "$RUNTIME_COMPOSE_FILE" 2>/dev/null && services+=("mn-native-sdk-grpc")
     grep -q '^  mn-litellm-proxy:' "$RUNTIME_COMPOSE_FILE" 2>/dev/null && services+=("mn-litellm-proxy")
     [ "$INSTALL_OPENSHELL" = "Y" ] && services+=("openshell")
@@ -6290,52 +6328,6 @@ function start_runtime_compose_sidecars() {
             reconcile_openshell_gateway_bind_host "${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
         fi
     fi
-}
-
-function install_web_ui_package() {
-    rm -rf "$LEGACY_UI_DIR"
-    rm -rf "$UI_DIR"
-    mkdir -p "$UI_DIR"
-
-    cat > "$UI_DIR/package.json" <<EOF
-{
-  "name": "mirrorneuron-web-ui-installed",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "dev": "vite --host ${MN_WEB_UI_HOST:-localhost}"
-  },
-  "dependencies": {
-    "@vitejs/plugin-react": "^6.0.1",
-    "vite": "^8.0.4",
-    "mirrorneuron-web-ui": "${MN_WEB_UI_NPM_PACKAGE_VERSION}"
-  },
-  "devDependencies": {}
-}
-EOF
-
-    cat > "$UI_DIR/vite.config.mjs" <<'EOF'
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
-
-const apiHost = process.env.MN_API_HOST || 'localhost'
-const apiPort = process.env.MN_API_PORT || '54001'
-
-export default defineConfig({
-  plugins: [react()],
-  server: {
-    proxy: {
-      '/api': {
-        target: `http://${apiHost}:${apiPort}`,
-        changeOrigin: true,
-      }
-    }
-  }
-})
-EOF
-
-    run_quiet "web-ui-npm-install" npm --prefix "$UI_DIR" install
-    cp -R "$UI_DIR/node_modules/mirrorneuron-web-ui/dist/." "$UI_DIR/"
 }
 
 function shell_escape_value() {
@@ -6431,7 +6423,7 @@ function add_shell_profile_exports() {
 print_header
 
 if [ "$NON_INTERACTIVE" != "Y" ]; then
-    INSTALL_WEB_UI=$(ask "Do you want to install the Web UI from npm?" "$INSTALL_WEB_UI")
+    INSTALL_WEB_UI=$(ask "Do you want to enable the Web UI Compose service?" "$INSTALL_WEB_UI")
     INSTALL_REDIS=$(ask "Do you want to install Redis via Docker?" "$INSTALL_REDIS")
     INSTALL_CONTEXT_ENGINE=$(ask "Do you want to install/start the Membrane context engine?" "$INSTALL_CONTEXT_ENGINE")
     INSTALL_OPENSHELL=$(ask "Do you want to install/start the OpenShell gateway for sandbox workers?" "$INSTALL_OPENSHELL")
@@ -6456,10 +6448,6 @@ if should_install_python_packages; then
 fi
 if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] || [ -z "${MN_AGENTS_ROOT:-}" ]; then
     require_cmd git
-fi
-
-if [ "$INSTALL_WEB_UI" = "Y" ]; then
-    require_cmd npm
 fi
 
 if ! docker info >/dev/null 2>&1; then
@@ -6494,12 +6482,11 @@ else
 fi
 
 if [ "$INSTALL_WEB_UI" = "Y" ]; then
-    print_step "Installing Web UI"
-    ( install_web_ui_package ) &
-    spinner $! "Installing Web UI package"
+    print_step "Preparing Web UI package for Docker Compose"
+    mkdir -p "$MN_WEB_UI_SOURCE_MOUNT"
 fi
 
-if [ "$INSTALL_REDIS" = "Y" ] || [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] || [ "$INSTALL_OPENSHELL" = "Y" ]; then
+if [ "$INSTALL_REDIS" = "Y" ] || [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] || [ "$INSTALL_OPENSHELL" = "Y" ] || [ "$INSTALL_WEB_UI" = "Y" ]; then
     print_step "Preparing services"
     if [ "$INSTALL_OPENSHELL" = "Y" ]; then
         install_openshell_cli
