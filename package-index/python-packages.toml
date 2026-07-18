@@ -29,7 +29,7 @@ binary_default = true
 name = "mirrorneuron-membrane-python-sdk"
 path = "Membrane/mn-context-engine-python-sdk"
 publish_group = "membrane"
-version = "1.2.25"
+version = "1.2.27"
 installer_groups = ["membrane-runtime"]
 binary_default = true
 build_formats = ["wheel"]
@@ -51,10 +51,26 @@ installer_groups = ["membrane-tools"]
 binary_default = false
 
 [[packages]]
+name = "mirrorneuron-actor-review-skill"
+path = "mn-skills/actor_review_skill"
+publish_group = "skill"
+version = "1.2.27"
+installer_groups = ["skill"]
+binary_default = false
+
+[[packages]]
+name = "mirrorneuron-autonomous-research-skill"
+path = "mn-skills/autonomous_research_skill"
+publish_group = "skill"
+version = "1.2.27"
+installer_groups = ["skill"]
+binary_default = false
+
+[[packages]]
 name = "mirrorneuron-blueprint-support-skill"
 path = "mn-skills/blueprint_support_skill"
 publish_group = "skill"
-version = "1.2.25"
+version = "1.2.27"
 installer_groups = ["skill", "blueprint-support"]
 default_extras = ["webui"]
 binary_default = true
@@ -63,7 +79,7 @@ binary_default = true
 name = "mirrorneuron-client-report-skill"
 path = "mn-skills/client_report_skill"
 publish_group = "skill"
-version = "1.2.25"
+version = "1.2.27"
 installer_groups = ["skill"]
 binary_default = false
 
@@ -79,7 +95,15 @@ binary_default = false
 name = "mirrorneuron-document-reading-skill"
 path = "mn-skills/document_reading_skill"
 publish_group = "skill"
-version = "1.2.25"
+version = "1.2.27"
+installer_groups = ["skill"]
+binary_default = false
+
+[[packages]]
+name = "mirrorneuron-evidence-engine-skill"
+path = "mn-skills/evidence_engine_skill"
+publish_group = "skill"
+version = "1.2.27"
 installer_groups = ["skill"]
 binary_default = false
 
@@ -143,7 +167,7 @@ binary_default = false
 name = "mirrorneuron-litellm-communicate-skill"
 path = "mn-skills/litellm_communicate_skill"
 publish_group = "skill"
-version = "1.2.25"
+version = "1.2.27"
 installer_groups = ["skill"]
 binary_default = false
 
@@ -151,7 +175,7 @@ binary_default = false
 name = "mirrorneuron-llm-ocr-skill"
 path = "mn-skills/llm_ocr_skill"
 publish_group = "skill"
-version = "1.2.25"
+version = "1.2.27"
 installer_groups = ["skill"]
 binary_default = false
 
@@ -204,10 +228,26 @@ installer_groups = ["skill"]
 binary_default = false
 
 [[packages]]
+name = "mirrorneuron-public-research-orchestrator-skill"
+path = "mn-skills/public_research_orchestrator_skill"
+publish_group = "skill"
+version = "1.2.27"
+installer_groups = ["skill"]
+binary_default = false
+
+[[packages]]
 name = "mirrorneuron-rag-skill"
 path = "mn-skills/rag_skill"
 publish_group = "skill"
-version = "1.2.25"
+version = "1.2.27"
+installer_groups = ["skill"]
+binary_default = false
+
+[[packages]]
+name = "mirrorneuron-scoring-framework-skill"
+path = "mn-skills/scoring_framework_skill"
+publish_group = "skill"
+version = "1.2.27"
 installer_groups = ["skill"]
 binary_default = false
 
@@ -248,7 +288,15 @@ binary_default = false
 name = "mirrorneuron-web-browser-skill"
 path = "mn-skills/web_browser_skill"
 publish_group = "skill"
-version = "1.2.25"
+version = "1.2.27"
+installer_groups = ["skill"]
+binary_default = false
+
+[[packages]]
+name = "mirrorneuron-w3m-browser-skill"
+path = "mn-skills/w3m_browser_skill"
+publish_group = "skill"
+version = "1.2.27"
 installer_groups = ["skill"]
 binary_default = false
 
@@ -256,7 +304,7 @@ binary_default = false
 name = "mirrorneuron-websocket-stream-skill"
 path = "mn-skills/websocket_stream_skill"
 publish_group = "skill"
-version = "1.2.25"
+version = "1.2.27"
 installer_groups = ["skill"]
 binary_default = false
 
@@ -329,7 +377,7 @@ binary_default = false
 name = "mn-prototype-stateful-step-agent"
 path = "mn-agents/prototype_stateful_step_agent"
 publish_group = "agent"
-version = "1.2.25"
+version = "1.2.27"
 installer_groups = ["agent"]
 binary_default = false
 
@@ -337,7 +385,7 @@ binary_default = false
 name = "mn-prototype-entity-queue-agent"
 path = "mn-agents/prototype_entity_queue_agent"
 publish_group = "agent"
-version = "1.2.25"
+version = "1.2.27"
 installer_groups = ["agent"]
 binary_default = false
 
@@ -345,7 +393,7 @@ binary_default = false
 name = "mn-prototype-bounded-tool-loop-agent"
 path = "mn-agents/prototype_bounded_tool_loop_agent"
 publish_group = "agent"
-version = "1.2.25"
+version = "1.2.27"
 installer_groups = ["agent"]
 binary_default = false
 
@@ -353,7 +401,7 @@ binary_default = false
 name = "mn-prototype-actor-review-agent"
 path = "mn-agents/prototype_actor_review_agent"
 publish_group = "agent"
-version = "1.2.25"
+version = "1.2.27"
 installer_groups = ["agent"]
 binary_default = false
 
@@ -361,7 +409,7 @@ binary_default = false
 name = "mn-prototype-artifact-finalizer-agent"
 path = "mn-agents/prototype_artifact_finalizer_agent"
 publish_group = "agent"
-version = "1.2.25"
+version = "1.2.27"
 installer_groups = ["agent"]
 binary_default = false
 
@@ -369,7 +417,7 @@ binary_default = false
 name = "mn-prototype-supervised-service-agent"
 path = "mn-agents/prototype_supervised_service_agent"
 publish_group = "agent"
-version = "1.2.25"
+version = "1.2.27"
 installer_groups = ["agent"]
 binary_default = false
 
@@ -377,6 +425,6 @@ binary_default = false
 name = "mn-prototype-stream-processor-agent"
 path = "mn-agents/prototype_stream_processor_agent"
 publish_group = "agent"
-version = "1.2.25"
+version = "1.2.27"
 installer_groups = ["agent"]
 binary_default = false
