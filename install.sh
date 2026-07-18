@@ -4392,7 +4392,7 @@ fi
 
 SCRIPT_DIR="$(mn_script_dir)"
 INSTALL_DIR="${MN_HOME:-${HOME}/.mn}"
-BIN_DIR="${HOME}/.local/bin"
+BIN_DIR="${INSTALL_DIR}/bin"
 VENV_DIR="${HOME}/.local/share/mn_venv"
 LEGACY_UI_DIR="${INSTALL_DIR}_ui"
 MN_WEB_UI_SOURCE_MODE="${MN_WEB_UI_SOURCE_MODE:-package}"
@@ -6482,7 +6482,6 @@ mkdir -p "$BIN_DIR" "$INSTALL_DIR"
 rm -f "$BIN_DIR/mn" "$BIN_DIR/mn-api" "$INSTALL_DIR/mn"
 if [ "$INSTALL_CLI" = "Y" ]; then
     ln -s "$VENV_DIR/bin/mn" "$BIN_DIR/mn"
-    ln -s "$VENV_DIR/bin/mn" "$INSTALL_DIR/mn"
 fi
 if [ "$INSTALL_API" = "Y" ]; then
     ln -s "$VENV_DIR/bin/mn-api" "$BIN_DIR/mn-api"

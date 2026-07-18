@@ -109,6 +109,7 @@ INSTALL_DIR="${MN_HOME:-${HOME}/.mn}"
 UI_DIR="${INSTALL_DIR}/webui"
 LEGACY_UI_DIR="${INSTALL_DIR}_ui"
 BIN_DIR="${HOME}/.local/bin"
+RUNTIME_BIN_DIR="${INSTALL_DIR}/bin"
 VENV_DIR="${HOME}/.local/share/mn_venv"
 
 if command -v docker >/dev/null 2>&1 && [ -f "$INSTALL_DIR/docker-compose.yml" ]; then
@@ -122,8 +123,8 @@ if command -v docker >/dev/null 2>&1 && [ -f "$INSTALL_DIR/docker-compose.yml" ]
 fi
 
 print_step "Removing Symlinks"
-rm -f "$BIN_DIR/mn" "$BIN_DIR/mn-api"
-print_success "Removed mn and mn-api symlinks from $BIN_DIR"
+rm -f "$BIN_DIR/mn" "$BIN_DIR/mn-api" "$RUNTIME_BIN_DIR/mn" "$RUNTIME_BIN_DIR/mn-api"
+print_success "Removed mn and mn-api command links."
 
 print_step "Removing Python Virtual Environment"
 if [ -d "$VENV_DIR" ]; then
