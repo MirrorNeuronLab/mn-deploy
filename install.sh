@@ -130,6 +130,58 @@ function mn_wait_for_docker_model_runner() {
     return 1
 }
 
+function mn_resolve_docker_host_socket() {
+    local context_host=""
+
+    case "${DOCKER_HOST:-}" in
+        unix://*)
+            printf '%s\n' "${DOCKER_HOST#unix://}"
+            return 0
+            ;;
+    esac
+
+    if command -v docker >/dev/null 2>&1; then
+        context_host="$(docker context inspect --format '{{.Endpoints.docker.Host}}' 2>/dev/null | head -n 1 || true)"
+        case "$context_host" in
+            unix://*)
+                printf '%s\n' "${context_host#unix://}"
+                return 0
+                ;;
+        esac
+    fi
+
+    if [ "$(uname -s)" = "Darwin" ]; then
+        printf '%s/.docker/run/docker.sock\n' "$HOME"
+    else
+        printf '/var/run/docker.sock\n'
+    fi
+}
+
+function mn_report_docker_daemon_failure() {
+    if docker info >/dev/null 2>&1; then
+        return 0
+    fi
+
+    print_error "Docker stopped responding during installation."
+    if [ "$(uname -s)" = "Darwin" ]; then
+        print_error "Restart Docker Desktop and rerun install.sh; the installer is safe to retry."
+        print_error "If Docker reports a containerd/bbolt assertion, collect diagnostics before resetting Docker data."
+    else
+        print_error "Restart the Docker daemon and rerun install.sh; the installer is safe to retry."
+    fi
+}
+
+function mn_run_docker_build() {
+    local status
+    if docker build "$@"; then
+        return 0
+    else
+        status=$?
+    fi
+    mn_report_docker_daemon_failure
+    return "$status"
+}
+
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --mode)
@@ -853,13 +905,7 @@ MN_SYNCTHING_SYNC_PORT="${MN_SYNCTHING_SYNC_PORT:-22000}"
 MN_HOST_OPENSHELL_CONFIG_DIR="${OPENSHELL_CONTAINER_CONFIG_DIR:-${HOME}/.config/openshell-mirror-neuron}"
 MN_HOST_OPENSHELL_STATE_DIR="${MN_HOST_OPENSHELL_STATE_DIR:-${INSTALL_DIR}/openshell-state}"
 OPENSHELL_GATEWAY_USER="${OPENSHELL_GATEWAY_USER:-$(id -u):$(id -g)}"
-if [ -z "${DOCKER_HOST_SOCKET:-}" ]; then
-    if [ -S "${HOME}/.docker/run/docker.sock" ]; then
-        DOCKER_HOST_SOCKET="${HOME}/.docker/run/docker.sock"
-    else
-        DOCKER_HOST_SOCKET="/var/run/docker.sock"
-    fi
-fi
+DOCKER_HOST_SOCKET="${DOCKER_HOST_SOCKET:-$(mn_resolve_docker_host_socket)}"
 if [ -z "${OPENSHELL_GATEWAY_DOCKER_GROUP:-}" ] && [ "$(uname -s)" = "Darwin" ]; then
     OPENSHELL_GATEWAY_DOCKER_GROUP="0"
 elif [ -z "${OPENSHELL_GATEWAY_DOCKER_GROUP:-}" ] && [ -S "${DOCKER_HOST_SOCKET}" ]; then
@@ -1906,6 +1952,7 @@ OPENSHELL_GATEWAY_BIND_HOST=${openshell_gateway_bind_host}
 OPENSHELL_GATEWAY_USER=${OPENSHELL_GATEWAY_USER}
 OPENSHELL_GATEWAY_DOCKER_GROUP=${OPENSHELL_GATEWAY_DOCKER_GROUP}
 DOCKER_HOST_SOCKET=${DOCKER_HOST_SOCKET}
+COMPOSE_PARALLEL_LIMIT=${COMPOSE_PARALLEL_LIMIT:-1}
 MN_COOKIE=${mn_cookie}
 MN_GRPC_AUTH_TOKEN=mirror_neuron_password
 MN_GRPC_ADMIN_TOKEN=mirror_neuron_password_admin
@@ -1914,11 +1961,22 @@ EOF
 }
 
 function runtime_compose() {
+    local status
     if command -v docker-compose >/dev/null 2>&1; then
-        docker-compose --env-file "$RUNTIME_COMPOSE_ENV" -f "$RUNTIME_COMPOSE_FILE" "$@"
+        if COMPOSE_PARALLEL_LIMIT="${COMPOSE_PARALLEL_LIMIT:-1}" docker-compose --env-file "$RUNTIME_COMPOSE_ENV" -f "$RUNTIME_COMPOSE_FILE" "$@"; then
+            return 0
+        else
+            status=$?
+        fi
     else
-        docker compose --env-file "$RUNTIME_COMPOSE_ENV" -f "$RUNTIME_COMPOSE_FILE" "$@"
+        if COMPOSE_PARALLEL_LIMIT="${COMPOSE_PARALLEL_LIMIT:-1}" docker compose --env-file "$RUNTIME_COMPOSE_ENV" -f "$RUNTIME_COMPOSE_FILE" "$@"; then
+            return 0
+        else
+            status=$?
+        fi
     fi
+    mn_report_docker_daemon_failure
+    return "$status"
 }
 
 function runtime_container_name_for_service() {
@@ -2136,7 +2194,7 @@ CMD ["mix", "run", "--no-halt"]
 EOF
     fi
 
-    DOCKER_BUILDKIT="${DOCKER_BUILDKIT:-1}" docker build -t mirror-neuron-core . >/dev/null 2>&1
+    DOCKER_BUILDKIT="${DOCKER_BUILDKIT:-1}" mn_run_docker_build -t mirror-neuron-core . >/dev/null 2>&1
 ) &
 spinner $! "Cloning and building Core (Docker image mirror-neuron-core)"
 write_runtime_compose_files
@@ -2432,13 +2490,7 @@ MN_SYNCTHING_SYNC_PORT="${MN_SYNCTHING_SYNC_PORT:-22000}"
 MN_HOST_OPENSHELL_CONFIG_DIR="${OPENSHELL_CONTAINER_CONFIG_DIR:-${HOME}/.config/openshell-mirror-neuron}"
 MN_HOST_OPENSHELL_STATE_DIR="${MN_HOST_OPENSHELL_STATE_DIR:-${INSTALL_DIR}/openshell-state}"
 OPENSHELL_GATEWAY_USER="${OPENSHELL_GATEWAY_USER:-$(id -u):$(id -g)}"
-if [ -z "${DOCKER_HOST_SOCKET:-}" ]; then
-    if [ -S "${HOME}/.docker/run/docker.sock" ]; then
-        DOCKER_HOST_SOCKET="${HOME}/.docker/run/docker.sock"
-    else
-        DOCKER_HOST_SOCKET="/var/run/docker.sock"
-    fi
-fi
+DOCKER_HOST_SOCKET="${DOCKER_HOST_SOCKET:-$(mn_resolve_docker_host_socket)}"
 if [ -z "${OPENSHELL_GATEWAY_DOCKER_GROUP:-}" ] && [ "$(uname -s)" = "Darwin" ]; then
     OPENSHELL_GATEWAY_DOCKER_GROUP="0"
 elif [ -z "${OPENSHELL_GATEWAY_DOCKER_GROUP:-}" ] && [ -S "${DOCKER_HOST_SOCKET}" ]; then
@@ -3745,6 +3797,7 @@ OPENSHELL_GATEWAY_BIND_HOST=${openshell_gateway_bind_host}
 OPENSHELL_GATEWAY_USER=${OPENSHELL_GATEWAY_USER}
 OPENSHELL_GATEWAY_DOCKER_GROUP=${OPENSHELL_GATEWAY_DOCKER_GROUP}
 DOCKER_HOST_SOCKET=${DOCKER_HOST_SOCKET}
+COMPOSE_PARALLEL_LIMIT=${COMPOSE_PARALLEL_LIMIT:-1}
 MN_COOKIE=${mn_cookie}
 MN_GRPC_AUTH_TOKEN=mirror_neuron_password
 MN_GRPC_ADMIN_TOKEN=mirror_neuron_password_admin
@@ -3753,11 +3806,22 @@ EOF
 }
 
 function runtime_compose() {
+    local status
     if command -v docker-compose >/dev/null 2>&1; then
-        docker-compose --env-file "$RUNTIME_COMPOSE_ENV" -f "$RUNTIME_COMPOSE_FILE" "$@"
+        if COMPOSE_PARALLEL_LIMIT="${COMPOSE_PARALLEL_LIMIT:-1}" docker-compose --env-file "$RUNTIME_COMPOSE_ENV" -f "$RUNTIME_COMPOSE_FILE" "$@"; then
+            return 0
+        else
+            status=$?
+        fi
     else
-        docker compose --env-file "$RUNTIME_COMPOSE_ENV" -f "$RUNTIME_COMPOSE_FILE" "$@"
+        if COMPOSE_PARALLEL_LIMIT="${COMPOSE_PARALLEL_LIMIT:-1}" docker compose --env-file "$RUNTIME_COMPOSE_ENV" -f "$RUNTIME_COMPOSE_FILE" "$@"; then
+            return 0
+        else
+            status=$?
+        fi
     fi
+    mn_report_docker_daemon_failure
+    return "$status"
 }
 
 function runtime_container_name_for_service() {
@@ -4040,7 +4104,7 @@ print_detail "Local component links: ${INSTALL_DIR}"
 print_step "Building MirrorNeuron Core Docker image from local source"
 (
     cd "$CORE_DIR"
-    DOCKER_BUILDKIT="${DOCKER_BUILDKIT:-1}" docker build -t mirror-neuron-core:latest .
+    DOCKER_BUILDKIT="${DOCKER_BUILDKIT:-1}" mn_run_docker_build -t mirror-neuron-core:latest .
 )
 print_detail "Built local core image: mirror-neuron-core:latest"
 
@@ -4284,13 +4348,7 @@ MN_SYNCTHING_SYNC_PORT="${MN_SYNCTHING_SYNC_PORT:-22000}"
 MN_HOST_OPENSHELL_CONFIG_DIR="${OPENSHELL_CONTAINER_CONFIG_DIR:-${HOME}/.config/openshell-mirror-neuron}"
 MN_HOST_OPENSHELL_STATE_DIR="${MN_HOST_OPENSHELL_STATE_DIR:-${INSTALL_DIR}/openshell-state}"
 OPENSHELL_GATEWAY_USER="${OPENSHELL_GATEWAY_USER:-$(id -u):$(id -g)}"
-if [ -z "${DOCKER_HOST_SOCKET:-}" ]; then
-    if [ -S "${HOME}/.docker/run/docker.sock" ]; then
-        DOCKER_HOST_SOCKET="${HOME}/.docker/run/docker.sock"
-    else
-        DOCKER_HOST_SOCKET="/var/run/docker.sock"
-    fi
-fi
+DOCKER_HOST_SOCKET="${DOCKER_HOST_SOCKET:-$(mn_resolve_docker_host_socket)}"
 if [ -z "${OPENSHELL_GATEWAY_DOCKER_GROUP:-}" ] && [ "$(uname -s)" = "Darwin" ]; then
     OPENSHELL_GATEWAY_DOCKER_GROUP="0"
 elif [ -z "${OPENSHELL_GATEWAY_DOCKER_GROUP:-}" ] && [ -S "${DOCKER_HOST_SOCKET}" ]; then
@@ -5245,7 +5303,7 @@ EXPOSE 50051 4369 54370
 CMD ["bin/mirror_neuron", "start"]
 EOF
 
-    DOCKER_BUILDKIT="${DOCKER_BUILDKIT:-1}" docker build --build-arg "CORE_RELEASE_TAG=$tag" -t mirror-neuron-core:latest "$context_dir" >/dev/null
+    DOCKER_BUILDKIT="${DOCKER_BUILDKIT:-1}" mn_run_docker_build --build-arg "CORE_RELEASE_TAG=$tag" -t mirror-neuron-core:latest "$context_dir" >/dev/null
     cat > "$INSTALL_METADATA_FILE" <<EOF
 {
   "core_release_tag": "$tag",
@@ -6016,6 +6074,7 @@ OPENSHELL_GATEWAY_BIND_HOST=${openshell_gateway_bind_host}
 OPENSHELL_GATEWAY_USER=${OPENSHELL_GATEWAY_USER}
 OPENSHELL_GATEWAY_DOCKER_GROUP=${OPENSHELL_GATEWAY_DOCKER_GROUP}
 DOCKER_HOST_SOCKET=${DOCKER_HOST_SOCKET}
+COMPOSE_PARALLEL_LIMIT=${COMPOSE_PARALLEL_LIMIT:-1}
 MN_COOKIE=${mn_cookie}
 MN_GRPC_AUTH_TOKEN=mirror_neuron_password
 MN_GRPC_ADMIN_TOKEN=mirror_neuron_password_admin
@@ -6024,11 +6083,22 @@ EOF
 }
 
 function runtime_compose() {
+    local status
     if command -v docker-compose >/dev/null 2>&1; then
-        docker-compose --env-file "$RUNTIME_COMPOSE_ENV" -f "$RUNTIME_COMPOSE_FILE" "$@"
+        if COMPOSE_PARALLEL_LIMIT="${COMPOSE_PARALLEL_LIMIT:-1}" docker-compose --env-file "$RUNTIME_COMPOSE_ENV" -f "$RUNTIME_COMPOSE_FILE" "$@"; then
+            return 0
+        else
+            status=$?
+        fi
     else
-        docker compose --env-file "$RUNTIME_COMPOSE_ENV" -f "$RUNTIME_COMPOSE_FILE" "$@"
+        if COMPOSE_PARALLEL_LIMIT="${COMPOSE_PARALLEL_LIMIT:-1}" docker compose --env-file "$RUNTIME_COMPOSE_ENV" -f "$RUNTIME_COMPOSE_FILE" "$@"; then
+            return 0
+        else
+            status=$?
+        fi
     fi
+    mn_report_docker_daemon_failure
+    return "$status"
 }
 
 function runtime_container_name_for_service() {
