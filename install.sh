@@ -5482,16 +5482,6 @@ network_name = "${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
 EOF
 }
 
-function install_openshell_cli() {
-    if command -v openshell >/dev/null 2>&1; then
-        return 0
-    fi
-    local installer="${TMPDIR:-/tmp}/mirror_neuron_openshell_install.sh"
-    curl_github -fLsS https://raw.githubusercontent.com/NVIDIA/OpenShell/main/install.sh -o "$installer"
-    OPENSHELL_VERSION="${OPENSHELL_VERSION:-v0.0.47}" sh "$installer" >/dev/null
-    rm -f "$installer"
-}
-
 function generate_mn_secret() {
     local secret
     local python_fallback="${MN_PYTHON_BIN:-}"
@@ -6241,9 +6231,6 @@ fi
 
 if [ "$INSTALL_REDIS" = "Y" ] || [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] || [ "$INSTALL_OPENSHELL" = "Y" ] || [ "$INSTALL_WEB_UI" = "Y" ]; then
     print_step "Preparing services"
-    if [ "$INSTALL_OPENSHELL" = "Y" ]; then
-        install_openshell_cli
-    fi
     ( start_runtime_compose_sidecars ) &
     spinner $! "Runtime services ready"
 fi
