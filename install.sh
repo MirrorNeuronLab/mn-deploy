@@ -1691,6 +1691,29 @@ function reconcile_openshell_gateway_bind_host() {
     runtime_compose up -d --force-recreate openshell >/dev/null
 }
 
+function wait_for_openshell_worker_service() {
+    local network_name="${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
+    local gateway_endpoint="http://openshell:${OPENSHELL_GATEWAY_PORT:-58080}"
+    local attempt=1
+
+    while [ "$attempt" -le 30 ]; do
+        if docker run --rm \
+            --network "$network_name" \
+            --entrypoint openshell \
+            mirror-neuron-core:latest \
+            --gateway-endpoint "$gateway_endpoint" \
+            sandbox list >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 1
+        attempt=$((attempt + 1))
+    done
+
+    print_error "OpenShell worker service did not become ready at ${gateway_endpoint}."
+    print_error "Next: docker logs openshell-cluster-openshell"
+    return 1
+}
+
 function ensure_runtime_host_directory() {
     local path="$1"
     local description="$2"
@@ -2015,6 +2038,7 @@ function start_runtime_compose_sidecars() {
         runtime_compose up -d "${services[@]}" >/dev/null
         if [ "$INSTALL_OPENSHELL" = "Y" ]; then
             reconcile_openshell_gateway_bind_host "${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
+            wait_for_openshell_worker_service
         fi
     fi
 }
@@ -3509,6 +3533,29 @@ function reconcile_openshell_gateway_bind_host() {
     runtime_compose up -d --force-recreate openshell >/dev/null
 }
 
+function wait_for_openshell_worker_service() {
+    local network_name="${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
+    local gateway_endpoint="http://openshell:${OPENSHELL_GATEWAY_PORT:-58080}"
+    local attempt=1
+
+    while [ "$attempt" -le 30 ]; do
+        if docker run --rm \
+            --network "$network_name" \
+            --entrypoint openshell \
+            mirror-neuron-core:latest \
+            --gateway-endpoint "$gateway_endpoint" \
+            sandbox list >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 1
+        attempt=$((attempt + 1))
+    done
+
+    print_error "OpenShell worker service did not become ready at ${gateway_endpoint}."
+    print_error "Next: docker logs openshell-cluster-openshell"
+    return 1
+}
+
 function ensure_runtime_host_directory() {
     local path="$1"
     local description="$2"
@@ -3830,6 +3877,7 @@ function start_runtime_compose_sidecars() {
         runtime_compose up -d "${services[@]}"
         if [ "$INSTALL_OPENSHELL" = "Y" ]; then
             reconcile_openshell_gateway_bind_host "${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
+            wait_for_openshell_worker_service
         fi
     fi
 }
@@ -5756,6 +5804,29 @@ function reconcile_openshell_gateway_bind_host() {
     runtime_compose up -d --force-recreate openshell >/dev/null
 }
 
+function wait_for_openshell_worker_service() {
+    local network_name="${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
+    local gateway_endpoint="http://openshell:${OPENSHELL_GATEWAY_PORT:-58080}"
+    local attempt=1
+
+    while [ "$attempt" -le 30 ]; do
+        if docker run --rm \
+            --network "$network_name" \
+            --entrypoint openshell \
+            mirror-neuron-core:latest \
+            --gateway-endpoint "$gateway_endpoint" \
+            sandbox list >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 1
+        attempt=$((attempt + 1))
+    done
+
+    print_error "OpenShell worker service did not become ready at ${gateway_endpoint}."
+    print_error "Next: docker logs openshell-cluster-openshell"
+    return 1
+}
+
 function ensure_runtime_host_directory() {
     local path="$1"
     local description="$2"
@@ -6074,6 +6145,7 @@ function start_runtime_compose_sidecars() {
         runtime_compose up -d "${services[@]}" >/dev/null
         if [ "$INSTALL_OPENSHELL" = "Y" ]; then
             reconcile_openshell_gateway_bind_host "${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
+            wait_for_openshell_worker_service
         fi
     fi
 }
