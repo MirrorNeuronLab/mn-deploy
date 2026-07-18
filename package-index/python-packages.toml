@@ -164,14 +164,6 @@ installer_groups = ["skill"]
 binary_default = false
 
 [[packages]]
-name = "mirrorneuron-litellm-communicate-skill"
-path = "mn-skills/litellm_communicate_skill"
-publish_group = "skill"
-version = "1.2.27"
-installer_groups = ["skill"]
-binary_default = false
-
-[[packages]]
 name = "mirrorneuron-llm-ocr-skill"
 path = "mn-skills/llm_ocr_skill"
 publish_group = "skill"
