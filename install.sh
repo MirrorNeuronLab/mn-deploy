@@ -4578,7 +4578,7 @@ Release/source options:
   --skills-repo / --skills-git-url
                                 Accepted for CLI compatibility; source inputs are ignored in binary mode.
   --membrane-repo / --membrane-git-url
-                                Accepted for CLI compatibility; binary mode uses GAR packages/images.
+                                Accepted for CLI compatibility; binary mode uses the GitHub core release asset plus GAR packages/images.
   MN_AGENTS_ROOT=/path          Optional local development override for packaged agent discovery.
   -h, --help                    Show this help.
 
