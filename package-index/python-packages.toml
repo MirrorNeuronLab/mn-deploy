@@ -92,6 +92,14 @@ installer_groups = ["skill"]
 binary_default = false
 
 [[packages]]
+name = "mirrorneuron-use-generic-model-skill"
+path = "mn-skills/use_generic_model_skill"
+publish_group = "skill"
+version = "1.2.29"
+installer_groups = ["skill"]
+binary_default = false
+
+[[packages]]
 name = "mirrorneuron-document-reading-skill"
 path = "mn-skills/document_reading_skill"
 publish_group = "skill"

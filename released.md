@@ -59,3 +59,9 @@ The Membrane runtime image digest is
 `sha256:4833dd00e712a054a35225b82f7b472d3fffbd41edceb64508943ede79e49bfa`.
 The `latest` image tag also points to this digest at publication time, but
 installers must use the immutable `:v1.2.29` tag.
+
+## 2026-07-21
+
+| What | Version | Where |
+| --- | --- | --- |
+| `mirrorneuron-use-generic-model-skill` | `1.2.29` | GAR Python: `agent-skills` (`https://us-central1-python.pkg.dev/mirrorneuron-public-packages/agent-skills/simple/`). |
