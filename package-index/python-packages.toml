@@ -293,6 +293,14 @@ installer_groups = ["skill"]
 binary_default = false
 
 [[packages]]
+name = "mirrorneuron-web-ui-skill"
+path = "mn-skills/web_ui_skill"
+publish_group = "skill"
+version = "1.2.29"
+installer_groups = ["skill"]
+binary_default = false
+
+[[packages]]
 name = "mirrorneuron-w3m-browser-skill"
 path = "mn-skills/w3m_browser_skill"
 publish_group = "skill"

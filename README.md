@@ -90,6 +90,11 @@ Clear runtime Redis state:
 - Use `./install.sh` or `./install.sh --mode binary` for release/package installs,
   `./install.sh --mode github` for repository installs, or `./install.sh --mode local`
   from a monorepo checkout for editable local installs.
+- Local mode resolves the selected SDK, CLI, API, and skill projects together
+  from sibling repositories. This allows local installs to use newly created
+  MirrorNeuron packages before they are published to the package registry.
+  `--no-skills` skips optional skill packages but keeps local skills required by
+  the runtime packages.
 - Local installs persist `MN_MEMBRANE_SOURCE_MODE=source`, so both initial and
   lazy context-engine starts build the linked `Membrane` checkout. Release and
   GitHub installs use the versioned GAR runtime image unless

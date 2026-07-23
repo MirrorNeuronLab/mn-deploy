@@ -34,6 +34,11 @@ must not silently cross into another source type. Explicit component-version
 overrides take precedence over the shared release version only for their named
 component.
 
+Local-mode Python resolution presents all selected sibling projects to pip in
+one editable install transaction. Dependencies between MirrorNeuron packages
+must resolve from those workspace checkouts, including packages that have not
+yet been published. Package-index resolution remains a binary-mode concern.
+
 ## Installed State
 
 Runtime state and generated configuration live below the configured

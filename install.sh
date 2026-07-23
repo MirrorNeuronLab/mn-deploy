@@ -2594,6 +2594,7 @@ MN_WEB_UI_PACKAGE_VERSION="${MN_WEB_UI_PACKAGE_VERSION:-}"
 SKILLS_DIR="${WORKSPACE_DIR}/mn-skills"
 AGENTS_DIR="${WORKSPACE_DIR}/mn-agents"
 BLUEPRINT_SUPPORT_SKILL_DIR="${SKILLS_DIR}/blueprint_support_skill"
+WEB_UI_SKILL_DIR="${SKILLS_DIR}/web_ui_skill"
 BLUEPRINTS_DIR="${WORKSPACE_DIR}/mn-blueprints"
 DOCS_DIR="${WORKSPACE_DIR}/mn-docs"
 SYSTEM_TESTS_DIR="${WORKSPACE_DIR}/mn-system-tests"
@@ -2901,7 +2902,8 @@ Options:
   --no-openshell        Skip OpenShell gateway setup.
   --syncthing / --no-syncthing
                         Enable or skip Syncthing shared-storage replication.
-  --no-skills           Skip editable install of packages under mn-skills.
+  --no-skills           Skip optional packages under mn-skills. Skills required
+                        by local runtime packages are still installed locally.
   --start               Start MirrorNeuron after install.
   --no-start            Skip starting MirrorNeuron after install.
   --start-as-worker     Start MirrorNeuron as a worker node after install.
@@ -4169,6 +4171,7 @@ require_mix_project_file "$CORE_DIR/mix.exs"
 require_dir "$CLI_DIR" "mn-cli"
 require_dir "$API_DIR" "mn-api"
 require_dir "$PY_SDK_DIR" "mn-python-sdk"
+require_file "$WEB_UI_SKILL_DIR/pyproject.toml" "mn-skills Web UI skill project"
 
 if [ "$INSTALL_WEB_UI" = "Y" ]; then require_dir "$WEB_UI_DIR" "mn-web-ui"; fi
 if [ "$INSTALL_SKILLS" = "Y" ]; then require_dir "$SKILLS_DIR" "mn-skills"; fi
@@ -4253,6 +4256,41 @@ function require_local_cli_target_executables() {
     fi
 }
 
+function install_local_editable_python_packages() {
+    local -a editable_requirements=(
+        -e "$PY_SDK_DIR"
+    )
+    local skill_dir
+    local skill_pyproject
+
+    if [ -f "$BLUEPRINT_SUPPORT_SKILL_DIR/pyproject.toml" ]; then
+        editable_requirements+=(-e "$BLUEPRINT_SUPPORT_SKILL_DIR")
+    fi
+    editable_requirements+=(
+        -e "$WEB_UI_SKILL_DIR"
+        -e "$CLI_DIR"
+        -e "$API_DIR"
+    )
+    if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
+        editable_requirements+=(-e "$MEMBRANE_DIR/mn-context-engine-python-sdk")
+    fi
+
+    if [ "$INSTALL_SKILLS" = "Y" ]; then
+        shopt -s nullglob
+        for skill_pyproject in "$SKILLS_DIR"/*/pyproject.toml; do
+            skill_dir="$(dirname "$skill_pyproject")"
+            case "$skill_dir" in
+                "$BLUEPRINT_SUPPORT_SKILL_DIR"|"$WEB_UI_SKILL_DIR") continue ;;
+            esac
+            editable_requirements+=(-e "$skill_dir")
+        done
+    fi
+
+    # Resolve all selected workspace projects together so dependencies between
+    # unreleased MirrorNeuron packages use their sibling editable checkouts.
+    "$VENV_DIR/bin/pip" install "${editable_requirements[@]}" >/dev/null
+}
+
 VENV_BACKUP_DIR=""
 VENV_INSTALL_OK="N"
 function restore_local_venv_backup_on_failure() {
@@ -4281,25 +4319,7 @@ print_step "Installing Python components from local source"
 (
     "$MN_PYTHON_BIN" -m venv "$VENV_DIR" >/dev/null
     "$VENV_DIR/bin/pip" install --upgrade pip >/dev/null
-    "$VENV_DIR/bin/pip" install -e "$PY_SDK_DIR" >/dev/null
-    if [ -f "$BLUEPRINT_SUPPORT_SKILL_DIR/pyproject.toml" ]; then
-        "$VENV_DIR/bin/pip" install -e "$BLUEPRINT_SUPPORT_SKILL_DIR[webui]" >/dev/null
-    fi
-    "$VENV_DIR/bin/pip" install -e "$CLI_DIR" >/dev/null
-    "$VENV_DIR/bin/pip" install -e "$API_DIR" >/dev/null
-    if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
-        "$VENV_DIR/bin/pip" install -e "$MEMBRANE_DIR/mn-context-engine-python-sdk" >/dev/null
-    fi
-
-    if [ "$INSTALL_SKILLS" = "Y" ]; then
-        shopt -s nullglob
-        for skill_pyproject in "$SKILLS_DIR"/*/pyproject.toml; do
-            if [ "$(dirname "$skill_pyproject")" = "$BLUEPRINT_SUPPORT_SKILL_DIR" ]; then
-                continue
-            fi
-            "$VENV_DIR/bin/pip" install -e "$(dirname "$skill_pyproject")" >/dev/null
-        done
-    fi
+    install_local_editable_python_packages
 ) &
 spinner $! "Installed local editable Python packages"
 require_local_cli_target_executables
