@@ -295,6 +295,53 @@ function mn_print_cli_verification_prompt() {
     printf 'Next: Open a new terminal session, then run mn --help to confirm the CLI is available.\n' >&3
 }
 
+function mn_run_runtime_compose() {
+    local log_dir="${TMPDIR:-/tmp}/mirror_neuron_install"
+    local log_file="${log_dir}/docker-compose.$$.log"
+    local status
+
+    if [ "$MN_INSTALL_VERBOSE" = "Y" ]; then
+        runtime_compose "$@"
+        return
+    fi
+
+    mkdir -p "$log_dir"
+    if runtime_compose "$@" >"$log_file" 2>&1; then
+        rm -f "$log_file"
+        return 0
+    else
+        status=$?
+    fi
+
+    print_error "Docker Compose failed. Details: $log_file"
+    printf '  Re-run with --verbose to show Compose output directly.\n' >&3
+    return "$status"
+}
+
+MN_RUNTIME_START_LOG=""
+function mn_run_runtime_start_command() {
+    local log_dir="${TMPDIR:-/tmp}/mirror_neuron_install"
+    local log_file="${log_dir}/runtime-start.$$.log"
+    local status
+
+    if [ "$MN_INSTALL_VERBOSE" = "Y" ] || [ "${START_AS_WORKER:-N}" = "Y" ]; then
+        "$@"
+        return
+    fi
+
+    mkdir -p "$log_dir"
+    if "$@" >"$log_file" 2>&1; then
+        grep -E '(^|[[:space:]])(! Warning:|warning:|× Error:|error:)' "$log_file" >&3 2>/dev/null || true
+        rm -f "$log_file"
+        return 0
+    else
+        status=$?
+    fi
+
+    MN_RUNTIME_START_LOG="$log_file"
+    return "$status"
+}
+
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --mode)
@@ -1861,7 +1908,7 @@ function reconcile_openshell_gateway_bind_host() {
     mv "$tmp_env" "$RUNTIME_COMPOSE_ENV"
     chmod 600 "$RUNTIME_COMPOSE_ENV" 2>/dev/null || true
     if [ "$current_bind_host" != "$desired_bind_host" ]; then
-        runtime_compose up -d --force-recreate openshell >/dev/null
+        mn_run_runtime_compose up -d --force-recreate openshell
     fi
 }
 
@@ -2203,30 +2250,36 @@ function ensure_docker_model_runner() {
     exit 1
 }
 
-function start_runtime_compose_sidecars() {
-    local services=()
-    [ "$INSTALL_REDIS" = "Y" ] && services+=("redis")
-    [ "$INSTALL_WEB_UI" = "Y" ] && services+=("web-ui")
-    grep -q '^  mn-native-sdk-grpc:' "$RUNTIME_COMPOSE_FILE" 2>/dev/null && services+=("mn-native-sdk-grpc")
-    grep -q '^  mn-litellm-proxy:' "$RUNTIME_COMPOSE_FILE" 2>/dev/null && services+=("mn-litellm-proxy")
-    [ "$INSTALL_OPENSHELL" = "Y" ] && services+=("openshell")
+function prepare_runtime_compose_sidecars() {
+    RUNTIME_COMPOSE_SIDECARS=()
+    [ "$INSTALL_REDIS" = "Y" ] && RUNTIME_COMPOSE_SIDECARS+=("redis")
+    [ "$INSTALL_WEB_UI" = "Y" ] && RUNTIME_COMPOSE_SIDECARS+=("web-ui")
+    grep -q '^  mn-native-sdk-grpc:' "$RUNTIME_COMPOSE_FILE" 2>/dev/null && RUNTIME_COMPOSE_SIDECARS+=("mn-native-sdk-grpc")
+    grep -q '^  mn-litellm-proxy:' "$RUNTIME_COMPOSE_FILE" 2>/dev/null && RUNTIME_COMPOSE_SIDECARS+=("mn-litellm-proxy")
+    [ "$INSTALL_OPENSHELL" = "Y" ] && RUNTIME_COMPOSE_SIDECARS+=("openshell")
     if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
-        services+=("membrane-context-engine")
+        RUNTIME_COMPOSE_SIDECARS+=("membrane-context-engine")
     fi
     if mn_is_linux_nvidia_host; then
         ensure_docker_model_runner
     fi
-    if [ "${#services[@]}" -gt 0 ]; then
-        remove_stale_runtime_containers_for_services context-engine-model "${services[@]}"
+    if [ "${#RUNTIME_COMPOSE_SIDECARS[@]}" -gt 0 ]; then
+        remove_stale_runtime_containers_for_services context-engine-model "${RUNTIME_COMPOSE_SIDECARS[@]}"
         ensure_docker_model_runner
         if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
-            runtime_compose build membrane-context-engine
+            mn_run_runtime_compose build membrane-context-engine
         fi
-        runtime_compose up -d "${services[@]}" >/dev/null
-        if [ "$INSTALL_OPENSHELL" = "Y" ]; then
-            reconcile_openshell_gateway_bind_host "${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
-            wait_for_openshell_worker_service
-        fi
+    fi
+}
+
+function start_runtime_compose_sidecars() {
+    prepare_runtime_compose_sidecars
+    if [ "${#RUNTIME_COMPOSE_SIDECARS[@]}" -gt 0 ]; then
+        mn_run_runtime_compose up -d "${RUNTIME_COMPOSE_SIDECARS[@]}"
+    fi
+    if [ "$INSTALL_OPENSHELL" = "Y" ]; then
+        reconcile_openshell_gateway_bind_host "${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
+        wait_for_openshell_worker_service
     fi
 }
 
@@ -2392,12 +2445,17 @@ if [ "$INSTALL_WEB_UI" = "Y" ]; then
 fi
 
 if [ "$INSTALL_REDIS" = "Y" ] || [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] || [ "$INSTALL_OPENSHELL" = "Y" ] || [ "$INSTALL_WEB_UI" = "Y" ]; then
-    print_step "Setting up Docker runtime services with Compose"
     if [ "$INSTALL_OPENSHELL" = "Y" ]; then
         install_openshell_cli
     fi
-    ( start_runtime_compose_sidecars ) &
-    spinner $! "Docker runtime services are available"
+    if [ "$START_NOW" = "Y" ]; then
+        prepare_runtime_compose_sidecars
+        print_detail "Docker services are prepared; automatic startup is deferred to mn runtime start."
+    else
+        print_step "Starting selected Docker runtime services"
+        ( start_runtime_compose_sidecars ) &
+        spinner $! "Selected Docker runtime services are available"
+    fi
 fi
 
 if [ "$INSTALL_CLI" = "Y" ] || [ "$INSTALL_API" = "Y" ]; then
@@ -2537,19 +2595,26 @@ if [ "$INSTALL_CLI" = "Y" ]; then
 fi
 
 if [ "$START_NOW" = "Y" ]; then
-    print_step "Starting MirrorNeuron Server..."
+    print_step "Starting MirrorNeuron services"
     if [ "$START_AS_WORKER" = "Y" ]; then
-        if ! "$VENV_DIR/bin/mn" runtime start --worker-node; then
+        if ! mn_run_runtime_start_command "$VENV_DIR/bin/mn" runtime start --worker-node; then
+            [ -n "$MN_RUNTIME_START_LOG" ] && print_warning "CLI startup details: $MN_RUNTIME_START_LOG"
             print_warning "mn runtime start --worker-node failed; starting worker gateway services with Docker Compose."
             runtime_compose up -d mn-native-sdk-grpc mn-litellm-proxy
         fi
     else
-        if ! "$VENV_DIR/bin/mn" runtime start; then
+        if ! mn_run_runtime_start_command "$VENV_DIR/bin/mn" runtime start; then
+            [ -n "$MN_RUNTIME_START_LOG" ] && print_warning "CLI startup details: $MN_RUNTIME_START_LOG"
             print_warning "mn runtime start failed; starting MirrorNeuron Docker Compose runtime."
-            runtime_compose up -d
+            mn_run_runtime_compose up -d
             "$VENV_DIR/bin/mn" runtime restart-sidecars --api >/dev/null 2>&1 || print_warning "MirrorNeuron Core started, but the REST API sidecar did not start automatically."
         fi
     fi
+    if [ "$INSTALL_OPENSHELL" = "Y" ] && [ "$START_AS_WORKER" != "Y" ]; then
+        reconcile_openshell_gateway_bind_host "${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
+        wait_for_openshell_worker_service
+    fi
+    print_success "MirrorNeuron services are running."
 fi
 
 mn_print_cli_verification_prompt
@@ -3734,7 +3799,7 @@ function reconcile_openshell_gateway_bind_host() {
     mv "$tmp_env" "$RUNTIME_COMPOSE_ENV"
     chmod 600 "$RUNTIME_COMPOSE_ENV" 2>/dev/null || true
     if [ "$current_bind_host" != "$desired_bind_host" ]; then
-        runtime_compose up -d --force-recreate openshell >/dev/null
+        mn_run_runtime_compose up -d --force-recreate openshell
     fi
 }
 
@@ -4073,30 +4138,36 @@ function ensure_docker_model_runner() {
     exit 1
 }
 
-function start_runtime_compose_sidecars() {
-    local services=()
-    [ "$INSTALL_REDIS" = "Y" ] && services+=("redis")
-    [ "$INSTALL_WEB_UI" = "Y" ] && services+=("web-ui")
-    grep -q '^  mn-native-sdk-grpc:' "$RUNTIME_COMPOSE_FILE" 2>/dev/null && services+=("mn-native-sdk-grpc")
-    grep -q '^  mn-litellm-proxy:' "$RUNTIME_COMPOSE_FILE" 2>/dev/null && services+=("mn-litellm-proxy")
-    [ "$INSTALL_OPENSHELL" = "Y" ] && services+=("openshell")
+function prepare_runtime_compose_sidecars() {
+    RUNTIME_COMPOSE_SIDECARS=()
+    [ "$INSTALL_REDIS" = "Y" ] && RUNTIME_COMPOSE_SIDECARS+=("redis")
+    [ "$INSTALL_WEB_UI" = "Y" ] && RUNTIME_COMPOSE_SIDECARS+=("web-ui")
+    grep -q '^  mn-native-sdk-grpc:' "$RUNTIME_COMPOSE_FILE" 2>/dev/null && RUNTIME_COMPOSE_SIDECARS+=("mn-native-sdk-grpc")
+    grep -q '^  mn-litellm-proxy:' "$RUNTIME_COMPOSE_FILE" 2>/dev/null && RUNTIME_COMPOSE_SIDECARS+=("mn-litellm-proxy")
+    [ "$INSTALL_OPENSHELL" = "Y" ] && RUNTIME_COMPOSE_SIDECARS+=("openshell")
     if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
-        services+=("membrane-context-engine")
+        RUNTIME_COMPOSE_SIDECARS+=("membrane-context-engine")
     fi
     if mn_is_linux_nvidia_host; then
         ensure_docker_model_runner
     fi
-    if [ "${#services[@]}" -gt 0 ]; then
-        remove_stale_runtime_containers_for_services context-engine-model "${services[@]}"
+    if [ "${#RUNTIME_COMPOSE_SIDECARS[@]}" -gt 0 ]; then
+        remove_stale_runtime_containers_for_services context-engine-model "${RUNTIME_COMPOSE_SIDECARS[@]}"
         ensure_docker_model_runner
         if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
-            runtime_compose build membrane-context-engine
+            mn_run_runtime_compose build membrane-context-engine
         fi
-        runtime_compose up -d "${services[@]}"
-        if [ "$INSTALL_OPENSHELL" = "Y" ]; then
-            reconcile_openshell_gateway_bind_host "${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
-            wait_for_openshell_worker_service
-        fi
+    fi
+}
+
+function start_runtime_compose_sidecars() {
+    prepare_runtime_compose_sidecars
+    if [ "${#RUNTIME_COMPOSE_SIDECARS[@]}" -gt 0 ]; then
+        mn_run_runtime_compose up -d "${RUNTIME_COMPOSE_SIDECARS[@]}"
+    fi
+    if [ "$INSTALL_OPENSHELL" = "Y" ]; then
+        reconcile_openshell_gateway_bind_host "${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
+        wait_for_openshell_worker_service
     fi
 }
 
@@ -4147,7 +4218,7 @@ function ensure_shell_profile_exports() {
         print_warning "${BIN_DIR} is not in your PATH."
     fi
     if [ "$needs_runtime_home" = "Y" ]; then
-        print_warning "Persisting MN_HOME=${INSTALL_DIR} for future terminal sessions."
+        print_detail "Persisting MN_HOME=${INSTALL_DIR} for future terminal sessions."
     fi
 
     shell_profile="$(mn_preferred_shell_profile)"
@@ -4372,12 +4443,17 @@ if [ "$INSTALL_WEB_UI" = "Y" ]; then
 fi
 
 if [ "$INSTALL_REDIS" = "Y" ] || [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] || [ "$INSTALL_OPENSHELL" = "Y" ] || [ "$INSTALL_WEB_UI" = "Y" ]; then
-    print_step "Setting up Docker runtime services with Compose"
     if [ "$INSTALL_OPENSHELL" = "Y" ]; then
         install_openshell_cli
     fi
-    start_runtime_compose_sidecars
-    print_success "Docker runtime services are available."
+    if [ "$START_NOW" = "Y" ]; then
+        prepare_runtime_compose_sidecars
+        print_detail "Docker services are prepared; automatic startup is deferred to mn runtime start."
+    else
+        print_step "Starting selected Docker runtime services"
+        start_runtime_compose_sidecars
+        print_success "Selected Docker runtime services are available."
+    fi
 fi
 
 if [ "$CORE_WAS_RUNNING" = "Y" ] && [ "$START_NOW" != "Y" ]; then
@@ -4398,8 +4474,35 @@ print_detail "Command links: ${BIN_DIR}"
 
 ensure_shell_profile_exports
 
+if [ "$START_NOW" = "Y" ]; then
+    print_step "Starting MirrorNeuron services"
+    "$VENV_DIR/bin/mn" runtime stop >/dev/null 2>&1 || true
+    if [ "$START_AS_WORKER" = "Y" ]; then
+        if ! mn_run_runtime_start_command "$VENV_DIR/bin/mn" runtime start --worker-node; then
+            [ -n "$MN_RUNTIME_START_LOG" ] && print_warning "CLI startup details: $MN_RUNTIME_START_LOG"
+            print_warning "mn runtime start --worker-node failed; starting worker gateway services with Docker Compose."
+            runtime_compose up -d mn-native-sdk-grpc mn-litellm-proxy
+        fi
+    else
+        if ! mn_run_runtime_start_command "$VENV_DIR/bin/mn" runtime start; then
+            [ -n "$MN_RUNTIME_START_LOG" ] && print_warning "CLI startup details: $MN_RUNTIME_START_LOG"
+            print_warning "mn runtime start failed; starting MirrorNeuron Docker Compose runtime."
+            mn_run_runtime_compose up -d
+            "$VENV_DIR/bin/mn" runtime restart-sidecars --api >/dev/null 2>&1 || print_warning "MirrorNeuron Core started, but the REST API sidecar did not start automatically."
+        fi
+    fi
+    if [ "$INSTALL_OPENSHELL" = "Y" ] && [ "$START_AS_WORKER" != "Y" ]; then
+        reconcile_openshell_gateway_bind_host "${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
+        wait_for_openshell_worker_service
+    fi
+    print_success "MirrorNeuron services are running."
+fi
+
 echo "" >&3
 print_success "MirrorNeuron installation completed."
+if [ "$START_NOW" = "Y" ] && [ "$INSTALL_WEB_UI" = "Y" ]; then
+    printf '  Web UI: %s\n' "http://localhost:${MN_WEB_UI_PORT:-55173}" >&3
+fi
 print_detail "Core image: mirror-neuron-core:latest (${CORE_DIR})"
 print_detail "CLI/API: editable installs from the local workspace"
 print_detail "State: ${INSTALL_DIR}"
@@ -4410,36 +4513,18 @@ fi
 if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
     print_detail "Membrane: ${MEMBRANE_DIR} (${MN_CONTEXT_ADDR:-localhost:50052})"
 fi
-
-if [ "$START_AS_WORKER" = "Y" ]; then
-    print_detail "Start the server: mn runtime start --worker-node"
-else
-    print_detail "Start the server: mn runtime start"
-fi
-if [ "$INSTALL_WEB_UI" = "Y" ]; then
-    print_detail "Web UI: http://localhost:${MN_WEB_UI_PORT:-55173}"
-fi
-mn_print_next_shell_command "mn node list"
 print_detail "Rebuild after Elixir changes: ${SCRIPT_DIR}/install.sh --mode local --no-web-ui --no-skills"
 
 if [ "$START_NOW" = "Y" ]; then
-    print_step "Starting MirrorNeuron Server"
-    "$VENV_DIR/bin/mn" runtime stop >/dev/null 2>&1 || true
-    if [ "$START_AS_WORKER" = "Y" ]; then
-        if ! "$VENV_DIR/bin/mn" runtime start --worker-node; then
-            print_warning "mn runtime start --worker-node failed; starting worker gateway services with Docker Compose."
-            runtime_compose up -d mn-native-sdk-grpc mn-litellm-proxy
-        fi
-    else
-        if ! "$VENV_DIR/bin/mn" runtime start; then
-            print_warning "mn runtime start failed; starting MirrorNeuron Docker Compose runtime."
-            runtime_compose up -d
-            "$VENV_DIR/bin/mn" runtime restart-sidecars --api >/dev/null 2>&1 || print_warning "MirrorNeuron Core started, but the REST API sidecar did not start automatically."
-        fi
-    fi
+    mn_print_next_shell_command "mn node list"
+elif [ "$START_AS_WORKER" = "Y" ]; then
+    mn_print_next_shell_command "mn runtime start --worker-node"
+else
+    mn_print_next_shell_command "mn runtime start"
 fi
-
-mn_print_cli_verification_prompt
+if [ "$MN_INSTALL_VERBOSE" = "Y" ]; then
+    mn_print_cli_verification_prompt
+fi
 }
 
 run_install_binary() {
@@ -6054,7 +6139,7 @@ function reconcile_openshell_gateway_bind_host() {
     mv "$tmp_env" "$RUNTIME_COMPOSE_ENV"
     chmod 600 "$RUNTIME_COMPOSE_ENV" 2>/dev/null || true
     if [ "$current_bind_host" != "$desired_bind_host" ]; then
-        runtime_compose up -d --force-recreate openshell >/dev/null
+        mn_run_runtime_compose up -d --force-recreate openshell
     fi
 }
 
@@ -6393,27 +6478,33 @@ function ensure_docker_model_runner() {
     exit 1
 }
 
-function start_runtime_compose_sidecars() {
-    local services=()
-    [ "$INSTALL_REDIS" = "Y" ] && services+=("redis")
-    [ "$INSTALL_WEB_UI" = "Y" ] && services+=("web-ui")
-    grep -q '^  mn-native-sdk-grpc:' "$RUNTIME_COMPOSE_FILE" 2>/dev/null && services+=("mn-native-sdk-grpc")
-    grep -q '^  mn-litellm-proxy:' "$RUNTIME_COMPOSE_FILE" 2>/dev/null && services+=("mn-litellm-proxy")
-    [ "$INSTALL_OPENSHELL" = "Y" ] && services+=("openshell")
+function prepare_runtime_compose_sidecars() {
+    RUNTIME_COMPOSE_SIDECARS=()
+    [ "$INSTALL_REDIS" = "Y" ] && RUNTIME_COMPOSE_SIDECARS+=("redis")
+    [ "$INSTALL_WEB_UI" = "Y" ] && RUNTIME_COMPOSE_SIDECARS+=("web-ui")
+    grep -q '^  mn-native-sdk-grpc:' "$RUNTIME_COMPOSE_FILE" 2>/dev/null && RUNTIME_COMPOSE_SIDECARS+=("mn-native-sdk-grpc")
+    grep -q '^  mn-litellm-proxy:' "$RUNTIME_COMPOSE_FILE" 2>/dev/null && RUNTIME_COMPOSE_SIDECARS+=("mn-litellm-proxy")
+    [ "$INSTALL_OPENSHELL" = "Y" ] && RUNTIME_COMPOSE_SIDECARS+=("openshell")
     if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
-        services+=("membrane-context-engine")
+        RUNTIME_COMPOSE_SIDECARS+=("membrane-context-engine")
     fi
     if mn_is_linux_nvidia_host; then
         ensure_docker_model_runner
     fi
-    if [ "${#services[@]}" -gt 0 ]; then
-        remove_stale_runtime_containers_for_services context-engine-model "${services[@]}"
+    if [ "${#RUNTIME_COMPOSE_SIDECARS[@]}" -gt 0 ]; then
+        remove_stale_runtime_containers_for_services context-engine-model "${RUNTIME_COMPOSE_SIDECARS[@]}"
         ensure_docker_model_runner
-        runtime_compose up -d "${services[@]}" >/dev/null
-        if [ "$INSTALL_OPENSHELL" = "Y" ]; then
-            reconcile_openshell_gateway_bind_host "${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
-            wait_for_openshell_worker_service
-        fi
+    fi
+}
+
+function start_runtime_compose_sidecars() {
+    prepare_runtime_compose_sidecars
+    if [ "${#RUNTIME_COMPOSE_SIDECARS[@]}" -gt 0 ]; then
+        mn_run_runtime_compose up -d "${RUNTIME_COMPOSE_SIDECARS[@]}"
+    fi
+    if [ "$INSTALL_OPENSHELL" = "Y" ]; then
+        reconcile_openshell_gateway_bind_host "${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
+        wait_for_openshell_worker_service
     fi
 }
 
@@ -6574,9 +6665,14 @@ if [ "$INSTALL_WEB_UI" = "Y" ]; then
 fi
 
 if [ "$INSTALL_REDIS" = "Y" ] || [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] || [ "$INSTALL_OPENSHELL" = "Y" ] || [ "$INSTALL_WEB_UI" = "Y" ]; then
-    print_step "Preparing services"
-    ( start_runtime_compose_sidecars ) &
-    spinner $! "Runtime services ready"
+    if [ "$START_NOW" = "Y" ]; then
+        prepare_runtime_compose_sidecars
+        print_detail "Docker services are prepared; automatic startup is deferred to mn runtime start."
+    else
+        print_step "Starting selected Docker runtime services"
+        ( start_runtime_compose_sidecars ) &
+        spinner $! "Selected Docker runtime services are available"
+    fi
 fi
 
 print_step "Finishing setup"
@@ -6596,19 +6692,26 @@ else
 fi
 
 if [ "$START_NOW" = "Y" ]; then
-    print_step "Starting MirrorNeuron"
+    print_step "Starting MirrorNeuron services"
     if [ "$START_AS_WORKER" = "Y" ]; then
-        if ! "$VENV_DIR/bin/mn" runtime start --worker-node; then
+        if ! mn_run_runtime_start_command "$VENV_DIR/bin/mn" runtime start --worker-node; then
+            [ -n "$MN_RUNTIME_START_LOG" ] && print_warning "CLI startup details: $MN_RUNTIME_START_LOG"
             print_warning "mn runtime start --worker-node failed; starting worker gateway services with Docker Compose."
             runtime_compose up -d mn-native-sdk-grpc mn-litellm-proxy
         fi
     else
-        if ! "$VENV_DIR/bin/mn" runtime start; then
+        if ! mn_run_runtime_start_command "$VENV_DIR/bin/mn" runtime start; then
+            [ -n "$MN_RUNTIME_START_LOG" ] && print_warning "CLI startup details: $MN_RUNTIME_START_LOG"
             print_warning "mn runtime start failed; starting MirrorNeuron Docker Compose runtime."
-            runtime_compose up -d
+            mn_run_runtime_compose up -d
             "$VENV_DIR/bin/mn" runtime restart-sidecars --api >/dev/null 2>&1 || print_warning "MirrorNeuron Core started, but the REST API sidecar did not start automatically."
         fi
     fi
+    if [ "$INSTALL_OPENSHELL" = "Y" ] && [ "$START_AS_WORKER" != "Y" ]; then
+        reconcile_openshell_gateway_bind_host "${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
+        wait_for_openshell_worker_service
+    fi
+    print_success "MirrorNeuron services are running."
 fi
 
 echo "" >&3
