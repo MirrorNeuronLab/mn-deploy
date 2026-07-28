@@ -45,6 +45,23 @@ installation or cleanup.
 - Do not run install, uninstall, publish, registry setup, Redis cleanup, or
   cluster mutation as a routine verification step.
 
+## Cross-Host Repository Sync
+
+- Do not `rsync`, `scp`, or otherwise copy tracked source files into a second
+  checkout when the same changes will later arrive there through Git. Commit
+  and push from one checkout, then use `git pull --ff-only` on the other host.
+- If temporary cross-host source copying is required for testing, reconcile it
+  before the next bulk pull. Fetch first and treat local edits as duplicates
+  only when the complete tracked working tree matches the fetched remote tip
+  and there are no untracked files.
+- Preserve a recovery stash before reconciling proven duplicates, fast-forward,
+  verify the stash tree equals the new `HEAD`, and only then remove the stash.
+  Never use `git reset --hard`, `git checkout --`, or an equivalent destructive
+  shortcut for unmatched work.
+- A dirty checkout that differs from the fetched remote must stop with an
+  actionable instruction to commit, stash, or resolve the work. Automation
+  must not guess which side is newer.
+
 ## CLI Output Standards
 
 - Default output is concise and action oriented; verbose diagnostics stay

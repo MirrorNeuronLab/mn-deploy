@@ -61,6 +61,61 @@ validate_repo_before_commit() {
     fi
 }
 
+sync_branch_before_commit() {
+    local branch="$1"
+    local remote_ref="refs/remotes/origin/$branch"
+    local recovery_stash
+
+    echo "Fetching latest changes for $branch..."
+    git fetch origin "$branch"
+
+    if ! git show-ref --verify --quiet "$remote_ref"; then
+        echo "error: origin/$branch was not found after fetch." >&2
+        return 1
+    fi
+
+    if [[ -z $(git status --porcelain) ]]; then
+        git merge --ff-only "$remote_ref"
+        return
+    fi
+
+    # A local branch at or ahead of its fetched remote can be committed safely.
+    if git merge-base --is-ancestor "$remote_ref" HEAD; then
+        return
+    fi
+
+    if ! git merge-base --is-ancestor HEAD "$remote_ref"; then
+        echo "error: local $branch has diverged from origin/$branch." >&2
+        echo "Commit or stash local work, reconcile the branch, and rerun." >&2
+        return 1
+    fi
+
+    # Reconcile only the narrow case where copied tracked files already equal
+    # the fetched fast-forward result. Untracked files are never discarded.
+    if [[ -z $(git ls-files --others --exclude-standard) ]] \
+        && git diff --quiet "$remote_ref" --; then
+        echo "Local tracked changes already match origin/$branch."
+        echo "Creating a recovery stash and fast-forwarding..."
+        git stash push -m "mn-deploy duplicate before fast-forward"
+        recovery_stash="stash@{0}"
+        git merge --ff-only "$remote_ref"
+
+        if ! git diff --quiet HEAD "$recovery_stash" --; then
+            echo "error: recovery stash differs from the fast-forwarded tree." >&2
+            echo "The recovery stash was kept as $recovery_stash; inspect it before continuing." >&2
+            return 1
+        fi
+
+        git stash drop "$recovery_stash"
+        echo "Duplicate local changes reconciled with origin/$branch."
+        return
+    fi
+
+    echo "error: local changes differ from origin/$branch while the branch is behind." >&2
+    echo "Commit or stash local work, pull with an explicit conflict strategy, and rerun." >&2
+    return 1
+}
+
 # Loop through all subdirectories in parent folder
 for dir in "$TARGET_DIR"/*/; do
     if [ -d "$dir/.git" ]; then
@@ -72,8 +127,7 @@ for dir in "$TARGET_DIR"/*/; do
 
         # Get current branch and pull latest changes
         BRANCH=$(git rev-parse --abbrev-ref HEAD)
-        echo "Pulling latest changes for $BRANCH..."
-        git pull origin "$BRANCH"
+        sync_branch_before_commit "$BRANCH"
 
         # Check if there are changes
         if [[ -n $(git status --porcelain) ]]; then

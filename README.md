@@ -55,6 +55,26 @@ Clear runtime Redis state:
 ./scripts/clear-redis.sh --yes
 ```
 
+Commit and push changes across sibling development repositories:
+
+```bash
+./git_commit_push_all.sh -m "Describe the update"
+```
+
+The bulk helper fetches before updating. If a checkout contains uncommitted
+tracked files that are already byte-identical to the fetched remote tip, it
+uses a recovery stash, fast-forwards, verifies the trees match, and removes the
+redundant stash. It stops without changing unique, untracked, or divergent
+work. For cross-host development, commit and push on one host and use
+`git pull --ff-only` on the other; do not copy tracked files between checkouts
+that will later receive the same commit.
+
+Run its isolated Git regression test with:
+
+```bash
+./scripts/test-git-commit-push-all.sh
+```
+
 ## Details
 
 - [Google Artifact Registry Python Publishing](./GOOGLE_ARTIFACT_REGISTRY.md)

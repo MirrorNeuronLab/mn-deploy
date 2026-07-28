@@ -74,6 +74,11 @@ replaces it. Failures identify the failed component and a recovery action.
 - Downloaded artifacts and metadata are validated where checksums/signatures or
   version checks are part of the release flow.
 - Listener exposure and cluster joins remain opt-in and visibly reported.
+- Workspace update helpers may reconcile dirty tracked files automatically only
+  when the complete working tree is byte-identical to the fetched remote tip,
+  the local branch can fast-forward, and a verified recovery stash protects the
+  operation. Unique, untracked, or divergent work must remain untouched and
+  produce an actionable error.
 
 ## Portability and Output
 
