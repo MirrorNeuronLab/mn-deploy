@@ -1830,25 +1830,39 @@ function resolve_openshell_gateway_bind_host() {
 
 function reconcile_openshell_gateway_bind_host() {
     local network_name="$1"
-    local desired current tmp_env
-    desired="$(resolve_openshell_gateway_bind_host "$network_name")"
-    current="$(sed -n 's/^OPENSHELL_GATEWAY_BIND_HOST=//p' "$RUNTIME_COMPOSE_ENV" | tail -1)"
-    [ "$current" = "$desired" ] && return 0
+    local desired_bind_host desired_endpoint current_bind_host current_endpoint tmp_env
+    desired_bind_host="$(resolve_openshell_gateway_bind_host "$network_name")"
+    desired_endpoint="${OPENSHELL_GATEWAY_ENDPOINT:-http://${desired_bind_host}:${OPENSHELL_GATEWAY_PORT:-58080}}"
+    current_bind_host="$(sed -n 's/^OPENSHELL_GATEWAY_BIND_HOST=//p' "$RUNTIME_COMPOSE_ENV" | tail -1)"
+    current_endpoint="$(sed -n 's/^OPENSHELL_GATEWAY_ENDPOINT=//p' "$RUNTIME_COMPOSE_ENV" | tail -1)"
+    if [ "$current_bind_host" = "$desired_bind_host" ] && [ "$current_endpoint" = "$desired_endpoint" ]; then
+        return 0
+    fi
 
     tmp_env="${RUNTIME_COMPOSE_ENV}.tmp"
-    awk -v value="$desired" '
-        BEGIN { replaced = 0 }
+    awk -v bind_host="$desired_bind_host" -v endpoint="$desired_endpoint" '
+        BEGIN { replaced_bind_host = 0; replaced_endpoint = 0 }
         /^OPENSHELL_GATEWAY_BIND_HOST=/ {
-            if (!replaced) print "OPENSHELL_GATEWAY_BIND_HOST=" value
-            replaced = 1
+            if (!replaced_bind_host) print "OPENSHELL_GATEWAY_BIND_HOST=" bind_host
+            replaced_bind_host = 1
+            next
+        }
+        /^OPENSHELL_GATEWAY_ENDPOINT=/ {
+            if (!replaced_endpoint) print "OPENSHELL_GATEWAY_ENDPOINT=" endpoint
+            replaced_endpoint = 1
             next
         }
         { print }
-        END { if (!replaced) print "OPENSHELL_GATEWAY_BIND_HOST=" value }
+        END {
+            if (!replaced_bind_host) print "OPENSHELL_GATEWAY_BIND_HOST=" bind_host
+            if (!replaced_endpoint) print "OPENSHELL_GATEWAY_ENDPOINT=" endpoint
+        }
     ' "$RUNTIME_COMPOSE_ENV" > "$tmp_env"
     mv "$tmp_env" "$RUNTIME_COMPOSE_ENV"
     chmod 600 "$RUNTIME_COMPOSE_ENV" 2>/dev/null || true
-    runtime_compose up -d --force-recreate openshell >/dev/null
+    if [ "$current_bind_host" != "$desired_bind_host" ]; then
+        runtime_compose up -d --force-recreate openshell >/dev/null
+    fi
 }
 
 function wait_for_openshell_worker_service() {
@@ -1908,7 +1922,7 @@ function prepare_litellm_gateway_config() {
 }
 
 function write_runtime_compose_files() {
-    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_agents_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image litellm_gateway_bind_host openshell_gateway_bind_host api_host
+    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_agents_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image litellm_gateway_bind_host openshell_gateway_bind_host openshell_gateway_endpoint api_host
     if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
         context_engine_source_dir >/dev/null
     fi
@@ -1928,6 +1942,7 @@ function write_runtime_compose_files() {
     fi
     network_name="${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
     openshell_gateway_bind_host="$(resolve_openshell_gateway_bind_host "$network_name")"
+    openshell_gateway_endpoint="${OPENSHELL_GATEWAY_ENDPOINT:-http://${openshell_gateway_bind_host}:${OPENSHELL_GATEWAY_PORT:-58080}}"
     network_external="$(resolve_docker_network_external "$network_name")"
     network_token="$(resolve_network_token)"
     redis_password="$(resolve_redis_password "mirror_neuron_password_admin")"
@@ -2061,7 +2076,7 @@ MN_REDIS_RECONNECT_MAX_BACKOFF_MS=${MN_REDIS_RECONNECT_MAX_BACKOFF_MS:-2000}
 ERL_EPMD_ADDRESS=${ERL_EPMD_ADDRESS:-0.0.0.0}
 ERL_AFLAGS=${ERL_AFLAGS:--kernel inet_dist_listen_min ${MN_DIST_PORT:-54370} inet_dist_listen_max ${MN_DIST_PORT:-54370}}
 OPENSHELL_GATEWAY_PORT=${OPENSHELL_GATEWAY_PORT:-58080}
-OPENSHELL_GATEWAY_ENDPOINT=${OPENSHELL_GATEWAY_ENDPOINT:-http://127.0.0.1:${OPENSHELL_GATEWAY_PORT:-58080}}
+OPENSHELL_GATEWAY_ENDPOINT=${openshell_gateway_endpoint}
 OPENSHELL_GATEWAY_BIND_HOST=${openshell_gateway_bind_host}
 OPENSHELL_GATEWAY_USER=${OPENSHELL_GATEWAY_USER}
 OPENSHELL_GATEWAY_DOCKER_GROUP=${OPENSHELL_GATEWAY_DOCKER_GROUP}
@@ -3688,25 +3703,39 @@ function resolve_openshell_gateway_bind_host() {
 
 function reconcile_openshell_gateway_bind_host() {
     local network_name="$1"
-    local desired current tmp_env
-    desired="$(resolve_openshell_gateway_bind_host "$network_name")"
-    current="$(sed -n 's/^OPENSHELL_GATEWAY_BIND_HOST=//p' "$RUNTIME_COMPOSE_ENV" | tail -1)"
-    [ "$current" = "$desired" ] && return 0
+    local desired_bind_host desired_endpoint current_bind_host current_endpoint tmp_env
+    desired_bind_host="$(resolve_openshell_gateway_bind_host "$network_name")"
+    desired_endpoint="${OPENSHELL_GATEWAY_ENDPOINT:-http://${desired_bind_host}:${OPENSHELL_GATEWAY_PORT:-58080}}"
+    current_bind_host="$(sed -n 's/^OPENSHELL_GATEWAY_BIND_HOST=//p' "$RUNTIME_COMPOSE_ENV" | tail -1)"
+    current_endpoint="$(sed -n 's/^OPENSHELL_GATEWAY_ENDPOINT=//p' "$RUNTIME_COMPOSE_ENV" | tail -1)"
+    if [ "$current_bind_host" = "$desired_bind_host" ] && [ "$current_endpoint" = "$desired_endpoint" ]; then
+        return 0
+    fi
 
     tmp_env="${RUNTIME_COMPOSE_ENV}.tmp"
-    awk -v value="$desired" '
-        BEGIN { replaced = 0 }
+    awk -v bind_host="$desired_bind_host" -v endpoint="$desired_endpoint" '
+        BEGIN { replaced_bind_host = 0; replaced_endpoint = 0 }
         /^OPENSHELL_GATEWAY_BIND_HOST=/ {
-            if (!replaced) print "OPENSHELL_GATEWAY_BIND_HOST=" value
-            replaced = 1
+            if (!replaced_bind_host) print "OPENSHELL_GATEWAY_BIND_HOST=" bind_host
+            replaced_bind_host = 1
+            next
+        }
+        /^OPENSHELL_GATEWAY_ENDPOINT=/ {
+            if (!replaced_endpoint) print "OPENSHELL_GATEWAY_ENDPOINT=" endpoint
+            replaced_endpoint = 1
             next
         }
         { print }
-        END { if (!replaced) print "OPENSHELL_GATEWAY_BIND_HOST=" value }
+        END {
+            if (!replaced_bind_host) print "OPENSHELL_GATEWAY_BIND_HOST=" bind_host
+            if (!replaced_endpoint) print "OPENSHELL_GATEWAY_ENDPOINT=" endpoint
+        }
     ' "$RUNTIME_COMPOSE_ENV" > "$tmp_env"
     mv "$tmp_env" "$RUNTIME_COMPOSE_ENV"
     chmod 600 "$RUNTIME_COMPOSE_ENV" 2>/dev/null || true
-    runtime_compose up -d --force-recreate openshell >/dev/null
+    if [ "$current_bind_host" != "$desired_bind_host" ]; then
+        runtime_compose up -d --force-recreate openshell >/dev/null
+    fi
 }
 
 function wait_for_openshell_worker_service() {
@@ -3766,7 +3795,7 @@ function prepare_litellm_gateway_config() {
 }
 
 function write_runtime_compose_files() {
-    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_agents_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image litellm_gateway_bind_host openshell_gateway_bind_host api_host
+    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_agents_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image litellm_gateway_bind_host openshell_gateway_bind_host openshell_gateway_endpoint api_host
     model_runner_model="${MN_CONTEXT_MODEL_RUNNER_MODEL:-hf.co/homerquan/mn-context-engine-model-v-Q4_K_M}"
     profiles="$(compose_profiles)"
     api_host="${MN_API_HOST:-}"
@@ -3783,6 +3812,7 @@ function write_runtime_compose_files() {
     fi
     network_name="${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
     openshell_gateway_bind_host="$(resolve_openshell_gateway_bind_host "$network_name")"
+    openshell_gateway_endpoint="${OPENSHELL_GATEWAY_ENDPOINT:-http://${openshell_gateway_bind_host}:${OPENSHELL_GATEWAY_PORT:-58080}}"
     network_external="$(resolve_docker_network_external "$network_name")"
     network_token="$(resolve_network_token)"
     redis_password="$(resolve_redis_password "mirror_neuron_password_admin")"
@@ -3916,7 +3946,7 @@ MN_REDIS_RECONNECT_MAX_BACKOFF_MS=${MN_REDIS_RECONNECT_MAX_BACKOFF_MS:-2000}
 ERL_EPMD_ADDRESS=${ERL_EPMD_ADDRESS:-0.0.0.0}
 ERL_AFLAGS=${ERL_AFLAGS:--kernel inet_dist_listen_min ${MN_DIST_PORT:-54370} inet_dist_listen_max ${MN_DIST_PORT:-54370}}
 OPENSHELL_GATEWAY_PORT=${OPENSHELL_GATEWAY_PORT:-58080}
-OPENSHELL_GATEWAY_ENDPOINT=${OPENSHELL_GATEWAY_ENDPOINT:-http://127.0.0.1:${OPENSHELL_GATEWAY_PORT:-58080}}
+OPENSHELL_GATEWAY_ENDPOINT=${openshell_gateway_endpoint}
 OPENSHELL_GATEWAY_BIND_HOST=${openshell_gateway_bind_host}
 OPENSHELL_GATEWAY_USER=${OPENSHELL_GATEWAY_USER}
 OPENSHELL_GATEWAY_DOCKER_GROUP=${OPENSHELL_GATEWAY_DOCKER_GROUP}
@@ -5993,25 +6023,39 @@ function resolve_openshell_gateway_bind_host() {
 
 function reconcile_openshell_gateway_bind_host() {
     local network_name="$1"
-    local desired current tmp_env
-    desired="$(resolve_openshell_gateway_bind_host "$network_name")"
-    current="$(sed -n 's/^OPENSHELL_GATEWAY_BIND_HOST=//p' "$RUNTIME_COMPOSE_ENV" | tail -1)"
-    [ "$current" = "$desired" ] && return 0
+    local desired_bind_host desired_endpoint current_bind_host current_endpoint tmp_env
+    desired_bind_host="$(resolve_openshell_gateway_bind_host "$network_name")"
+    desired_endpoint="${OPENSHELL_GATEWAY_ENDPOINT:-http://${desired_bind_host}:${OPENSHELL_GATEWAY_PORT:-58080}}"
+    current_bind_host="$(sed -n 's/^OPENSHELL_GATEWAY_BIND_HOST=//p' "$RUNTIME_COMPOSE_ENV" | tail -1)"
+    current_endpoint="$(sed -n 's/^OPENSHELL_GATEWAY_ENDPOINT=//p' "$RUNTIME_COMPOSE_ENV" | tail -1)"
+    if [ "$current_bind_host" = "$desired_bind_host" ] && [ "$current_endpoint" = "$desired_endpoint" ]; then
+        return 0
+    fi
 
     tmp_env="${RUNTIME_COMPOSE_ENV}.tmp"
-    awk -v value="$desired" '
-        BEGIN { replaced = 0 }
+    awk -v bind_host="$desired_bind_host" -v endpoint="$desired_endpoint" '
+        BEGIN { replaced_bind_host = 0; replaced_endpoint = 0 }
         /^OPENSHELL_GATEWAY_BIND_HOST=/ {
-            if (!replaced) print "OPENSHELL_GATEWAY_BIND_HOST=" value
-            replaced = 1
+            if (!replaced_bind_host) print "OPENSHELL_GATEWAY_BIND_HOST=" bind_host
+            replaced_bind_host = 1
+            next
+        }
+        /^OPENSHELL_GATEWAY_ENDPOINT=/ {
+            if (!replaced_endpoint) print "OPENSHELL_GATEWAY_ENDPOINT=" endpoint
+            replaced_endpoint = 1
             next
         }
         { print }
-        END { if (!replaced) print "OPENSHELL_GATEWAY_BIND_HOST=" value }
+        END {
+            if (!replaced_bind_host) print "OPENSHELL_GATEWAY_BIND_HOST=" bind_host
+            if (!replaced_endpoint) print "OPENSHELL_GATEWAY_ENDPOINT=" endpoint
+        }
     ' "$RUNTIME_COMPOSE_ENV" > "$tmp_env"
     mv "$tmp_env" "$RUNTIME_COMPOSE_ENV"
     chmod 600 "$RUNTIME_COMPOSE_ENV" 2>/dev/null || true
-    runtime_compose up -d --force-recreate openshell >/dev/null
+    if [ "$current_bind_host" != "$desired_bind_host" ]; then
+        runtime_compose up -d --force-recreate openshell >/dev/null
+    fi
 }
 
 function wait_for_openshell_worker_service() {
@@ -6071,7 +6115,7 @@ function prepare_litellm_gateway_config() {
 }
 
 function write_runtime_compose_files() {
-    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_agents_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image litellm_gateway_bind_host openshell_gateway_bind_host api_host
+    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_agents_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image litellm_gateway_bind_host openshell_gateway_bind_host openshell_gateway_endpoint api_host
     model_runner_model="${MN_CONTEXT_MODEL_RUNNER_MODEL:-hf.co/homerquan/mn-context-engine-model-v-Q4_K_M}"
     profiles="$(compose_profiles)"
     api_host="${MN_API_HOST:-}"
@@ -6088,6 +6132,7 @@ function write_runtime_compose_files() {
     fi
     network_name="${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
     openshell_gateway_bind_host="$(resolve_openshell_gateway_bind_host "$network_name")"
+    openshell_gateway_endpoint="${OPENSHELL_GATEWAY_ENDPOINT:-http://${openshell_gateway_bind_host}:${OPENSHELL_GATEWAY_PORT:-58080}}"
     network_external="$(resolve_docker_network_external "$network_name")"
     network_token="$(resolve_network_token)"
     redis_password="$(resolve_redis_password "mirror_neuron_password_admin")"
@@ -6221,7 +6266,7 @@ MN_REDIS_RECONNECT_MAX_BACKOFF_MS=${MN_REDIS_RECONNECT_MAX_BACKOFF_MS:-2000}
 ERL_EPMD_ADDRESS=${ERL_EPMD_ADDRESS:-0.0.0.0}
 ERL_AFLAGS=${ERL_AFLAGS:--kernel inet_dist_listen_min ${MN_DIST_PORT:-54370} inet_dist_listen_max ${MN_DIST_PORT:-54370}}
 OPENSHELL_GATEWAY_PORT=${OPENSHELL_GATEWAY_PORT:-58080}
-OPENSHELL_GATEWAY_ENDPOINT=${OPENSHELL_GATEWAY_ENDPOINT:-http://127.0.0.1:${OPENSHELL_GATEWAY_PORT:-58080}}
+OPENSHELL_GATEWAY_ENDPOINT=${openshell_gateway_endpoint}
 OPENSHELL_GATEWAY_BIND_HOST=${openshell_gateway_bind_host}
 OPENSHELL_GATEWAY_USER=${OPENSHELL_GATEWAY_USER}
 OPENSHELL_GATEWAY_DOCKER_GROUP=${OPENSHELL_GATEWAY_DOCKER_GROUP}

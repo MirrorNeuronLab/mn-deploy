@@ -81,6 +81,9 @@ Clear runtime Redis state:
   provisioned lazily when a blueprint that requires context memory runs.
 - OpenShell sandbox JWT keys are bootstrapped by the pinned gateway container;
   installing OpenSSL on the host is not required.
+- The OpenShell host endpoint follows its published Compose bind address:
+  Docker Desktop uses loopback, while native Linux uses the runtime bridge
+  gateway so both the host CLI and sandbox containers can reach the service.
 - The Web UI is a Docker Compose service published on port `55173` by default;
   installing it does not require npm on the host. Binary installs fetch the
   selected `mirrorneuron-web-ui` package version inside the service, while
