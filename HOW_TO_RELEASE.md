@@ -203,6 +203,10 @@ some Apple Silicon Docker Desktop configurations), run the manual **Publish
 Core GAR Runtime Image** GitHub workflow from `MirrorNeuron/main` with
 `release_tag=v1.2.30` instead.
 
+`release_all.sh` waits for the tag-triggered Core image job. If its three tags
+are missing afterwards, it dispatches this GitHub workflow and waits for it;
+the unified release therefore never falls back to a host-local Core build.
+
 Verify all three tags point to the published multi-platform manifest. The
 binary installer retags the immutable image locally as `mirror-neuron-core:latest`
 for Docker Compose; `--mode local` still builds that local image from source.

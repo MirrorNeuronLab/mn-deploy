@@ -172,6 +172,45 @@ wait_for_tag_workflows() {
   done
 }
 
+publish_core_gar_image_from_github() {
+  local workflow='publish-core-gar-image.yml'
+  local previous_run_id run_id attempt
+
+  previous_run_id="$(gh run list \
+    --repo MirrorNeuronLab/MirrorNeuron \
+    --workflow "$workflow" \
+    --branch main \
+    --event workflow_dispatch \
+    --limit 1 \
+    --json databaseId \
+    --jq '.[0].databaseId // empty')"
+
+  gh workflow run "$workflow" \
+    --repo MirrorNeuronLab/MirrorNeuron \
+    --ref main \
+    -f "release_tag=${TAG}"
+
+  run_id=""
+  for attempt in $(seq 1 30); do
+    run_id="$(gh run list \
+      --repo MirrorNeuronLab/MirrorNeuron \
+      --workflow "$workflow" \
+      --branch main \
+      --event workflow_dispatch \
+      --limit 1 \
+      --json databaseId \
+      --jq '.[0].databaseId // empty')"
+    if [[ -n "$run_id" && "$run_id" != "$previous_run_id" ]]; then
+      break
+    fi
+    sleep 10
+  done
+
+  [[ -n "$run_id" && "$run_id" != "$previous_run_id" ]] ||
+    die "No GitHub Core GAR backfill workflow appeared for ${TAG}."
+  gh run watch "$run_id" --repo MirrorNeuronLab/MirrorNeuron --exit-status
+}
+
 publish_and_verify_gar() {
   local local_count remote_count image tags_file core_image core_tags_file
 
@@ -206,9 +245,7 @@ publish_and_verify_gar() {
   gcloud artifacts docker tags list "$core_image" --format='value(tag)' > "$core_tags_file"
 
   if ! grep -qx "$VERSION" "$core_tags_file" || ! grep -qx "$TAG" "$core_tags_file" || ! grep -qx latest "$core_tags_file"; then
-    "${SCRIPT_DIR}/publish_public_core_to_google_artifact_registry.sh" \
-      --apply \
-      --version "$TAG"
+    publish_core_gar_image_from_github
     gcloud artifacts docker tags list "$core_image" --format='value(tag)' > "$core_tags_file"
   fi
 
