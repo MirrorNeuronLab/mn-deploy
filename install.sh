@@ -9,7 +9,7 @@ MN_INSTALL_MODE="${MN_INSTALL_MODE:-binary}"
 MN_INSTALL_MODE_EXPLICIT="N"
 MN_INSTALL_HELP_REQUESTED="N"
 MN_INSTALL_VERBOSE="${MN_INSTALL_VERBOSE:-N}"
-LATEST="v1.2.29"
+LATEST="v1.2.31"
 MN_DEFAULT_INSTALL_VERSION="${MN_DEFAULT_INSTALL_VERSION:-$LATEST}"
 MN_INSTALL_VERSION="${MN_INSTALL_VERSION:-}"
 MN_INSTALL_SCRIPT_NAME="$(basename "$0")"
@@ -27,7 +27,7 @@ Modes:
   binary   Install released artifacts/packages. This is the default.
 
 Common options:
-  --version TAG                 Install this release version, for example v1.2.29.
+  --version TAG                 Install this release version, for example v1.2.31.
   --yes, -y                     Run non-interactively with defaults and flags. This is the default.
   --interactive                 Ask each install question before proceeding.
   -v, --verbose                 Show installation details and command paths.
@@ -62,9 +62,9 @@ Examples:
   ./$MN_INSTALL_SCRIPT_NAME --interactive
   ./$MN_INSTALL_SCRIPT_NAME --mode github
   ./$MN_INSTALL_SCRIPT_NAME --mode local --no-web-ui --no-skills
-  ./$MN_INSTALL_SCRIPT_NAME --version v1.2.29
-  ./$MN_INSTALL_SCRIPT_NAME --mode github --version v1.2.29
-  ./$MN_INSTALL_SCRIPT_NAME --core-version v1.2.29 --python-sdk-version v1.2.29 --cli-version v1.2.29 --api-version v1.2.29 --web-ui-version v1.2.29
+  ./$MN_INSTALL_SCRIPT_NAME --version v1.2.31
+  ./$MN_INSTALL_SCRIPT_NAME --mode github --version v1.2.31
+  ./$MN_INSTALL_SCRIPT_NAME --core-version v1.2.31 --python-sdk-version v1.2.31 --cli-version v1.2.31 --api-version v1.2.31 --web-ui-version v1.2.31
 EOF
 }
 
@@ -361,7 +361,7 @@ while [ "$#" -gt 0 ]; do
         --version)
             shift
             if [ "$#" -eq 0 ]; then
-                echo "install.sh: --version requires a release tag such as v1.2.29." >&3
+                echo "install.sh: --version requires a release tag such as v1.2.31." >&3
                 print_unified_usage
                 exit 1
             fi
@@ -1142,7 +1142,7 @@ Options:
 
 Examples:
   ./$script_name --mode github --no-web-ui
-  ./$script_name --mode github --version v1.2.29
+  ./$script_name --mode github --version v1.2.31
   ./$script_name --mode github --interactive
   ./$script_name --mode github --python-components sdk,api
   MN_PYTHON=/opt/homebrew/bin/python3.11 ./$script_name --mode github
@@ -1223,7 +1223,7 @@ while [ "$#" -gt 0 ]; do
         --version)
             shift
             if [ "$#" -eq 0 ]; then
-                print_error "--version requires a release tag such as v1.2.29."
+                print_error "--version requires a release tag such as v1.2.31."
                 github_usage
                 exit 1
             fi
@@ -2002,7 +2002,7 @@ function write_runtime_compose_files() {
     runtime_skills_root="${MN_SKILLS_ROOT:-${MN_HOST_HOME_DIR}/skills}"
     runtime_agents_root="$(ensure_agent_catalog_root)"
     runtime_package_index="${MN_PACKAGE_INDEX_FILE:-}"
-    membrane_engine_tag="${MN_MEMBRANE_ENGINE_IMAGE_TAG:-${INSTALL_VERSION:-v${MN_PACKAGE_VERSION:-1.2.29}}}"
+    membrane_engine_tag="${MN_MEMBRANE_ENGINE_IMAGE_TAG:-${INSTALL_VERSION:-v${MN_PACKAGE_VERSION:-1.2.31}}}"
     if [[ "$membrane_engine_tag" != v* ]]; then
         membrane_engine_tag="v${membrane_engine_tag}"
     fi
@@ -3894,7 +3894,7 @@ function write_runtime_compose_files() {
     runtime_skills_root="${MN_SKILLS_ROOT:-${MN_HOST_HOME_DIR}/skills}"
     runtime_agents_root="$(ensure_agent_catalog_root)"
     runtime_package_index="${MN_PACKAGE_INDEX_FILE:-}"
-    membrane_engine_tag="${MN_MEMBRANE_ENGINE_IMAGE_TAG:-${INSTALL_VERSION:-v${MN_PACKAGE_VERSION:-1.2.29}}}"
+    membrane_engine_tag="${MN_MEMBRANE_ENGINE_IMAGE_TAG:-${INSTALL_VERSION:-v${MN_PACKAGE_VERSION:-1.2.31}}}"
     if [[ "$membrane_engine_tag" != v* ]]; then
         membrane_engine_tag="v${membrane_engine_tag}"
     fi
@@ -4590,10 +4590,10 @@ PYTHON_SDK_INSTALL_VERSION="${MN_PYTHON_SDK_VERSION:-}"
 CLI_INSTALL_VERSION="${MN_CLI_VERSION:-}"
 API_INSTALL_VERSION="${MN_API_VERSION:-}"
 WEB_UI_INSTALL_VERSION="${MN_WEB_UI_VERSION:-}"
-DEFAULT_PYTHON_SDK_INSTALL_VERSION="${MN_DEFAULT_PYTHON_SDK_VERSION:-v1.2.29}"
-DEFAULT_CLI_INSTALL_VERSION="${MN_DEFAULT_CLI_VERSION:-v1.2.29}"
-DEFAULT_API_INSTALL_VERSION="${MN_DEFAULT_API_VERSION:-v1.2.29}"
-DEFAULT_WEB_UI_INSTALL_VERSION="${MN_DEFAULT_WEB_UI_VERSION:-v1.2.29}"
+DEFAULT_PYTHON_SDK_INSTALL_VERSION="${MN_DEFAULT_PYTHON_SDK_VERSION:-v1.2.31}"
+DEFAULT_CLI_INSTALL_VERSION="${MN_DEFAULT_CLI_VERSION:-v1.2.31}"
+DEFAULT_API_INSTALL_VERSION="${MN_DEFAULT_API_VERSION:-v1.2.31}"
+DEFAULT_WEB_UI_INSTALL_VERSION="${MN_DEFAULT_WEB_UI_VERSION:-v1.2.31}"
 CORE_ASSET_URL="${MN_CORE_ASSET_URL:-}"
 CORE_IMAGE="${MN_CORE_IMAGE:-}"
 CORE_GAR_PROJECT="${MN_CORE_GAR_PROJECT:-mirrorneuron-public-packages}"
@@ -4737,14 +4737,14 @@ Release/source options:
 
 Examples:
   ./$script_name --no-web-ui
-  ./$script_name --version v1.2.29
+  ./$script_name --version v1.2.31
   ./$script_name --interactive
   ./$script_name --no-web-ui --python-components sdk,api
   ./$script_name --gar-project my-gcp-project --gar-repository agent-skills
   ./$script_name --python-index-url https://us-central1-python.pkg.dev/my-gcp-project/agent-skills/simple/
   MN_PYTHON=/opt/homebrew/bin/python3.11 ./$script_name
-  ./$script_name --version v1.2.29 --no-web-ui
-  ./$script_name --core-version v1.2.29 --python-sdk-version v1.2.29 --cli-version v1.2.29 --api-version v1.2.29 --web-ui-version v1.2.29
+  ./$script_name --version v1.2.31 --no-web-ui
+  ./$script_name --core-version v1.2.31 --python-sdk-version v1.2.31 --cli-version v1.2.31 --api-version v1.2.31 --web-ui-version v1.2.31
 EOF
 }
 
@@ -4825,7 +4825,7 @@ while [ "$#" -gt 0 ]; do
         --version)
             shift
             if [ "$#" -eq 0 ]; then
-                print_error "--version requires a release tag such as v1.2.29."
+                print_error "--version requires a release tag such as v1.2.31."
                 usage
                 exit 1
             fi
@@ -4839,7 +4839,7 @@ while [ "$#" -gt 0 ]; do
         --core-version)
             shift
             if [ "$#" -eq 0 ]; then
-                print_error "--core-version requires a release tag such as v1.2.29."
+                print_error "--core-version requires a release tag such as v1.2.31."
                 usage
                 exit 1
             fi
@@ -4851,7 +4851,7 @@ while [ "$#" -gt 0 ]; do
         --python-sdk-version)
             shift
             if [ "$#" -eq 0 ]; then
-                print_error "--python-sdk-version requires a release tag such as v1.2.29."
+                print_error "--python-sdk-version requires a release tag such as v1.2.31."
                 usage
                 exit 1
             fi
@@ -4863,7 +4863,7 @@ while [ "$#" -gt 0 ]; do
         --cli-version)
             shift
             if [ "$#" -eq 0 ]; then
-                print_error "--cli-version requires a release tag such as v1.2.29."
+                print_error "--cli-version requires a release tag such as v1.2.31."
                 usage
                 exit 1
             fi
@@ -4875,7 +4875,7 @@ while [ "$#" -gt 0 ]; do
         --api-version)
             shift
             if [ "$#" -eq 0 ]; then
-                print_error "--api-version requires a release tag such as v1.2.29."
+                print_error "--api-version requires a release tag such as v1.2.31."
                 usage
                 exit 1
             fi
@@ -4887,7 +4887,7 @@ while [ "$#" -gt 0 ]; do
         --web-ui-version)
             shift
             if [ "$#" -eq 0 ]; then
-                print_error "--web-ui-version requires a release tag such as v1.2.29."
+                print_error "--web-ui-version requires a release tag such as v1.2.31."
                 usage
                 exit 1
             fi
@@ -5498,7 +5498,7 @@ function resolve_core_release_tag() {
     if [ -z "$tag" ] || [ "$tag" = "$effective_url" ]; then
         local script_name="${MN_INSTALL_SCRIPT_NAME:-$(basename "$0")}"
         print_error "Could not resolve the latest MirrorNeuron release tag from $effective_url."
-        print_error "Set MN_CORE_RELEASE_TAG explicitly, for example: MN_CORE_RELEASE_TAG=v1.2.29 ./$script_name"
+        print_error "Set MN_CORE_RELEASE_TAG explicitly, for example: MN_CORE_RELEASE_TAG=v1.2.31 ./$script_name"
         exit 1
     fi
 
@@ -6306,7 +6306,7 @@ function write_runtime_compose_files() {
     runtime_skills_root="${MN_SKILLS_ROOT:-${MN_HOST_HOME_DIR}/skills}"
     runtime_agents_root="${MN_AGENTS_ROOT:-}"
     runtime_package_index="${MN_PACKAGE_INDEX_FILE:-}"
-    membrane_engine_tag="${MN_MEMBRANE_ENGINE_IMAGE_TAG:-${INSTALL_VERSION:-v${MN_PACKAGE_VERSION:-1.2.29}}}"
+    membrane_engine_tag="${MN_MEMBRANE_ENGINE_IMAGE_TAG:-${INSTALL_VERSION:-v${MN_PACKAGE_VERSION:-1.2.31}}}"
     if [[ "$membrane_engine_tag" != v* ]]; then
         membrane_engine_tag="v${membrane_engine_tag}"
     fi
