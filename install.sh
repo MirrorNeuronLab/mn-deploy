@@ -4595,6 +4595,11 @@ DEFAULT_CLI_INSTALL_VERSION="${MN_DEFAULT_CLI_VERSION:-v1.2.29}"
 DEFAULT_API_INSTALL_VERSION="${MN_DEFAULT_API_VERSION:-v1.2.29}"
 DEFAULT_WEB_UI_INSTALL_VERSION="${MN_DEFAULT_WEB_UI_VERSION:-v1.2.29}"
 CORE_ASSET_URL="${MN_CORE_ASSET_URL:-}"
+CORE_IMAGE="${MN_CORE_IMAGE:-}"
+CORE_GAR_PROJECT="${MN_CORE_GAR_PROJECT:-mirrorneuron-public-packages}"
+CORE_GAR_LOCATION="${MN_CORE_GAR_LOCATION:-us-central1}"
+CORE_GAR_DOCKER_REPOSITORY="${MN_CORE_GAR_DOCKER_REPOSITORY:-mirrorneuron-runtime}"
+CORE_GAR_DOCKER_IMAGE_NAME="${MN_CORE_GAR_DOCKER_IMAGE_NAME:-mirror-neuron-core}"
 MN_PACKAGE_VERSION=""
 MN_PYTHON_SDK_PACKAGE_VERSION=""
 MN_CLI_PACKAGE_VERSION=""
@@ -4711,7 +4716,9 @@ Release/source options:
   --api-version TAG             Pin mirrorneuron-api. Env: MN_API_VERSION.
   --web-ui-version TAG          Pin mirrorneuron-web-ui. Env: MN_WEB_UI_VERSION.
   --core-release-tag TAG        Legacy alias for --version.
-  --core-asset-url URL          Same as MN_CORE_ASSET_URL.
+  --core-asset-url URL          Same as MN_CORE_ASSET_URL. Explicit legacy
+                                OTP-archive install path; normal binary installs
+                                pull the GAR Core image.
   --gar-project PROJECT         Same as MN_GAR_PROJECT. Overrides the default public package index.
   --gar-location LOCATION       Same as MN_GAR_LOCATION. Default: us-central1.
   --gar-repository NAME         Same as MN_GAR_REPOSITORY. Default: agent-skills.
@@ -4723,7 +4730,8 @@ Release/source options:
   --skills-repo / --skills-git-url
                                 Accepted for CLI compatibility; source inputs are ignored in binary mode.
   --membrane-repo / --membrane-git-url
-                                Accepted for CLI compatibility; binary mode uses the GitHub core release asset plus GAR packages/images.
+                                Accepted for CLI compatibility; binary mode uses
+                                the GAR Core and Membrane images plus GAR packages.
   MN_AGENTS_ROOT=/path          Optional local development override for packaged agent discovery.
   -h, --help                    Show this help.
 
@@ -5504,7 +5512,64 @@ function core_asset_url_for_tag() {
     printf 'https://github.com/%s/releases/download/%s/MirrorNeuron-%s-%s-otp-release.tar.gz' "$CORE_REPO" "$tag" "$tag" "$platform"
 }
 
-function install_core_from_release() {
+function core_gar_image_for_tag() {
+    local tag="$1"
+
+    if [ -n "$CORE_IMAGE" ]; then
+        printf '%s' "$CORE_IMAGE"
+        return
+    fi
+
+    printf '%s-docker.pkg.dev/%s/%s/%s:%s' \
+        "$CORE_GAR_LOCATION" \
+        "$CORE_GAR_PROJECT" \
+        "$CORE_GAR_DOCKER_REPOSITORY" \
+        "$CORE_GAR_DOCKER_IMAGE_NAME" \
+        "$tag"
+}
+
+function install_core_from_gar() {
+    local tag image image_version image_revision image_digest
+
+    tag="$(resolve_core_release_tag)"
+    image="$(core_gar_image_for_tag "$tag")"
+    print_detail "Pulling Core GAR image $image."
+
+    if ! docker pull "$image"; then
+        print_error "Could not pull the required Core GAR image: $image"
+        print_error "Binary installs require this immutable Core image. Verify the release image is published and public, then retry."
+        exit 1
+    fi
+
+    image_version="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' "$image" 2>/dev/null || true)"
+    image_revision="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$image" 2>/dev/null || true)"
+    image_digest="$(docker image inspect --format '{{ index .RepoDigests 0 }}' "$image" 2>/dev/null || true)"
+    image_digest="${image_digest##*@}"
+
+    if [ "$image_version" != "$tag" ]; then
+        print_error "Core GAR image version label mismatch: expected $tag, got ${image_version:-missing}."
+        exit 1
+    fi
+    if [[ ! "$image_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+        print_error "Core GAR image did not expose a valid manifest digest: ${image_digest:-missing}."
+        exit 1
+    fi
+
+    docker image tag "$image" mirror-neuron-core:latest
+    mn_remove_path_or_exit "$INSTALL_DIR" "MirrorNeuron state directory"
+    mkdir -p "$INSTALL_DIR"
+    cat > "$INSTALL_METADATA_FILE" <<EOF
+{
+  "core_release_tag": "$tag",
+  "core_image": "$image",
+  "core_image_digest": "$image_digest",
+  "core_image_revision": "$image_revision",
+  "updated_at": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+}
+EOF
+}
+
+function install_core_from_otp_asset() {
     local platform tag asset_url work_dir tarball context_dir
     platform="$(docker_platform)"
     work_dir="${TMPDIR:-/tmp}/mirror_neuron_core_release.$$"
@@ -5513,13 +5578,8 @@ function install_core_from_release() {
 
     mkdir -p "$work_dir" "$context_dir"
 
-    if [ -n "$CORE_ASSET_URL" ]; then
-        tag="$CORE_RELEASE_TAG"
-        asset_url="$CORE_ASSET_URL"
-    else
-        tag="$(resolve_core_release_tag)"
-        asset_url="$(core_asset_url_for_tag "$tag" "$platform")"
-    fi
+    tag="$CORE_RELEASE_TAG"
+    asset_url="$CORE_ASSET_URL"
 
     print_detail "Core release $tag for Docker platform $platform."
     run_quiet "download-core-release" curl_github -fL "$asset_url" -o "$tarball"
@@ -5590,6 +5650,14 @@ EOF
 }
 EOF
     rm -rf "$work_dir"
+}
+
+function install_core_from_release() {
+    if [ -n "$CORE_ASSET_URL" ]; then
+        install_core_from_otp_asset
+    else
+        install_core_from_gar
+    fi
 }
 
 PIP_INDEX_ARGS=()

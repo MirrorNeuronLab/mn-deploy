@@ -49,8 +49,8 @@ Create a complete multi-repository release:
   2. update indexed/static package versions and snapshot installer support;
   3. commit, push, and annotate one tag in every release repository;
   4. wait for tag-triggered GitHub release workflows;
-  5. publish and verify Python packages in GAR, PyPI, npm, and the Membrane
-     runtime image;
+  5. publish and verify Python packages in GAR, PyPI, npm, and the Core and
+     Membrane runtime images;
   6. update installer/blueprint pins and record the completed release.
 
 Prerequisites: authenticated git, gh, gcloud, npm, curl, Python build/Twine
@@ -173,7 +173,7 @@ wait_for_tag_workflows() {
 }
 
 publish_and_verify_gar() {
-  local local_count remote_count image tags_file
+  local local_count remote_count image tags_file core_image core_tags_file
 
   "${SCRIPT_DIR}/publish_python_packages_to_google_artifact_registry.sh" \
     --python "${SCRIPT_DIR}/.venv-gar-publish/bin/python" \
@@ -198,6 +198,21 @@ publish_and_verify_gar() {
 
   grep -qx "$VERSION" "$tags_file" || die "Membrane Docker tag ${VERSION} was not published."
   grep -qx "${TAG}" "$tags_file" || die "Membrane Docker tag ${TAG} was not published."
+
+  core_image="${LOCATION}-docker.pkg.dev/${PROJECT}/mirrorneuron-runtime/mirror-neuron-core"
+  core_tags_file="$(mktemp "${TMPDIR:-/tmp}/mn-core-tags.XXXXXX")"
+  trap 'rm -f "$tags_file" "$core_tags_file"' RETURN
+  gcloud artifacts docker tags list "$core_image" --format='value(tag)' > "$core_tags_file"
+
+  if ! grep -qx "$VERSION" "$core_tags_file"; then
+    "${SCRIPT_DIR}/publish_public_core_to_google_artifact_registry.sh" \
+      --apply \
+      --version "$TAG"
+    gcloud artifacts docker tags list "$core_image" --format='value(tag)' > "$core_tags_file"
+  fi
+
+  grep -qx "$VERSION" "$core_tags_file" || die "Core Docker tag ${VERSION} was not published."
+  grep -qx "${TAG}" "$core_tags_file" || die "Core Docker tag ${TAG} was not published."
 
   local_count="$(find "${SCRIPT_DIR}/dist/python-packages" -maxdepth 1 -type f | wc -l | tr -d ' ')"
   remote_count="$(gcloud artifacts files list \
@@ -245,7 +260,8 @@ update_post_release_pins() {
 - PyPI: mirrorneuron-api, mirrorneuron-cli, mirrorneuron-python-sdk,
   and mirrorneuron-membrane-python-sdk ${VERSION}.
 - GAR Python: all packages in package-index/python-packages.toml at ${VERSION}.
-- GAR Docker: membrane-context-engine:${VERSION} and membrane-context-engine:${TAG}.
+- GAR Docker: mirror-neuron-core:${VERSION}/${TAG} and
+  membrane-context-engine:${VERSION}/${TAG}.
 - GitHub tag: ${TAG} across the release repositories.
 EOF
 
