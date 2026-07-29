@@ -110,6 +110,102 @@ function mn_is_linux_nvidia_host() {
     [ -n "$gpu_list" ]
 }
 
+function mn_is_ubuntu_linux_host() {
+    [ "$(uname -s)" = "Linux" ] || return 1
+    [ -r /etc/os-release ] || return 1
+
+    local distro_id distro_like
+    distro_id="$(. /etc/os-release; printf '%s' "${ID:-}")"
+    distro_like="$(. /etc/os-release; printf '%s' "${ID_LIKE:-}")"
+    case " ${distro_id} ${distro_like} " in
+        *" ubuntu "*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+function mn_is_docker_desktop_host() {
+    local host_os docker_os
+    host_os="$(uname -s)"
+    case "$host_os" in
+        Darwin|MINGW*|MSYS*|CYGWIN*) return 0 ;;
+    esac
+
+    docker_os="$(docker info --format '{{.OperatingSystem}}' 2>/dev/null | tr '[:upper:]' '[:lower:]' || true)"
+    case "$docker_os" in
+        *"docker desktop"*|*"windows"*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+function mn_print_docker_model_runner_install_hint() {
+    if mn_is_docker_desktop_host; then
+        printf 'Next: docker desktop enable model-runner\n' >&3
+    elif mn_is_ubuntu_linux_host; then
+        printf 'Next: run these commands, then rerun install.sh:\n' >&3
+        printf '  sudo apt-get update\n' >&3
+        printf '  sudo apt-get install docker-model-plugin -y\n' >&3
+    else
+        printf "Next: install the Docker Model Runner plugin for this platform, then run 'docker model start-runner'.\n" >&3
+    fi
+}
+
+function mn_install_ubuntu_docker_model_plugin() {
+    local -a privilege=()
+
+    if ! command -v apt-get >/dev/null 2>&1; then
+        print_error "'apt-get' is required to install docker-model-plugin on Ubuntu."
+        mn_print_docker_model_runner_install_hint
+        exit 1
+    fi
+
+    if [ "$(id -u)" -ne 0 ]; then
+        if ! command -v sudo >/dev/null 2>&1; then
+            print_error "'sudo' is required to install docker-model-plugin on Ubuntu."
+            mn_print_docker_model_runner_install_hint
+            exit 1
+        fi
+        if [ "${NON_INTERACTIVE:-Y}" = "Y" ]; then
+            if ! sudo -n true >/dev/null 2>&1; then
+                print_error "Installing docker-model-plugin requires sudo access."
+                mn_print_docker_model_runner_install_hint
+                exit 1
+            fi
+            privilege=(sudo -n)
+        else
+            privilege=(sudo)
+        fi
+    fi
+
+    print_step "Installing Docker Model Runner plugin for Ubuntu"
+    if ! "${privilege[@]}" apt-get update; then
+        print_error "Could not refresh Ubuntu package metadata."
+        mn_print_docker_model_runner_install_hint
+        exit 1
+    fi
+    if ! "${privilege[@]}" apt-get install docker-model-plugin -y; then
+        print_error "Could not install docker-model-plugin."
+        mn_print_docker_model_runner_install_hint
+        exit 1
+    fi
+}
+
+function mn_prepare_docker_model_runner_cli() {
+    if mn_is_docker_desktop_host; then
+        if docker model status >/dev/null 2>&1; then
+            return 0
+        fi
+        print_step "Enabling Docker Model Runner in Docker Desktop"
+        if ! docker desktop enable model-runner >/dev/null 2>&1; then
+            print_warning "Docker Desktop did not enable Model Runner automatically."
+        fi
+        return 0
+    fi
+
+    if mn_is_ubuntu_linux_host && ! docker model --help >/dev/null 2>&1; then
+        mn_install_ubuntu_docker_model_plugin
+    fi
+}
+
 function mn_docker_model_runner_endpoint_ready() {
     command -v curl >/dev/null 2>&1 || return 1
     curl --fail --silent --show-error --max-time 5 \
@@ -2206,8 +2302,10 @@ function ensure_docker_model_runner() {
         return 0
     fi
 
+    mn_prepare_docker_model_runner_cli
     if ! docker model --help >/dev/null 2>&1; then
-        print_error "Docker Model Runner CLI is not available. Upgrade Docker Desktop/Engine to a version with 'docker model' support."
+        print_error "Docker Model Runner CLI is not available."
+        mn_print_docker_model_runner_install_hint
         exit 1
     fi
 
@@ -2236,9 +2334,10 @@ function ensure_docker_model_runner() {
             return 0
         fi
 
-        print_warning "Docker Model Runner is not running; attempting to enable it."
-        if docker desktop enable model-runner >/dev/null 2>&1 && docker model status >/dev/null 2>&1; then
-            return 0
+        if mn_is_docker_desktop_host; then
+            print_warning "Docker Model Runner is not running after the Docker Desktop enable command."
+        else
+            print_warning "Docker Model Runner is not running; attempting to install and start it."
         fi
 
         if docker model install-runner --help >/dev/null 2>&1; then
@@ -2250,7 +2349,8 @@ function ensure_docker_model_runner() {
         fi
     fi
 
-    print_error "Docker Model Runner is not ready. Enable it in Docker Desktop Settings > AI, or run 'docker model install-runner' and 'docker model start-runner' on Docker Engine."
+    print_error "Docker Model Runner is not ready."
+    mn_print_docker_model_runner_install_hint
     exit 1
 }
 
@@ -4098,8 +4198,10 @@ function ensure_docker_model_runner() {
         return 0
     fi
 
+    mn_prepare_docker_model_runner_cli
     if ! docker model --help >/dev/null 2>&1; then
-        print_error "Docker Model Runner CLI is not available. Upgrade Docker Desktop/Engine to a version with 'docker model' support."
+        print_error "Docker Model Runner CLI is not available."
+        mn_print_docker_model_runner_install_hint
         exit 1
     fi
 
@@ -4128,9 +4230,10 @@ function ensure_docker_model_runner() {
             return 0
         fi
 
-        print_warning "Docker Model Runner is not running; attempting to enable it."
-        if docker desktop enable model-runner >/dev/null 2>&1 && docker model status >/dev/null 2>&1; then
-            return 0
+        if mn_is_docker_desktop_host; then
+            print_warning "Docker Model Runner is not running after the Docker Desktop enable command."
+        else
+            print_warning "Docker Model Runner is not running; attempting to install and start it."
         fi
 
         if docker model install-runner --help >/dev/null 2>&1; then
@@ -4142,7 +4245,8 @@ function ensure_docker_model_runner() {
         fi
     fi
 
-    print_error "Docker Model Runner is not ready. Enable it in Docker Desktop Settings > AI, or run 'docker model install-runner' and 'docker model start-runner' on Docker Engine."
+    print_error "Docker Model Runner is not ready."
+    mn_print_docker_model_runner_install_hint
     exit 1
 }
 
@@ -6510,8 +6614,10 @@ function ensure_docker_model_runner() {
         return 0
     fi
 
+    mn_prepare_docker_model_runner_cli
     if ! docker model --help >/dev/null 2>&1; then
-        print_error "Docker Model Runner CLI is not available. Upgrade Docker Desktop/Engine to a version with 'docker model' support."
+        print_error "Docker Model Runner CLI is not available."
+        mn_print_docker_model_runner_install_hint
         exit 1
     fi
 
@@ -6540,9 +6646,10 @@ function ensure_docker_model_runner() {
             return 0
         fi
 
-        print_warning "Docker Model Runner is not running; attempting to enable it."
-        if docker desktop enable model-runner >/dev/null 2>&1 && docker model status >/dev/null 2>&1; then
-            return 0
+        if mn_is_docker_desktop_host; then
+            print_warning "Docker Model Runner is not running after the Docker Desktop enable command."
+        else
+            print_warning "Docker Model Runner is not running; attempting to install and start it."
         fi
 
         if docker model install-runner --help >/dev/null 2>&1; then
@@ -6554,7 +6661,8 @@ function ensure_docker_model_runner() {
         fi
     fi
 
-    print_error "Docker Model Runner is not ready. Enable it in Docker Desktop Settings > AI, or run 'docker model install-runner' and 'docker model start-runner' on Docker Engine."
+    print_error "Docker Model Runner is not ready."
+    mn_print_docker_model_runner_install_hint
     exit 1
 }
 
