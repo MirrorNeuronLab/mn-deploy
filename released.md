@@ -76,7 +76,7 @@ installers must use the immutable `:v1.2.29` tag.
 | `mirrorneuron-python-sdk` | `1.2.31` | PyPI; GAR Python: `agent-skills`. |
 | `mirrorneuron-web-ui` | `1.2.31` | npm. |
 | `mirrorneuron-membrane-python-sdk` | `1.2.31` | PyPI; GAR Python: `agent-skills`. |
-| All indexed skill and agent distributions | `1.2.31` | GAR Python: `agent-skills` — 105 wheel/source distributions. |
+| All indexed skill and agent distributions | `1.2.31` | GAR Python: `agent-skills` — 107 wheel/source distributions, including `mirrorneuron-live-video-analysis-skill`. |
 | `membrane-context-engine` runtime image | `v1.2.31`, `1.2.31`, `latest` | GAR Docker: `mirrorneuron-runtime` (`us-central1-docker.pkg.dev/mirrorneuron-public-packages/mirrorneuron-runtime/membrane-context-engine`), Linux amd64 and arm64. |
 
 The Membrane runtime image tags all resolve to
