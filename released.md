@@ -65,3 +65,21 @@ installers must use the immutable `:v1.2.29` tag.
 | What | Version | Where |
 | --- | --- | --- |
 | `mirrorneuron-use-generic-model-skill` | `1.2.29` | GAR Python: `agent-skills` (`https://us-central1-python.pkg.dev/mirrorneuron-public-packages/agent-skills/simple/`). |
+
+## 2026-07-29 — v1.2.31
+
+| What | Version | Where |
+| --- | --- | --- |
+| MirrorNeuron Core runtime | `v1.2.31` | GitHub Releases (OTP tarballs). GAR: not published. |
+| `mirrorneuron-api` | `1.2.31` | PyPI; GAR Python: `agent-skills` (`https://us-central1-python.pkg.dev/mirrorneuron-public-packages/agent-skills/simple/`). |
+| `mirrorneuron-cli` | `1.2.31` | PyPI; GAR Python: `agent-skills`. |
+| `mirrorneuron-python-sdk` | `1.2.31` | PyPI; GAR Python: `agent-skills`. |
+| `mirrorneuron-web-ui` | `1.2.31` | npm. |
+| `mirrorneuron-membrane-python-sdk` | `1.2.31` | PyPI; GAR Python: `agent-skills`. |
+| All indexed skill and agent distributions | `1.2.31` | GAR Python: `agent-skills` — 105 wheel/source distributions. |
+| `membrane-context-engine` runtime image | `v1.2.31`, `1.2.31`, `latest` | GAR Docker: `mirrorneuron-runtime` (`us-central1-docker.pkg.dev/mirrorneuron-public-packages/mirrorneuron-runtime/membrane-context-engine`), Linux amd64 and arm64. |
+
+The Membrane runtime image tags all resolve to
+`sha256:1e904fde2ea9fae825e829a584b4402b575d0047c7ea151882be5499b607f9ed`.
+The release scope excludes `otterdesk-desktop-app` and
+`mirrorneuron-system-tests`.
