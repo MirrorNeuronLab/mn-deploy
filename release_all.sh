@@ -23,7 +23,6 @@ REPOSITORIES=(
   mn-docs
   mn-agents
   otterdesk-blueprints
-  mn-system-tests
   mn-skills
   MirrorNeuron
   Membrane
@@ -37,7 +36,6 @@ WORKFLOW_REPOSITORIES=(
   mn-web-ui
   mn-deploy
   mn-python-sdk
-  mn-system-tests
   MirrorNeuron
   Membrane
 )
@@ -221,8 +219,7 @@ verify_public_registries() {
     mirrorneuron-api \
     mirrorneuron-cli \
     mirrorneuron-python-sdk \
-    mirrorneuron-membrane-python-sdk \
-    mirrorneuron-system-tests; do
+    mirrorneuron-membrane-python-sdk; do
     curl --fail --silent --show-error \
       "https://pypi.org/pypi/${package}/${VERSION}/json" \
       --output /dev/null || die "PyPI does not contain ${package}==${VERSION}."
@@ -246,7 +243,7 @@ update_post_release_pins() {
 
 - npm: `mirrorneuron-web-ui@${VERSION}`.
 - PyPI: mirrorneuron-api, mirrorneuron-cli, mirrorneuron-python-sdk,
-  mirrorneuron-membrane-python-sdk, and mirrorneuron-system-tests ${VERSION}.
+  and mirrorneuron-membrane-python-sdk ${VERSION}.
 - GAR Python: all packages in package-index/python-packages.toml at ${VERSION}.
 - GAR Docker: membrane-context-engine:${VERSION} and membrane-context-engine:${TAG}.
 - GitHub tag: ${TAG} across the release repositories.
