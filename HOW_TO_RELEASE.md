@@ -22,6 +22,16 @@ canonical list of Python distributions that the installer can resolve.
    dependency pins, then commit and push those changes.
 9. Append the confirmed destinations to `released.md`.
 
+For the standard release path, use the single-command orchestrator from this
+directory:
+
+```bash
+./release_all.sh -v 1.2.30
+```
+
+It performs the checklist in order and stops before post-release pin updates
+if any required public registry verification fails.
+
 ## Repositories
 
 The stable release tag is created in all of these repositories:
@@ -39,7 +49,6 @@ mn-system-tests
 mn-skills
 MirrorNeuron
 Membrane
-otterdesk-desktop-app
 ```
 
 Before tagging, check all worktrees:
@@ -47,7 +56,7 @@ Before tagging, check all worktrees:
 ```bash
 for repo in mn-api mn-cli mn-web-ui mn-deploy mn-python-sdk mn-docs \
   mn-agents otterdesk-blueprints mn-system-tests mn-skills MirrorNeuron \
-  Membrane otterdesk-desktop-app; do
+  Membrane; do
   git -C "$repo" status --short --branch
 done
 ```
@@ -79,8 +88,7 @@ been pushed to `main`:
 ```bash
 release_tag=v1.2.29
 repos=(mn-api mn-cli mn-web-ui mn-deploy mn-python-sdk mn-docs mn-agents \
-  otterdesk-blueprints mn-system-tests mn-skills MirrorNeuron Membrane \
-  otterdesk-desktop-app)
+  otterdesk-blueprints mn-system-tests mn-skills MirrorNeuron Membrane)
 
 for repo in "${repos[@]}"; do
   git -C "$repo" tag "$release_tag"
@@ -208,4 +216,3 @@ git -C otterdesk-blueprints add .
 git -C otterdesk-blueprints commit -m "Pin blueprint dependencies to 1.2.29"
 git -C otterdesk-blueprints push origin main
 ```
-
