@@ -299,8 +299,8 @@ update_post_release_pins() {
 - PyPI: mirrorneuron-api, mirrorneuron-cli, mirrorneuron-python-sdk,
   and mirrorneuron-membrane-python-sdk ${VERSION}.
 - GAR Python: all packages in package-index/python-packages.toml at ${VERSION}.
-- GAR Docker: mirror-neuron-core:${VERSION}/${TAG} and
-  membrane-context-engine:${VERSION}/${TAG}.
+- GAR Docker: mirror-neuron-core and membrane-context-engine each published
+  ${TAG}, ${VERSION}, and latest (pointing to this release at confirmation).
 - GitHub tag: ${TAG} across the release repositories.
 EOF
 

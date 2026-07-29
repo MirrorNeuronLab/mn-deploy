@@ -165,9 +165,9 @@ files. For the 1.2.29 release, the index contained 52 packages and produced
 
 ## Publish the Membrane GAR runtime image
 
-If the Membrane workflow's `Publish GAR runtime image` job is skipped because
-GitHub OIDC variables are not configured, publish from an authenticated local
-checkout:
+Membrane runtime images are published from an authenticated local checkout by
+the unified release pipeline; its GitHub release workflow does not build or
+push Docker images. To publish or backfill an image directly:
 
 ```bash
 ./mn-deploy/publish_public_membrane_to_google_artifact_registry.sh \
