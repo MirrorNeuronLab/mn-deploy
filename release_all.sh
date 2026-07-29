@@ -105,9 +105,12 @@ check_workspace() {
     git -C "$path" fetch --quiet origin main --tags
     [[ "$(git -C "$path" rev-parse main)" == "$(git -C "$path" rev-parse origin/main)" ]] ||
       die "${repo}/main is not synchronized with origin/main."
-    git -C "$path" rev-parse --verify --quiet "refs/tags/${TAG}" >/dev/null &&
+    if git -C "$path" rev-parse --verify --quiet "refs/tags/${TAG}" >/dev/null; then
       die "${repo} already contains ${TAG}; tags are immutable release inputs."
+    fi
   done
+
+  return 0
 }
 
 prepare_release_metadata() {
