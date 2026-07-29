@@ -1,4 +1,4 @@
-# Google Artifact Registry Python Publishing
+# Google Artifact Registry Publishing
 
 This runbook publishes every package listed in
 `package-index/python-packages.toml` to Google Artifact Registry (GAR). The
@@ -31,7 +31,7 @@ npm. Core OTP archives remain GitHub Release assets only for an explicit
 
 ## Runtime Image Release Contract
 
-For release tag `v1.2.27`, each runtime workflow publishes immutable and
+For release tag `v1.2.27`, the local runtime publishers publish immutable and
 convenience tags to the **Docker** `mirrorneuron-runtime` repository:
 
 ```text
@@ -56,6 +56,10 @@ for image in mirror-neuron-core membrane-context-engine; do
     --sort-by='~updateTime'
 done
 ```
+
+The standard `release_all.sh` flow publishes the Core image from the local
+release machine after the Core GitHub Release workflow finishes. GitHub Actions
+builds the Core OTP archives but does not publish the Core GAR image.
 
 ## Requested Python Namespace Split
 
@@ -208,6 +212,28 @@ local host-only Rust archive:
 This publisher uses normal `gcloud auth login` credentials. The Python
 publisher also needs Application Default Credentials because Twine uses the
 Google Artifact Registry keyring backend.
+
+## Public Core Docker Image
+
+The Core runtime image is published locally from the exact requested Core Git
+tag:
+
+```bash
+./publish_public_core_to_google_artifact_registry.sh \
+  --apply \
+  --version v1.2.30
+```
+
+The publisher pushes a multi-platform `linux/amd64,linux/arm64` manifest with
+the `vX.Y.Z`, `X.Y.Z`, and `latest` tags. On an ARM64 release machine it
+automatically registers pinned QEMU amd64 emulation. Erlang build commands use
+single-mapped JIT memory during emulation because QEMU user mode cannot execute
+the normal dual-mapped JIT memory layout.
+
+Docker Desktop and Docker Buildx are required. The QEMU registration uses a
+short-lived privileged `tonistiigi/binfmt` container. Pass `--qemu always` when
+an Apple Silicon shell reports x64 through Rosetta, or `--qemu never` when the
+builder's emulation is managed separately.
 
 ## Public Otterdesk Desktop Packages
 

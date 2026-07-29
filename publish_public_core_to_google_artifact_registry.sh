@@ -14,11 +14,16 @@ DOCKER_REPOSITORY="${MN_CORE_GAR_DOCKER_REPOSITORY:-mirrorneuron-runtime}"
 DOCKER_IMAGE_NAME="${MN_CORE_GAR_DOCKER_IMAGE_NAME:-mirror-neuron-core}"
 DOCKER_PLATFORMS="${MN_CORE_DOCKER_PLATFORMS:-linux/amd64,linux/arm64}"
 DOCKER_PROGRESS="${MN_CORE_DOCKER_PROGRESS:-auto}"
+QEMU_MODE="${MN_CORE_QEMU_MODE:-auto}"
+QEMU_IMAGE="${MN_CORE_QEMU_IMAGE:-tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0}"
+QEMU_ERL_AFLAGS="${MN_CORE_QEMU_ERL_AFLAGS:-+JMsingle true}"
+HOST_ARCH="${MN_CORE_HOST_ARCH:-$(uname -m)}"
 GCLOUD_BIN="${MN_GCLOUD_BIN:-gcloud}"
 DOCKER_BIN="${MN_DOCKER_BIN:-docker}"
 APPLY="N"
 TAG_LATEST="Y"
 WORKTREE_DIR=""
+EMULATE_AMD64="N"
 
 usage() {
     cat <<'EOF'
@@ -42,6 +47,9 @@ Options:
   --docker-platforms LIST         Buildx platforms. Default: linux/amd64,linux/arm64.
   --docker-progress MODE          Buildx progress mode. Default: auto.
                                   Env: MN_CORE_DOCKER_PROGRESS.
+  --qemu MODE                    amd64 emulator setup: auto, always, or never.
+                                  Default: auto (enable on an ARM64 host).
+                                  Env: MN_CORE_QEMU_MODE.
   --no-latest                     Do not update the latest tag.
   --gcloud PATH                   gcloud executable. Env: MN_GCLOUD_BIN.
   --docker PATH                   docker executable. Env: MN_DOCKER_BIN.
@@ -98,6 +106,44 @@ normalize_version_tag() {
 validate_version_tag() {
     [[ "$1" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta|rc)\.(0|[1-9][0-9]*))?$ ]] ||
         die "Version must be vMAJOR.MINOR.PATCH (optionally -alpha.N, -beta.N, or -rc.N), got '$1'."
+}
+
+validate_qemu_mode() {
+    case "$QEMU_MODE" in
+        auto|always|never) ;;
+        *) die "QEMU mode must be auto, always, or never; got '$QEMU_MODE'." ;;
+    esac
+}
+
+platform_requested() {
+    local platforms="${DOCKER_PLATFORMS//[[:space:]]/}"
+    case ",${platforms}," in
+        *,"$1",*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+configure_amd64_emulation() {
+    platform_requested linux/amd64 || return
+
+    case "$QEMU_MODE" in
+        always)
+            EMULATE_AMD64="Y"
+            ;;
+        auto)
+            case "$HOST_ARCH" in
+                arm64|aarch64) EMULATE_AMD64="Y" ;;
+            esac
+            ;;
+        never)
+            return
+            ;;
+    esac
+
+    if [ "$EMULATE_AMD64" = "Y" ]; then
+        log "Configuring amd64 QEMU emulation for Core release build on ${HOST_ARCH}."
+        run_or_echo "$DOCKER_BIN" run --privileged --rm "$QEMU_IMAGE" --install amd64
+    fi
 }
 
 infer_version() {
@@ -205,6 +251,8 @@ publish_docker_image() {
         run_or_echo "$GCLOUD_BIN" auth configure-docker "$registry" --quiet
     fi
 
+    configure_amd64_emulation
+
     build_cmd=(
         "$DOCKER_BIN" buildx build
         --platform "$DOCKER_PLATFORMS"
@@ -218,6 +266,11 @@ publish_docker_image() {
         --tag "${image_repo}:${version_tag}"
         --tag "${image_repo}:${version_number}"
     )
+    if [ "$EMULATE_AMD64" = "Y" ]; then
+        # Erlang's dual-mapped JIT memory is not supported by QEMU user mode.
+        # This build-only argument is consumed by the Dockerfile's Mix steps.
+        build_cmd+=(--build-arg "ERL_AFLAGS=${QEMU_ERL_AFLAGS}")
+    fi
     if [ "$TAG_LATEST" = "Y" ]; then
         build_cmd+=(--tag "${image_repo}:latest")
     fi
@@ -246,6 +299,8 @@ while [ "$#" -gt 0 ]; do
         --docker-platforms=*) DOCKER_PLATFORMS="${1#*=}" ;;
         --docker-progress) shift; [ "$#" -gt 0 ] || die "--docker-progress requires a value."; DOCKER_PROGRESS="$1" ;;
         --docker-progress=*) DOCKER_PROGRESS="${1#*=}" ;;
+        --qemu) shift; [ "$#" -gt 0 ] || die "--qemu requires a value."; QEMU_MODE="$1" ;;
+        --qemu=*) QEMU_MODE="${1#*=}" ;;
         --no-latest) TAG_LATEST="N" ;;
         --gcloud) shift; [ "$#" -gt 0 ] || die "--gcloud requires a value."; GCLOUD_BIN="$1" ;;
         --gcloud=*) GCLOUD_BIN="${1#*=}" ;;
@@ -265,6 +320,7 @@ CORE_DOCKERFILE="${CORE_DOCKERFILE:-${CORE_DIR}/Dockerfile}"
 
 VERSION_TAG="$(infer_version)"
 validate_version_tag "$VERSION_TAG"
+validate_qemu_mode
 trap cleanup EXIT
 prepare_tag_worktree "$VERSION_TAG"
 

@@ -50,11 +50,12 @@ Create a complete multi-repository release:
   3. commit, push, and annotate one tag in every release repository;
   4. wait for tag-triggered GitHub release workflows;
   5. publish and verify Python packages in GAR, PyPI, npm, and the Core and
-     Membrane runtime images;
+     Membrane runtime images (Core is built locally with Docker Buildx/QEMU);
   6. update installer/blueprint pins and record the completed release.
 
-Prerequisites: authenticated git, gh, gcloud, npm, curl, Python build/Twine
-environment, and publishing authority for the configured npm/PyPI/GAR targets.
+Prerequisites: authenticated git, gh, gcloud, npm, curl, Docker with Buildx,
+Python build/Twine environment, and publishing authority for the configured
+npm/PyPI/GAR targets.
 EOF
 }
 
@@ -175,45 +176,6 @@ wait_for_tag_workflows() {
   done
 }
 
-publish_core_gar_image_from_github() {
-  local workflow='publish-core-gar-image.yml'
-  local previous_run_id run_id attempt
-
-  previous_run_id="$(gh run list \
-    --repo MirrorNeuronLab/MirrorNeuron \
-    --workflow "$workflow" \
-    --branch main \
-    --event workflow_dispatch \
-    --limit 1 \
-    --json databaseId \
-    --jq '.[0].databaseId // empty')"
-
-  gh workflow run "$workflow" \
-    --repo MirrorNeuronLab/MirrorNeuron \
-    --ref main \
-    -f "release_tag=${TAG}"
-
-  run_id=""
-  for attempt in $(seq 1 30); do
-    run_id="$(gh run list \
-      --repo MirrorNeuronLab/MirrorNeuron \
-      --workflow "$workflow" \
-      --branch main \
-      --event workflow_dispatch \
-      --limit 1 \
-      --json databaseId \
-      --jq '.[0].databaseId // empty')"
-    if [[ -n "$run_id" && "$run_id" != "$previous_run_id" ]]; then
-      break
-    fi
-    sleep 10
-  done
-
-  [[ -n "$run_id" && "$run_id" != "$previous_run_id" ]] ||
-    die "No GitHub Core GAR backfill workflow appeared for ${TAG}."
-  gh run watch "$run_id" --repo MirrorNeuronLab/MirrorNeuron --exit-status
-}
-
 publish_and_verify_gar() {
   local local_count remote_count image tags_file core_image core_tags_file
 
@@ -242,15 +204,16 @@ publish_and_verify_gar() {
   grep -qx "${TAG}" "$tags_file" || die "Membrane Docker tag ${TAG} was not published."
   grep -qx latest "$tags_file" || die "Membrane Docker latest tag was not published."
 
+  "${SCRIPT_DIR}/publish_public_core_to_google_artifact_registry.sh" \
+    --apply \
+    --version "$TAG" \
+    --project "$PROJECT" \
+    --location "$LOCATION"
+
   core_image="${LOCATION}-docker.pkg.dev/${PROJECT}/mirrorneuron-runtime/mirror-neuron-core"
   core_tags_file="$(mktemp "${TMPDIR:-/tmp}/mn-core-tags.XXXXXX")"
   trap 'rm -f "$tags_file" "$core_tags_file"' RETURN
   gcloud artifacts docker tags list "$core_image" --format='value(tag)' > "$core_tags_file"
-
-  if ! grep -qx "$VERSION" "$core_tags_file" || ! grep -qx "$TAG" "$core_tags_file" || ! grep -qx latest "$core_tags_file"; then
-    publish_core_gar_image_from_github
-    gcloud artifacts docker tags list "$core_image" --format='value(tag)' > "$core_tags_file"
-  fi
 
   grep -qx "$VERSION" "$core_tags_file" || die "Core Docker tag ${VERSION} was not published."
   grep -qx "${TAG}" "$core_tags_file" || die "Core Docker tag ${TAG} was not published."
@@ -342,9 +305,13 @@ done
 validate_version "$VERSION"
 TAG="v${VERSION}"
 
-for command in git gh gcloud npm curl perl; do
+for command in git gh gcloud docker npm curl perl; do
   require_command "$command"
 done
+docker info >/dev/null 2>&1 ||
+  die "Docker is not running or the current user cannot access the Docker daemon."
+docker buildx version >/dev/null 2>&1 ||
+  die "Docker Buildx is required to publish multi-platform runtime images."
 
 check_workspace
 prepare_release_metadata

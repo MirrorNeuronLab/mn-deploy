@@ -185,6 +185,18 @@ Run its isolated Git regression test with:
     --repository agent-skills
   ```
 
+- Public Core multi-platform Docker image GAR apply:
+
+  ```bash
+  ./publish_public_core_to_google_artifact_registry.sh \
+    --apply \
+    --version v1.2.30
+  ```
+
+  On Apple Silicon this automatically registers QEMU for the x64 release
+  image. The standard `./release_all.sh -v 1.2.30` flow runs this local
+  publisher; the Core GitHub Actions workflow only publishes OTP archives.
+
 - Public Membrane Rust binary and Docker image GAR dry run:
 
   ```bash

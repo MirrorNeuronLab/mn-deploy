@@ -70,7 +70,7 @@ installers must use the immutable `:v1.2.29` tag.
 
 | What | Version | Where |
 | --- | --- | --- |
-| MirrorNeuron Core runtime | `v1.2.31` | GitHub Releases (OTP tarballs). GAR: not published. |
+| MirrorNeuron Core runtime | `v1.2.31`, `1.2.31`, `latest` | GitHub Releases (OTP tarballs); GAR Docker: `mirrorneuron-runtime` (`us-central1-docker.pkg.dev/mirrorneuron-public-packages/mirrorneuron-runtime/mirror-neuron-core`), Linux amd64 and arm64. |
 | `mirrorneuron-api` | `1.2.31` | PyPI; GAR Python: `agent-skills` (`https://us-central1-python.pkg.dev/mirrorneuron-public-packages/agent-skills/simple/`). |
 | `mirrorneuron-cli` | `1.2.31` | PyPI; GAR Python: `agent-skills`. |
 | `mirrorneuron-python-sdk` | `1.2.31` | PyPI; GAR Python: `agent-skills`. |
@@ -79,6 +79,8 @@ installers must use the immutable `:v1.2.29` tag.
 | All indexed skill and agent distributions | `1.2.31` | GAR Python: `agent-skills` — 107 wheel/source distributions, including `mirrorneuron-live-video-analysis-skill`. |
 | `membrane-context-engine` runtime image | `v1.2.31`, `1.2.31`, `latest` | GAR Docker: `mirrorneuron-runtime` (`us-central1-docker.pkg.dev/mirrorneuron-public-packages/mirrorneuron-runtime/membrane-context-engine`), Linux amd64 and arm64. |
 
+The Core runtime image tags all resolve to
+`sha256:dad099b5485322051e6a9056c176599d82542887d348a7f570e132a8996ac630`.
 The Membrane runtime image tags all resolve to
 `sha256:1e904fde2ea9fae825e829a584b4402b575d0047c7ea151882be5499b607f9ed`.
 The release scope excludes `otterdesk-desktop-app` and
