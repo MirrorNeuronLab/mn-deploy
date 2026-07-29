@@ -301,14 +301,6 @@ installer_groups = ["skill"]
 binary_default = false
 
 [[packages]]
-name = "mirrorneuron-w3m-browser-skill"
-path = "mn-skills/w3m_browser_skill"
-publish_group = "skill"
-version = "1.2.30"
-installer_groups = ["skill"]
-binary_default = false
-
-[[packages]]
 name = "mirrorneuron-websocket-stream-skill"
 path = "mn-skills/websocket_stream_skill"
 publish_group = "skill"
