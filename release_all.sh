@@ -188,7 +188,7 @@ publish_and_verify_gar() {
   trap 'rm -f "$tags_file"' RETURN
   gcloud artifacts docker tags list "$image" --format='value(tag)' > "$tags_file"
 
-  if ! grep -qx "$VERSION" "$tags_file"; then
+  if ! grep -qx "$VERSION" "$tags_file" || ! grep -qx "$TAG" "$tags_file" || ! grep -qx latest "$tags_file"; then
     "${SCRIPT_DIR}/publish_public_membrane_to_google_artifact_registry.sh" \
       --apply \
       --version "$TAG" \
@@ -198,13 +198,14 @@ publish_and_verify_gar() {
 
   grep -qx "$VERSION" "$tags_file" || die "Membrane Docker tag ${VERSION} was not published."
   grep -qx "${TAG}" "$tags_file" || die "Membrane Docker tag ${TAG} was not published."
+  grep -qx latest "$tags_file" || die "Membrane Docker latest tag was not published."
 
   core_image="${LOCATION}-docker.pkg.dev/${PROJECT}/mirrorneuron-runtime/mirror-neuron-core"
   core_tags_file="$(mktemp "${TMPDIR:-/tmp}/mn-core-tags.XXXXXX")"
   trap 'rm -f "$tags_file" "$core_tags_file"' RETURN
   gcloud artifacts docker tags list "$core_image" --format='value(tag)' > "$core_tags_file"
 
-  if ! grep -qx "$VERSION" "$core_tags_file"; then
+  if ! grep -qx "$VERSION" "$core_tags_file" || ! grep -qx "$TAG" "$core_tags_file" || ! grep -qx latest "$core_tags_file"; then
     "${SCRIPT_DIR}/publish_public_core_to_google_artifact_registry.sh" \
       --apply \
       --version "$TAG"
@@ -213,6 +214,7 @@ publish_and_verify_gar() {
 
   grep -qx "$VERSION" "$core_tags_file" || die "Core Docker tag ${VERSION} was not published."
   grep -qx "${TAG}" "$core_tags_file" || die "Core Docker tag ${TAG} was not published."
+  grep -qx latest "$core_tags_file" || die "Core Docker latest tag was not published."
 
   local_count="$(find "${SCRIPT_DIR}/dist/python-packages" -maxdepth 1 -type f | wc -l | tr -d ' ')"
   remote_count="$(gcloud artifacts files list \

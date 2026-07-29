@@ -8,10 +8,12 @@ WORKSPACE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 PROJECT="${MN_GAR_PROJECT:-mirrorneuron-public-packages}"
 LOCATION="${MN_GAR_LOCATION:-us-central1}"
 CORE_DIR="${MN_CORE_DIR:-${WORKSPACE_ROOT}/MirrorNeuron}"
+CORE_DOCKERFILE="${MN_CORE_DOCKERFILE:-}"
 VERSION="${MN_CORE_VERSION:-${MN_PACKAGE_VERSION:-}}"
 DOCKER_REPOSITORY="${MN_CORE_GAR_DOCKER_REPOSITORY:-mirrorneuron-runtime}"
 DOCKER_IMAGE_NAME="${MN_CORE_GAR_DOCKER_IMAGE_NAME:-mirror-neuron-core}"
 DOCKER_PLATFORMS="${MN_CORE_DOCKER_PLATFORMS:-linux/amd64,linux/arm64}"
+DOCKER_PROGRESS="${MN_CORE_DOCKER_PROGRESS:-auto}"
 GCLOUD_BIN="${MN_GCLOUD_BIN:-gcloud}"
 DOCKER_BIN="${MN_DOCKER_BIN:-docker}"
 APPLY="N"
@@ -31,11 +33,15 @@ Options:
   --version VERSION               Release version/tag, for example v1.2.30.
                                    Env: MN_CORE_VERSION or MN_PACKAGE_VERSION.
   --core-dir PATH                 Core checkout. Env: MN_CORE_DIR.
+  --dockerfile PATH               Release Dockerfile. Defaults to the Dockerfile
+                                  in the Core checkout. Env: MN_CORE_DOCKERFILE.
   --project PROJECT               GAR project. Env: MN_GAR_PROJECT.
   --location LOCATION             GAR location. Env: MN_GAR_LOCATION.
   --docker-repository NAME        GAR Docker repository. Default: mirrorneuron-runtime.
   --docker-image-name NAME        GAR image name. Default: mirror-neuron-core.
   --docker-platforms LIST         Buildx platforms. Default: linux/amd64,linux/arm64.
+  --docker-progress MODE          Buildx progress mode. Default: auto.
+                                  Env: MN_CORE_DOCKER_PROGRESS.
   --no-latest                     Do not update the latest tag.
   --gcloud PATH                   gcloud executable. Env: MN_GCLOUD_BIN.
   --docker PATH                   docker executable. Env: MN_DOCKER_BIN.
@@ -178,7 +184,7 @@ prepare_tag_worktree() {
     WORKTREE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mn-core-gar.${version_tag}.XXXXXX")"
     rmdir "$WORKTREE_DIR"
     git -C "$CORE_DIR" worktree add --detach "$WORKTREE_DIR" "refs/tags/${version_tag}" >/dev/null
-    [ -f "$WORKTREE_DIR/Dockerfile" ] || die "Core Dockerfile was not found at tag ${version_tag}."
+    [ -f "$CORE_DOCKERFILE" ] || die "Core Dockerfile was not found: $CORE_DOCKERFILE"
 }
 
 publish_docker_image() {
@@ -202,9 +208,13 @@ publish_docker_image() {
     build_cmd=(
         "$DOCKER_BIN" buildx build
         --platform "$DOCKER_PLATFORMS"
+        --progress "$DOCKER_PROGRESS"
         --push
+        --file "$CORE_DOCKERFILE"
         --build-arg "CORE_RELEASE_TAG=${version_tag}"
         --build-arg "CORE_REVISION=${revision}"
+        --label "org.opencontainers.image.version=${version_tag}"
+        --label "org.opencontainers.image.revision=${revision}"
         --tag "${image_repo}:${version_tag}"
         --tag "${image_repo}:${version_number}"
     )
@@ -222,6 +232,8 @@ while [ "$#" -gt 0 ]; do
         --version=*) VERSION="${1#*=}" ;;
         --core-dir) shift; [ "$#" -gt 0 ] || die "--core-dir requires a value."; CORE_DIR="$1" ;;
         --core-dir=*) CORE_DIR="${1#*=}" ;;
+        --dockerfile) shift; [ "$#" -gt 0 ] || die "--dockerfile requires a value."; CORE_DOCKERFILE="$1" ;;
+        --dockerfile=*) CORE_DOCKERFILE="${1#*=}" ;;
         --project) shift; [ "$#" -gt 0 ] || die "--project requires a value."; PROJECT="$1" ;;
         --project=*) PROJECT="${1#*=}" ;;
         --location) shift; [ "$#" -gt 0 ] || die "--location requires a value."; LOCATION="$1" ;;
@@ -232,6 +244,8 @@ while [ "$#" -gt 0 ]; do
         --docker-image-name=*) DOCKER_IMAGE_NAME="${1#*=}" ;;
         --docker-platforms) shift; [ "$#" -gt 0 ] || die "--docker-platforms requires a value."; DOCKER_PLATFORMS="$1" ;;
         --docker-platforms=*) DOCKER_PLATFORMS="${1#*=}" ;;
+        --docker-progress) shift; [ "$#" -gt 0 ] || die "--docker-progress requires a value."; DOCKER_PROGRESS="$1" ;;
+        --docker-progress=*) DOCKER_PROGRESS="${1#*=}" ;;
         --no-latest) TAG_LATEST="N" ;;
         --gcloud) shift; [ "$#" -gt 0 ] || die "--gcloud requires a value."; GCLOUD_BIN="$1" ;;
         --gcloud=*) GCLOUD_BIN="${1#*=}" ;;
@@ -246,6 +260,8 @@ done
 command_exists git || die "git was not found."
 command_exists "$GCLOUD_BIN" || die "'$GCLOUD_BIN' was not found."
 command_exists "$DOCKER_BIN" || die "'$DOCKER_BIN' was not found."
+
+CORE_DOCKERFILE="${CORE_DOCKERFILE:-${CORE_DIR}/Dockerfile}"
 
 VERSION_TAG="$(infer_version)"
 validate_version_tag "$VERSION_TAG"

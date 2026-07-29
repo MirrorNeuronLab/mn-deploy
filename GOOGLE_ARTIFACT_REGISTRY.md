@@ -16,22 +16,28 @@ than one of those formats.
 - `agent-skills` (Python): the current public simple index for all indexed
   Python distributions:
   `https://us-central1-python.pkg.dev/mirrorneuron-public-packages/agent-skills/simple/`
-- `mirrorneuron-runtime` (Docker): the public runtime-image repository. The
-  Membrane engine must publish here as
+- `mirrorneuron-runtime` (Docker): the public runtime-image repository. Core
+  and Membrane publish here as
+  `us-central1-docker.pkg.dev/mirrorneuron-public-packages/mirrorneuron-runtime/mirror-neuron-core:<tag>`
+  and
   `us-central1-docker.pkg.dev/mirrorneuron-public-packages/mirrorneuron-runtime/membrane-context-engine:<tag>`.
 - `mirrorneuron-binaries` (Generic): public binary release archives.
 
 The normal binary installer downloads the Python SDK, CLI, API, Membrane Python
-SDK, agents, and skills from `agent-skills`; it pulls the Membrane engine image
-from `mirrorneuron-runtime`. The Web UI is published to npm, and Core release
-archives are published through GitHub Releases.
+SDK, agents, and skills from `agent-skills`; it pulls the immutable Core and
+Membrane engine images from `mirrorneuron-runtime`. The Web UI is published to
+npm. Core OTP archives remain GitHub Release assets only for an explicit
+`--core-asset-url` compatibility install.
 
 ## Runtime Image Release Contract
 
-For release tag `v1.2.27`, the Membrane workflow publishes these immutable and
+For release tag `v1.2.27`, each runtime workflow publishes immutable and
 convenience tags to the **Docker** `mirrorneuron-runtime` repository:
 
 ```text
+us-central1-docker.pkg.dev/mirrorneuron-public-packages/mirrorneuron-runtime/mirror-neuron-core:v1.2.27
+us-central1-docker.pkg.dev/mirrorneuron-public-packages/mirrorneuron-runtime/mirror-neuron-core:1.2.27
+us-central1-docker.pkg.dev/mirrorneuron-public-packages/mirrorneuron-runtime/mirror-neuron-core:latest
 us-central1-docker.pkg.dev/mirrorneuron-public-packages/mirrorneuron-runtime/membrane-context-engine:v1.2.27
 us-central1-docker.pkg.dev/mirrorneuron-public-packages/mirrorneuron-runtime/membrane-context-engine:1.2.27
 us-central1-docker.pkg.dev/mirrorneuron-public-packages/mirrorneuron-runtime/membrane-context-engine:latest
@@ -43,10 +49,12 @@ runtime image at the Python `agent-skills` repository.
 Verify a published release with:
 
 ```bash
-$HOME/google-cloud-sdk/bin/gcloud artifacts docker tags list \
-  us-central1-docker.pkg.dev/mirrorneuron-public-packages/mirrorneuron-runtime/membrane-context-engine \
-  --format='table(tag,version,updateTime)' \
-  --sort-by='~updateTime'
+for image in mirror-neuron-core membrane-context-engine; do
+  $HOME/google-cloud-sdk/bin/gcloud artifacts docker tags list \
+    "us-central1-docker.pkg.dev/mirrorneuron-public-packages/mirrorneuron-runtime/${image}" \
+    --format='table(tag,version,updateTime)' \
+    --sort-by='~updateTime'
+done
 ```
 
 ## Requested Python Namespace Split
@@ -57,7 +65,7 @@ Python repositories are therefore:
 
 | Package family | Python GAR repository | Notes |
 | --- | --- | --- |
-| Core-adjacent runtime packages: `mirrorneuron-python-sdk`, `mirrorneuron-cli`, `mirrorneuron-api`, and the Membrane Python SDK | `mirrorneuron-runtime-python` | The Core executable itself remains a GitHub Release archive; the Membrane engine remains the Docker image in `mirrorneuron-runtime`. |
+| Core-adjacent runtime packages: `mirrorneuron-python-sdk`, `mirrorneuron-cli`, `mirrorneuron-api`, and the Membrane Python SDK | `mirrorneuron-runtime-python` | Core and Membrane runtime images remain Docker images in `mirrorneuron-runtime`. |
 | `mn-skills/*` packages | `mirrorneuron-skills` | Python repository. |
 | `mn-agents/*` packages | `mirrorneuron-agents` | Python repository. |
 

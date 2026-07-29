@@ -113,7 +113,8 @@ done
 
 The relevant publication destinations are:
 
-- `MirrorNeuron`: GitHub Releases for the core OTP runtime.
+- `MirrorNeuron`: GitHub Releases for core OTP archives and GAR Docker for the
+  Core runtime image.
 - `mn-web-ui`: npm.
 - `mn-api`, `mn-cli`, and `mn-python-sdk`: PyPI when Trusted Publishing is
   configured, and GAR Python through the package publication flow.
@@ -177,6 +178,34 @@ checkout:
 
 Verify the immutable tag and the `latest` tag in
 `us-central1-docker.pkg.dev/mirrorneuron-public-packages/mirrorneuron-runtime/`.
+
+## Publish the Core GAR runtime image
+
+The Core release workflow publishes the `mirror-neuron-core` source image for
+`linux/amd64` and `linux/arm64` after its tag tests pass. It applies
+`vX.Y.Z`, `X.Y.Z`, and `latest`; binary installs always use `vX.Y.Z`.
+
+If the workflow's GAR job is skipped because GitHub OIDC variables are not
+configured, or to backfill an existing release, publish the exact Core tag from
+an authenticated local checkout. The helper uses the checkout's current release
+Dockerfile with the requested tag's source tree; this allows old tags to benefit
+from compatible build-image fixes without changing their application source.
+The maintained Dockerfile pins the supported Elixir 1.18 runtime:
+
+```bash
+./mn-deploy/publish_public_core_to_google_artifact_registry.sh \
+  --apply \
+  --version v1.2.30
+```
+
+If a local multi-platform builder cannot run an amd64 Erlang VM (for example,
+some Apple Silicon Docker Desktop configurations), run the manual **Publish
+Core GAR Runtime Image** GitHub workflow from `MirrorNeuron/main` with
+`release_tag=v1.2.30` instead.
+
+Verify all three tags point to the published multi-platform manifest. The
+binary installer retags the immutable image locally as `mirror-neuron-core:latest`
+for Docker Compose; `--mode local` still builds that local image from source.
 
 ## Update installers and blueprints after publication
 
