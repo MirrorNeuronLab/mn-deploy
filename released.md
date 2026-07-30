@@ -85,3 +85,14 @@ The Membrane runtime image tags all resolve to
 `sha256:1e904fde2ea9fae825e829a584b4402b575d0047c7ea151882be5499b607f9ed`.
 The release scope excludes `otterdesk-desktop-app` and
 `mirrorneuron-system-tests`.
+
+## 2026-07-29 — mn-cli v1.2.32
+
+| What | Version | Where |
+| --- | --- | --- |
+| `mirrorneuron-cli` | `1.2.32` | GitHub Releases; PyPI. |
+
+This patch prevents the runtime update check from treating an older release
+plan component as a downgrade offer. The default installer pins this CLI
+version and disables periodic update checks while it starts the newly installed
+runtime.

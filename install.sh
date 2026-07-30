@@ -421,12 +421,12 @@ function mn_run_runtime_start_command() {
     local status
 
     if [ "$MN_INSTALL_VERBOSE" = "Y" ] || [ "${START_AS_WORKER:-N}" = "Y" ]; then
-        "$@"
+        MN_DISABLE_UPDATE_CHECK=1 "$@"
         return
     fi
 
     mkdir -p "$log_dir"
-    if "$@" >"$log_file" 2>&1; then
+    if MN_DISABLE_UPDATE_CHECK=1 "$@" >"$log_file" 2>&1; then
         grep -E '(^|[[:space:]])(! Warning:|warning:|× Error:|error:)' "$log_file" >&3 2>/dev/null || true
         rm -f "$log_file"
         return 0
@@ -2583,7 +2583,7 @@ fi
 echo "" >&3
 print_success "MirrorNeuron installation completed."
 if [ "$INSTALL_WEB_UI" = "Y" ]; then
-    print_detail "Web UI: http://${MN_WEB_UI_HOST:-localhost}:${MN_WEB_UI_PORT:-55173}"
+    printf '  Web UI: %s\n' "http://${MN_WEB_UI_HOST:-localhost}:${MN_WEB_UI_PORT:-55173}" >&3
 fi
 if [ "$INSTALL_CLI" = "Y" ]; then
     print_detail "CLI: mn"
@@ -4613,7 +4613,7 @@ fi
 echo "" >&3
 print_success "MirrorNeuron installation completed."
 if [ "$INSTALL_WEB_UI" = "Y" ]; then
-    print_detail "Web UI: http://${MN_WEB_UI_HOST:-localhost}:${MN_WEB_UI_PORT:-55173}"
+    printf '  Web UI: %s\n' "http://${MN_WEB_UI_HOST:-localhost}:${MN_WEB_UI_PORT:-55173}" >&3
 fi
 print_detail "Core image: mirror-neuron-core:latest (${CORE_DIR})"
 print_detail "CLI/API: editable installs from the local workspace"
@@ -4695,7 +4695,7 @@ CLI_INSTALL_VERSION="${MN_CLI_VERSION:-}"
 API_INSTALL_VERSION="${MN_API_VERSION:-}"
 WEB_UI_INSTALL_VERSION="${MN_WEB_UI_VERSION:-}"
 DEFAULT_PYTHON_SDK_INSTALL_VERSION="${MN_DEFAULT_PYTHON_SDK_VERSION:-v1.2.31}"
-DEFAULT_CLI_INSTALL_VERSION="${MN_DEFAULT_CLI_VERSION:-v1.2.31}"
+DEFAULT_CLI_INSTALL_VERSION="${MN_DEFAULT_CLI_VERSION:-v1.2.32}"
 DEFAULT_API_INSTALL_VERSION="${MN_DEFAULT_API_VERSION:-v1.2.31}"
 DEFAULT_WEB_UI_INSTALL_VERSION="${MN_DEFAULT_WEB_UI_VERSION:-v1.2.31}"
 CORE_ASSET_URL="${MN_CORE_ASSET_URL:-}"
@@ -6905,7 +6905,7 @@ fi
 echo "" >&3
 print_success "MirrorNeuron ${CORE_INSTALL_VERSION} installed."
 if [ "$INSTALL_WEB_UI" = "Y" ]; then
-    print_detail "Web UI: http://${MN_WEB_UI_HOST:-localhost}:${MN_WEB_UI_PORT:-55173}"
+    printf '  Web UI: %s\n' "http://${MN_WEB_UI_HOST:-localhost}:${MN_WEB_UI_PORT:-55173}" >&3
 fi
 print_detail "SDK ${PYTHON_SDK_INSTALL_VERSION}; CLI ${CLI_INSTALL_VERSION}; API ${API_INSTALL_VERSION}; Web UI ${WEB_UI_INSTALL_VERSION}"
 if [ "$INSTALL_CLI" = "Y" ]; then
