@@ -420,13 +420,17 @@ function mn_run_runtime_start_command() {
     local log_file="${log_dir}/runtime-start.$$.log"
     local status
 
-    if [ "$MN_INSTALL_VERBOSE" = "Y" ] || [ "${START_AS_WORKER:-N}" = "Y" ]; then
+    # Never hide command output while leaving it attached to interactive input.
+    # A future CLI prompt must be visible instead of appearing as an installer hang.
+    if [ "$MN_INSTALL_VERBOSE" = "Y" ] ||
+       [ "${START_AS_WORKER:-N}" = "Y" ] ||
+       [ -t 0 ]; then
         MN_DISABLE_UPDATE_CHECK=1 "$@"
         return
     fi
 
     mkdir -p "$log_dir"
-    if MN_DISABLE_UPDATE_CHECK=1 "$@" >"$log_file" 2>&1; then
+    if MN_DISABLE_UPDATE_CHECK=1 "$@" </dev/null >"$log_file" 2>&1; then
         grep -E '(^|[[:space:]])(! Warning:|warning:|× Error:|error:)' "$log_file" >&3 2>/dev/null || true
         rm -f "$log_file"
         return 0
