@@ -79,6 +79,8 @@ The release workflow validates that both
 `install_support/v1.2.29/docker-compose.yml` and
 `install_support/v1.2.29/package-index/python-packages.toml` exist. A missing
 snapshot fails the deploy release even when the main templates are correct.
+Snapshot creation also rejects a Compose template whose default
+`MN_WEB_UI_PACKAGE_VERSION` does not match the requested release version.
 
 ## Tag all repositories
 

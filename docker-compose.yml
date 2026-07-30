@@ -10,7 +10,7 @@ services:
     working_dir: /work
     environment:
       MN_WEB_UI_SOURCE_MODE: ${MN_WEB_UI_SOURCE_MODE:-package}
-      MN_WEB_UI_PACKAGE_VERSION: ${MN_WEB_UI_PACKAGE_VERSION:-1.2.29}
+      MN_WEB_UI_PACKAGE_VERSION: ${MN_WEB_UI_PACKAGE_VERSION:-1.2.31}
       MN_WEB_UI_API_HOST: ${MN_WEB_UI_API_HOST:-host.docker.internal}
       MN_API_PORT: ${MN_API_PORT:-54001}
       MN_WEB_UI_PORT: ${MN_WEB_UI_PORT:-55173}

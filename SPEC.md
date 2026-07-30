@@ -60,6 +60,8 @@ replaces it. Failures identify the failed component and a recovery action.
   publishing/install flows.
 - Version changes across scripts, snapshots, package metadata, and artifacts
   must remain coherent.
+- Snapshot creation rejects a Docker Compose template whose default Web UI npm
+  version does not match the requested release version.
 - Historical snapshots are not rewritten to adopt current defaults.
 
 ## Safety and Security

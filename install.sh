@@ -2582,6 +2582,9 @@ fi
 
 echo "" >&3
 print_success "MirrorNeuron installation completed."
+if [ "$INSTALL_WEB_UI" = "Y" ]; then
+    print_detail "Web UI: http://${MN_WEB_UI_HOST:-localhost}:${MN_WEB_UI_PORT:-55173}"
+fi
 if [ "$INSTALL_CLI" = "Y" ]; then
     print_detail "CLI: mn"
 fi
@@ -2690,9 +2693,6 @@ if [ "$START_AS_WORKER" = "Y" ]; then
     print_detail "Start the server: mn runtime start --worker-node"
 else
     print_detail "Start the server: mn runtime start"
-fi
-if [ "$INSTALL_WEB_UI" = "Y" ]; then
-    print_detail "Web UI: http://localhost:${MN_WEB_UI_PORT:-55173}"
 fi
 if [ "$INSTALL_CLI" = "Y" ]; then
     mn_print_next_shell_command "mn node list"
@@ -4612,8 +4612,8 @@ fi
 
 echo "" >&3
 print_success "MirrorNeuron installation completed."
-if [ "$START_NOW" = "Y" ] && [ "$INSTALL_WEB_UI" = "Y" ]; then
-    printf '  Web UI: %s\n' "http://localhost:${MN_WEB_UI_PORT:-55173}" >&3
+if [ "$INSTALL_WEB_UI" = "Y" ]; then
+    print_detail "Web UI: http://${MN_WEB_UI_HOST:-localhost}:${MN_WEB_UI_PORT:-55173}"
 fi
 print_detail "Core image: mirror-neuron-core:latest (${CORE_DIR})"
 print_detail "CLI/API: editable installs from the local workspace"
@@ -6904,6 +6904,9 @@ fi
 
 echo "" >&3
 print_success "MirrorNeuron ${CORE_INSTALL_VERSION} installed."
+if [ "$INSTALL_WEB_UI" = "Y" ]; then
+    print_detail "Web UI: http://${MN_WEB_UI_HOST:-localhost}:${MN_WEB_UI_PORT:-55173}"
+fi
 print_detail "SDK ${PYTHON_SDK_INSTALL_VERSION}; CLI ${CLI_INSTALL_VERSION}; API ${API_INSTALL_VERSION}; Web UI ${WEB_UI_INSTALL_VERSION}"
 if [ "$INSTALL_CLI" = "Y" ]; then
     print_detail "CLI: mn"

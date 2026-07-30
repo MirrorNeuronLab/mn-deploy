@@ -81,6 +81,18 @@ restore_version_text() {
   perl -0pi -e "s/\\Q${old_version}\\E/${new_version}/g" "$file"
 }
 
+set_compose_web_ui_version() {
+  local file="$1"
+  local version="$2"
+
+  MN_RELEASE_WEB_UI_VERSION="$version" perl -0pi -e \
+    's~(MN_WEB_UI_PACKAGE_VERSION:\s*\$\{MN_WEB_UI_PACKAGE_VERSION:-)[^}]+(\})~$1$ENV{MN_RELEASE_WEB_UI_VERSION}$2~g' \
+    "$file"
+  grep -Fq \
+    "MN_WEB_UI_PACKAGE_VERSION: \${MN_WEB_UI_PACKAGE_VERSION:-${version}}" \
+    "$file" || die "Could not pin the Web UI Compose package version to ${version}."
+}
+
 commit_and_push_if_changed() {
   local repo="$1"
   local message="$2"
@@ -122,6 +134,7 @@ prepare_release_metadata() {
   [[ -n "${PREVIOUS_VERSION}" ]] || die "Could not determine the current package-index version."
 
   restore_version_text "$index_file" "$PREVIOUS_VERSION" "$VERSION"
+  set_compose_web_ui_version "${SCRIPT_DIR}/docker-compose.yml" "$VERSION"
 
   for pyproject in \
     "${WORKSPACE_ROOT}/Membrane/mn-context-engine-python-sdk/pyproject.toml" \
@@ -135,7 +148,7 @@ prepare_release_metadata() {
   commit_and_push_if_changed \
     mn-deploy \
     "Prepare ${TAG} package index and installer support" \
-    package-index/python-packages.toml "install_support/${TAG}"
+    package-index/python-packages.toml docker-compose.yml "install_support/${TAG}"
   commit_and_push_if_changed \
     Membrane \
     "Prepare ${TAG} Membrane package metadata" \
@@ -250,7 +263,6 @@ update_post_release_pins() {
   local file
 
   restore_version_text "${SCRIPT_DIR}/install.sh" "$PREVIOUS_VERSION" "$VERSION"
-  restore_version_text "${SCRIPT_DIR}/docker-compose.yml" "$PREVIOUS_VERSION" "$VERSION"
 
   while IFS= read -r -d '' file; do
     restore_version_text "$file" "$PREVIOUS_VERSION" "$VERSION"
@@ -273,7 +285,7 @@ EOF
   commit_and_push_if_changed \
     mn-deploy \
     "Document ${TAG} release" \
-    install.sh docker-compose.yml released.md
+    install.sh released.md
 
   if ! git -C "${WORKSPACE_ROOT}/otterdesk-blueprints" diff --quiet ||
      ! git -C "${WORKSPACE_ROOT}/otterdesk-blueprints" diff --cached --quiet; then

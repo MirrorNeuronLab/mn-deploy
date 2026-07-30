@@ -34,6 +34,7 @@ validate_version() {
 validate_support_files() {
     local compose_file="$1"
     local package_index="$2"
+    local expected_version="$3"
 
     if [[ ! -f "$compose_file" ]]; then
         echo "Docker Compose template was not found: $compose_file" >&2
@@ -41,6 +42,12 @@ validate_support_files() {
     fi
     if ! grep -q '^name: mirror-neuron$' "$compose_file" || ! grep -q 'mirror-neuron-core' "$compose_file"; then
         echo "Docker Compose template does not look like the MirrorNeuron runtime template: $compose_file" >&2
+        exit 1
+    fi
+    if ! grep -Fq \
+        "MN_WEB_UI_PACKAGE_VERSION: \${MN_WEB_UI_PACKAGE_VERSION:-${expected_version}}" \
+        "$compose_file"; then
+        echo "Docker Compose Web UI version does not match ${expected_version}: $compose_file" >&2
         exit 1
     fi
 
@@ -88,6 +95,7 @@ if [[ -z "$VERSION" ]]; then
 fi
 
 validate_version "$VERSION"
+EXPECTED_VERSION="${VERSION#v}"
 
 compose_source="${SCRIPT_DIR}/docker-compose.yml"
 package_index_source="${SCRIPT_DIR}/package-index/python-packages.toml"
@@ -95,7 +103,7 @@ support_dir="${SCRIPT_DIR}/install_support/${VERSION}"
 compose_target="${support_dir}/docker-compose.yml"
 package_index_target="${support_dir}/package-index/python-packages.toml"
 
-validate_support_files "$compose_source" "$package_index_source"
+validate_support_files "$compose_source" "$package_index_source" "$EXPECTED_VERSION"
 
 if [[ -d "$support_dir" && "$FORCE" != "Y" ]]; then
     if find "$support_dir" -mindepth 1 -print -quit | grep -q .; then
@@ -109,6 +117,6 @@ mkdir -p "${support_dir}/package-index"
 cp "$compose_source" "$compose_target"
 cp "$package_index_source" "$package_index_target"
 
-validate_support_files "$compose_target" "$package_index_target"
+validate_support_files "$compose_target" "$package_index_target" "$EXPECTED_VERSION"
 
 echo "Saved install support snapshot: $support_dir"
