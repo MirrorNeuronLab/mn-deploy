@@ -193,7 +193,7 @@ write_runtime_endpoints_file() {
     local api_host api_port api_base_url grpc_host grpc_port grpc_target updated_at
     api_host="$(local_endpoint_host "$(runtime_env_or_default "MN_API_HOST" "localhost")")"
     api_port="$(runtime_env_or_default "MN_API_PORT" "54001")"
-    api_base_url="${MN_API_BASE_URL:-http://${api_host}:${api_port}/api/v1}"
+    api_base_url="${MN_API_BASE_URL:-http://${api_host}:${api_port}/api/v2}"
     grpc_host="$(local_endpoint_host "$(runtime_env_or_default "MN_GRPC_BIND_HOST" "localhost")")"
     grpc_port="$(runtime_env_or_default "MN_GRPC_PORT" "55051")"
     grpc_target="${MN_GRPC_TARGET:-}"
