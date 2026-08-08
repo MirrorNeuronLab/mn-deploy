@@ -90,6 +90,11 @@ Run its isolated Git regression test with:
   profile export for both MirrorNeuron and OtterDesk:
   `export MN_HOME="$HOME/.mn"`.
 - Generated Compose settings are stored in `~/.mn/docker-compose.env`.
+- The Syncthing sidecar is forced into LAN-only mode before every start,
+  including when it reuses an existing configuration. Relay and global
+  discovery connections, NAT/STUN traversal, usage reporting, automatic
+  upgrade checks, and crash reporting are disabled; configured LAN or VPN peer
+  addresses continue to work.
 - In binary mode, the `mn` and `mn-api` commands are linked under `~/.mn/bin`.
   The installer adds that directory to the active zsh or bash startup file; open a new terminal
   after the first install, or run the reload command printed by the installer.
