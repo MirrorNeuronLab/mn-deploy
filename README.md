@@ -61,13 +61,14 @@ Commit and push changes across sibling development repositories:
 ./git_commit_push_all.sh -m "Describe the update"
 ```
 
-The bulk helper fetches before updating. If a checkout contains uncommitted
-tracked files that are already byte-identical to the fetched remote tip, it
-uses a recovery stash, fast-forwards, verifies the trees match, and removes the
-redundant stash. It stops without changing unique, untracked, or divergent
-work. For cross-host development, commit and push on one host and use
-`git pull --ff-only` on the other; do not copy tracked files between checkouts
-that will later receive the same commit.
+The bulk helper fetches the current branch and all remote tags before updating.
+If a checkout contains uncommitted tracked files that are already
+byte-identical to the fetched remote tip, it uses a recovery stash,
+fast-forwards, verifies the trees match, and removes the redundant stash. It
+stops without changing unique, untracked, or divergent work. For cross-host
+development, commit and push on one host and use `git pull --ff-only` plus
+`git fetch origin --tags` on the other; do not copy tracked files between
+checkouts that will later receive the same commit.
 
 Run its isolated Git regression test with:
 

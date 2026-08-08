@@ -36,6 +36,18 @@ git clone "$REMOTE" "$PUBLISHER" >/dev/null
 git -C "$PUBLISHER" config user.name "mn-deploy test"
 git -C "$PUBLISHER" config user.email "mn-deploy-test@example.invalid"
 
+# Tags added after a clone can point to commits the clone already has. An
+# ordinary branch fetch does not guarantee that those tags are downloaded.
+git -C "$PUBLISHER" tag sync-test-tag
+git -C "$PUBLISHER" push origin refs/tags/sync-test-tag >/dev/null
+test -z "$(git -C "$TARGET" tag --list sync-test-tag)"
+
+"$HELPER_DIR/git_commit_push_all.sh" >"$OUTPUT" 2>&1
+
+test "$(git -C "$TARGET" rev-parse refs/tags/sync-test-tag)" = \
+    "$(git -C "$PUBLISHER" rev-parse refs/tags/sync-test-tag)"
+grep -q "Fetching latest changes and tags" "$OUTPUT"
+
 printf '%s\n' "published duplicate" >"$PUBLISHER/value.txt"
 git -C "$PUBLISHER" add value.txt
 git -C "$PUBLISHER" commit -m "published duplicate" >/dev/null

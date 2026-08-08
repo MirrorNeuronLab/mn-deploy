@@ -66,8 +66,8 @@ sync_branch_before_commit() {
     local remote_ref="refs/remotes/origin/$branch"
     local recovery_stash
 
-    echo "Fetching latest changes for $branch..."
-    git fetch origin "$branch"
+    echo "Fetching latest changes and tags for $branch..."
+    git fetch --tags origin "$branch"
 
     if ! git show-ref --verify --quiet "$remote_ref"; then
         echo "error: origin/$branch was not found after fetch." >&2
