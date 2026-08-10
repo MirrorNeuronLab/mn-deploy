@@ -2586,9 +2586,6 @@ fi
 
 echo "" >&3
 print_success "MirrorNeuron installation completed."
-if [ "$INSTALL_WEB_UI" = "Y" ]; then
-    printf '  Web UI: %s\n' "http://${MN_WEB_UI_HOST:-localhost}:${MN_WEB_UI_PORT:-55173}" >&3
-fi
 if [ "$INSTALL_CLI" = "Y" ]; then
     print_detail "CLI: mn"
 fi
@@ -4622,9 +4619,6 @@ fi
 
 echo "" >&3
 print_success "MirrorNeuron installation completed."
-if [ "$INSTALL_WEB_UI" = "Y" ]; then
-    printf '  Web UI: %s\n' "http://${MN_WEB_UI_HOST:-localhost}:${MN_WEB_UI_PORT:-55173}" >&3
-fi
 print_detail "Core image: mirror-neuron-core:latest (${CORE_DIR})"
 print_detail "CLI/API: editable installs from the local workspace"
 print_detail "State: ${INSTALL_DIR}"
