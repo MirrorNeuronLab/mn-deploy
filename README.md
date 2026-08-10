@@ -91,6 +91,10 @@ Run its isolated Git regression test with:
   profile export for both MirrorNeuron and OtterDesk:
   `export MN_HOME="$HOME/.mn"`.
 - Generated Compose settings are stored in `~/.mn/docker-compose.env`.
+- If the default Blueprint Web UI range (`61000`–`61049`) conflicts with a
+  local service, set `MN_BLUEPRINT_WEB_UI_PORT_START` and
+  `MN_BLUEPRINT_WEB_UI_PORT_END` for one local install. The selected range is
+  retained by later local-source refreshes unless explicitly overridden.
 - The Syncthing sidecar is forced into LAN-only mode before every start,
   including when it reuses an existing configuration. Relay and global
   discovery connections, NAT/STUN traversal, usage reporting, automatic

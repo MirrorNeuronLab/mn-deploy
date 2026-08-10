@@ -3970,7 +3970,7 @@ function prepare_litellm_gateway_config() {
 }
 
 function write_runtime_compose_files() {
-    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_agents_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image litellm_gateway_bind_host openshell_gateway_bind_host openshell_gateway_endpoint api_host
+    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_agents_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image litellm_gateway_bind_host openshell_gateway_bind_host openshell_gateway_endpoint api_host blueprint_web_ui_port_start blueprint_web_ui_port_end
     model_runner_model="${MN_CONTEXT_MODEL_RUNNER_MODEL:-hf.co/homerquan/mn-context-engine-model-v-Q4_K_M}"
     profiles="$(compose_profiles)"
     api_host="${MN_API_HOST:-}"
@@ -4024,6 +4024,12 @@ function write_runtime_compose_files() {
     if [ "$INSTALL_OPENSHELL" = "Y" ]; then
         write_openshell_compose_config
     fi
+    # Preserve a locally selected Blueprint UI range on later local-source
+    # refreshes. Docker Desktop reserves every prepublished port in the range.
+    blueprint_web_ui_port_start="${MN_BLUEPRINT_WEB_UI_PORT_START:-$(read_env_value "$RUNTIME_COMPOSE_ENV" "MN_BLUEPRINT_WEB_UI_PORT_START")}"
+    blueprint_web_ui_port_end="${MN_BLUEPRINT_WEB_UI_PORT_END:-$(read_env_value "$RUNTIME_COMPOSE_ENV" "MN_BLUEPRINT_WEB_UI_PORT_END")}"
+    blueprint_web_ui_port_start="${blueprint_web_ui_port_start:-61000}"
+    blueprint_web_ui_port_end="${blueprint_web_ui_port_end:-61049}"
     cat > "$RUNTIME_COMPOSE_ENV" <<EOF
 COMPOSE_PROJECT_NAME=mirror-neuron
 COMPOSE_PROFILES=${profiles}
@@ -4076,8 +4082,8 @@ MN_WEB_UI_PACKAGE_VERSION=${MN_WEB_UI_PACKAGE_VERSION}
 MN_WEB_UI_API_HOST=${MN_WEB_UI_API_HOST:-host.docker.internal}
 MN_BLUEPRINT_WEB_UI_BIND_HOST=${MN_BLUEPRINT_WEB_UI_BIND_HOST:-0.0.0.0}
 MN_BLUEPRINT_WEB_UI_PUBLIC_HOST=${MN_BLUEPRINT_WEB_UI_PUBLIC_HOST:-localhost}
-MN_BLUEPRINT_WEB_UI_PORT_START=${MN_BLUEPRINT_WEB_UI_PORT_START:-61000}
-MN_BLUEPRINT_WEB_UI_PORT_END=${MN_BLUEPRINT_WEB_UI_PORT_END:-61049}
+MN_BLUEPRINT_WEB_UI_PORT_START=${blueprint_web_ui_port_start}
+MN_BLUEPRINT_WEB_UI_PORT_END=${blueprint_web_ui_port_end}
 MN_BLUEPRINT_WEB_UI_PORT_ALLOCATION_MODE=${MN_BLUEPRINT_WEB_UI_PORT_ALLOCATION_MODE:-prepublished}
 MN_ENV=${MN_ENV:-dev}
 MN_BLUEPRINT_SOURCE=${MN_BLUEPRINT_SOURCE:-github}
