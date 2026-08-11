@@ -156,6 +156,14 @@ installer_groups = ["skill"]
 binary_default = false
 
 [[packages]]
+name = "mirrorneuron-goal-work-packet-skill"
+path = "mn-skills/goal_work_packet_skill"
+publish_group = "skill"
+version = "1.2.31"
+installer_groups = ["skill"]
+binary_default = false
+
+[[packages]]
 name = "mirrorneuron-generate-fake-data-skill"
 path = "mn-skills/generate_fake_data_skill"
 publish_group = "skill"
@@ -206,6 +214,14 @@ binary_default = false
 [[packages]]
 name = "mirrorneuron-mcp-client-skill"
 path = "mn-skills/mcp_client_skill"
+publish_group = "skill"
+version = "1.2.31"
+installer_groups = ["skill"]
+binary_default = false
+
+[[packages]]
+name = "mirrorneuron-mcp-server-skill"
+path = "mn-skills/mcp_server_skill"
 publish_group = "skill"
 version = "1.2.31"
 installer_groups = ["skill"]
