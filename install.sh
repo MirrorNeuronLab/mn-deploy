@@ -363,6 +363,37 @@ function mn_remove_profile_line() {
     rm -f "$temporary_profile"
 }
 
+function mn_remove_legacy_linux_mn_home_export() {
+    local profile="$1"
+    local temporary_profile
+
+    [ -n "${MN_LEGACY_LINUX_MN_HOME:-}" ] || return 0
+    [ -f "$profile" ] || return 0
+
+    temporary_profile="$(mktemp "${profile}.mn.XXXXXX")"
+    if ! MN_LEGACY_LINUX_MN_HOME="$MN_LEGACY_LINUX_MN_HOME" awk '
+        {
+            candidate = $0
+            sub(/^[[:space:]]*/, "", candidate)
+            sub(/^export[[:space:]]+/, "", candidate)
+            if (candidate == "MN_HOME=" ENVIRON["MN_LEGACY_LINUX_MN_HOME"] ||
+                candidate == "MN_HOME=\"" ENVIRON["MN_LEGACY_LINUX_MN_HOME"] "\"" ||
+                candidate == "MN_HOME=\047" ENVIRON["MN_LEGACY_LINUX_MN_HOME"] "\047") {
+                next
+            }
+            print
+        }
+    ' "$profile" > "$temporary_profile"; then
+        rm -f "$temporary_profile"
+        return 1
+    fi
+    if ! cat "$temporary_profile" > "$profile"; then
+        rm -f "$temporary_profile"
+        return 1
+    fi
+    rm -f "$temporary_profile"
+}
+
 function mn_deduplicate_generated_profile_exports() {
     local profile="$1"
     local path_line="$2"
@@ -370,6 +401,7 @@ function mn_deduplicate_generated_profile_exports() {
     local legacy_path_line="$4"
 
     mn_deduplicate_profile_line "$profile" "# MN and OTTERDESK"
+    mn_remove_legacy_linux_mn_home_export "$profile"
     mn_remove_profile_line "$profile" "$legacy_path_line"
     mn_deduplicate_profile_line "$profile" "$path_line"
     mn_deduplicate_profile_line "$profile" "$home_line"
@@ -512,6 +544,20 @@ fi
 
 export MN_INSTALL_VERSION
 export MN_HOME="${MN_HOME:-${HOME}/.mn}"
+
+# Older installers persisted the Linux default as an absolute path. When that
+# shell configuration is reused on macOS, /home is not a writable home root.
+MN_LEGACY_LINUX_MN_HOME=""
+if [ "$(uname -s)" = "Darwin" ]; then
+    mn_home_basename="${HOME##*/}"
+    mn_legacy_linux_default="/home/${mn_home_basename}/.mn"
+    if [ "$MN_HOME" = "$mn_legacy_linux_default" ]; then
+        MN_LEGACY_LINUX_MN_HOME="$MN_HOME"
+        export MN_HOME="${HOME}/.mn"
+        printf 'warning: Migrating legacy MN_HOME=%s to %s for macOS.\n' \
+            "$MN_LEGACY_LINUX_MN_HOME" "$MN_HOME" >&3
+    fi
+fi
 
 function mn_script_dir() {
     local source_path=""
@@ -2191,7 +2237,7 @@ MN_WORKSPACE_ROOT=${MN_WORKSPACE_ROOT:-}
 MN_AGENTS_ROOT=${runtime_agents_root}
 MN_SKILLS_ROOT=${runtime_skills_root}
 MN_PACKAGE_INDEX_FILE=${runtime_package_index}
-MN_PIP_INDEX_URL=${MN_PIP_INDEX_URL:-${MN_PYTHON_INDEX_URL:-}}
+MN_PIP_INDEX_URL=${MN_PIP_INDEX_URL:-${MN_PYTHON_INDEX_URL:-${MN_DEFAULT_PIP_INDEX_URL:-https://us-central1-python.pkg.dev/mirrorneuron-public-packages/agent-skills/simple/}}}
 MN_PIP_EXTRA_INDEX_URL=${MN_PIP_EXTRA_INDEX_URL:-${MN_PYTHON_EXTRA_INDEX_URL:-https://pypi.org/simple}}
 MN_RUNTIME_MODULE_VERSION=${MN_RUNTIME_MODULE_VERSION:-${MN_PACKAGE_VERSION:-}}
 MN_CONTEXT_MEMORY_ENABLED=${context_memory_enabled}
@@ -4090,7 +4136,7 @@ MN_WORKSPACE_ROOT=${MN_WORKSPACE_ROOT:-}
 MN_AGENTS_ROOT=${runtime_agents_root}
 MN_SKILLS_ROOT=${runtime_skills_root}
 MN_PACKAGE_INDEX_FILE=${runtime_package_index}
-MN_PIP_INDEX_URL=${MN_PIP_INDEX_URL:-${MN_PYTHON_INDEX_URL:-}}
+MN_PIP_INDEX_URL=${MN_PIP_INDEX_URL:-${MN_PYTHON_INDEX_URL:-${MN_DEFAULT_PIP_INDEX_URL:-https://us-central1-python.pkg.dev/mirrorneuron-public-packages/agent-skills/simple/}}}
 MN_PIP_EXTRA_INDEX_URL=${MN_PIP_EXTRA_INDEX_URL:-${MN_PYTHON_EXTRA_INDEX_URL:-https://pypi.org/simple}}
 MN_RUNTIME_MODULE_VERSION=${MN_RUNTIME_MODULE_VERSION:-${MN_PACKAGE_VERSION:-}}
 MN_CONTEXT_MEMORY_ENABLED=${context_memory_enabled}
@@ -4722,7 +4768,7 @@ MN_GAR_PROJECT="${MN_GAR_PROJECT:-}"
 MN_GAR_LOCATION="${MN_GAR_LOCATION:-us-central1}"
 MN_GAR_REPOSITORY="${MN_GAR_REPOSITORY:-agent-skills}"
 MN_DEFAULT_PIP_INDEX_URL="${MN_DEFAULT_PIP_INDEX_URL:-https://us-central1-python.pkg.dev/mirrorneuron-public-packages/agent-skills/simple/}"
-MN_PIP_INDEX_URL="${MN_PIP_INDEX_URL:-${MN_PYTHON_INDEX_URL:-}}"
+MN_PIP_INDEX_URL="${MN_PIP_INDEX_URL:-${MN_PYTHON_INDEX_URL:-${MN_DEFAULT_PIP_INDEX_URL}}}"
 MN_PIP_EXTRA_INDEX_URL="${MN_PIP_EXTRA_INDEX_URL:-${MN_PYTHON_EXTRA_INDEX_URL:-https://pypi.org/simple}}"
 MN_HOST_HOME_DIR="${MN_HOST_HOME_DIR:-${MN_HOST_MN_DIR:-${INSTALL_DIR}}}"
 MN_HOST_ARTIFACTS_DIR="${MN_HOST_ARTIFACTS_DIR:-${MN_HOST_HOME_DIR}/runs}"
@@ -6503,7 +6549,7 @@ MN_WORKSPACE_ROOT=${MN_WORKSPACE_ROOT:-}
 MN_AGENTS_ROOT=${runtime_agents_root}
 MN_SKILLS_ROOT=${runtime_skills_root}
 MN_PACKAGE_INDEX_FILE=${runtime_package_index}
-MN_PIP_INDEX_URL=${MN_PIP_INDEX_URL:-${MN_PYTHON_INDEX_URL:-}}
+MN_PIP_INDEX_URL=${MN_PIP_INDEX_URL:-${MN_PYTHON_INDEX_URL:-${MN_DEFAULT_PIP_INDEX_URL:-https://us-central1-python.pkg.dev/mirrorneuron-public-packages/agent-skills/simple/}}}
 MN_PIP_EXTRA_INDEX_URL=${MN_PIP_EXTRA_INDEX_URL:-${MN_PYTHON_EXTRA_INDEX_URL:-https://pypi.org/simple}}
 MN_RUNTIME_MODULE_VERSION=${MN_RUNTIME_MODULE_VERSION:-${MN_PACKAGE_VERSION:-}}
 MN_CONTEXT_MEMORY_ENABLED=${context_memory_enabled}

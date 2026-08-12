@@ -483,6 +483,10 @@ services:
       DOCKER_BUILDKIT: ${DOCKER_BUILDKIT:-1}
       BUILDKIT_PROGRESS: ${BUILDKIT_PROGRESS:-plain}
       MN_ENV: ${MN_ENV:-dev}
+      MN_PIP_INDEX_URL: ${MN_PIP_INDEX_URL:-https://us-central1-python.pkg.dev/mirrorneuron-public-packages/agent-skills/simple/}
+      MN_PIP_EXTRA_INDEX_URL: ${MN_PIP_EXTRA_INDEX_URL:-https://pypi.org/simple}
+      PIP_INDEX_URL: ${MN_PIP_INDEX_URL:-https://us-central1-python.pkg.dev/mirrorneuron-public-packages/agent-skills/simple/}
+      PIP_EXTRA_INDEX_URL: ${MN_PIP_EXTRA_INDEX_URL:-https://pypi.org/simple}
       MN_WORKSPACE_ROOT: ${MN_WORKSPACE_ROOT:-}
       MN_BLUEPRINT_SOURCE: ${MN_BLUEPRINT_SOURCE:-}
       MN_BLUEPRINT_REPO: ${MN_BLUEPRINT_REPO:-}
