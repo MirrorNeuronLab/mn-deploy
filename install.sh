@@ -2737,7 +2737,7 @@ function ensure_shell_profile_exports() {
 ensure_shell_profile_exports
 
 if [ "$START_AS_WORKER" = "Y" ]; then
-    print_detail "Start the server: mn runtime start --worker-node"
+    print_detail "Start the server: mn runtime start --worker"
 else
     print_detail "Start the server: mn runtime start"
 fi
@@ -2748,9 +2748,9 @@ fi
 if [ "$START_NOW" = "Y" ]; then
     print_step "Starting MirrorNeuron services"
     if [ "$START_AS_WORKER" = "Y" ]; then
-        if ! mn_run_runtime_start_command "$VENV_DIR/bin/mn" runtime start --worker-node; then
+        if ! mn_run_runtime_start_command "$VENV_DIR/bin/mn" runtime start --worker; then
             [ -n "$MN_RUNTIME_START_LOG" ] && print_warning "CLI startup details: $MN_RUNTIME_START_LOG"
-            print_warning "mn runtime start --worker-node failed; starting worker gateway services with Docker Compose."
+            print_warning "mn runtime start --worker failed; starting worker gateway services with Docker Compose."
             runtime_compose up -d mn-native-sdk-grpc mn-litellm-proxy
         fi
     else
@@ -4643,9 +4643,9 @@ if [ "$START_NOW" = "Y" ]; then
     print_step "Starting MirrorNeuron services"
     "$VENV_DIR/bin/mn" runtime stop >/dev/null 2>&1 || true
     if [ "$START_AS_WORKER" = "Y" ]; then
-        if ! mn_run_runtime_start_command "$VENV_DIR/bin/mn" runtime start --worker-node; then
+        if ! mn_run_runtime_start_command "$VENV_DIR/bin/mn" runtime start --worker; then
             [ -n "$MN_RUNTIME_START_LOG" ] && print_warning "CLI startup details: $MN_RUNTIME_START_LOG"
-            print_warning "mn runtime start --worker-node failed; starting worker gateway services with Docker Compose."
+            print_warning "mn runtime start --worker failed; starting worker gateway services with Docker Compose."
             runtime_compose up -d mn-native-sdk-grpc mn-litellm-proxy
         fi
     else
@@ -4680,7 +4680,7 @@ print_detail "Rebuild after Elixir changes: ${SCRIPT_DIR}/install.sh --mode loca
 if [ "$START_NOW" = "Y" ]; then
     mn_print_next_shell_command "mn node list"
 elif [ "$START_AS_WORKER" = "Y" ]; then
-    mn_print_next_shell_command "mn runtime start --worker-node"
+    mn_print_next_shell_command "mn runtime start --worker"
 else
     mn_print_next_shell_command "mn runtime start"
 fi
@@ -6932,9 +6932,9 @@ fi
 if [ "$START_NOW" = "Y" ]; then
     print_step "Starting MirrorNeuron services"
     if [ "$START_AS_WORKER" = "Y" ]; then
-        if ! mn_run_runtime_start_command "$VENV_DIR/bin/mn" runtime start --worker-node; then
+        if ! mn_run_runtime_start_command "$VENV_DIR/bin/mn" runtime start --worker; then
             [ -n "$MN_RUNTIME_START_LOG" ] && print_warning "CLI startup details: $MN_RUNTIME_START_LOG"
-            print_warning "mn runtime start --worker-node failed; starting worker gateway services with Docker Compose."
+            print_warning "mn runtime start --worker failed; starting worker gateway services with Docker Compose."
             runtime_compose up -d mn-native-sdk-grpc mn-litellm-proxy
         fi
     else
@@ -6968,7 +6968,7 @@ if [ "$INSTALL_CLI" = "Y" ]; then
     if [ "$START_NOW" = "Y" ]; then
         mn_print_next_shell_command "mn node list"
     elif [ "$START_AS_WORKER" = "Y" ]; then
-        mn_print_next_shell_command "mn runtime start --worker-node"
+        mn_print_next_shell_command "mn runtime start --worker"
     else
         mn_print_next_shell_command "mn runtime start"
     fi
