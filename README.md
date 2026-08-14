@@ -35,6 +35,17 @@ Ask before each install choice:
 ./install.sh --interactive
 ```
 
+Reset all existing runtime data and perform a fresh install:
+
+```bash
+./install.sh --reset
+```
+
+Reset is destructive and always asks you to type the exact uppercase text
+`YES`, even when `--yes` is also passed. It deletes and recreates `MN_HOME`
+(default `~/.mn`), clears Redis, and removes the MirrorNeuron Docker Compose
+containers and persistent volumes before the selected install mode runs.
+
 Install from GitHub repositories:
 
 ```bash

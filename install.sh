@@ -9,6 +9,7 @@ MN_INSTALL_MODE="${MN_INSTALL_MODE:-binary}"
 MN_INSTALL_MODE_EXPLICIT="N"
 MN_INSTALL_HELP_REQUESTED="N"
 MN_INSTALL_VERBOSE="${MN_INSTALL_VERBOSE:-N}"
+MN_INSTALL_RESET="N"
 LATEST="v1.2.31"
 MN_DEFAULT_INSTALL_VERSION="${MN_DEFAULT_INSTALL_VERSION:-$LATEST}"
 MN_INSTALL_VERSION="${MN_INSTALL_VERSION:-}"
@@ -30,6 +31,8 @@ Common options:
   --version TAG                 Install this release version, for example v1.2.31.
   --yes, -y                     Run non-interactively with defaults and flags. This is the default.
   --interactive                 Ask each install question before proceeding.
+  --reset                       Permanently clear existing runtime data before installing.
+                                Always requires typing YES; --yes does not bypass it.
   -v, --verbose                 Show installation details and command paths.
   --no-reinstall                Keep an existing install instead of overwriting it.
   --web-ui / --no-web-ui        Enable or skip Web UI setup.
@@ -60,6 +63,7 @@ Common options:
 Examples:
   ./$MN_INSTALL_SCRIPT_NAME --no-web-ui
   ./$MN_INSTALL_SCRIPT_NAME --interactive
+  ./$MN_INSTALL_SCRIPT_NAME --reset
   ./$MN_INSTALL_SCRIPT_NAME --mode github
   ./$MN_INSTALL_SCRIPT_NAME --mode local --no-web-ui --no-skills
   ./$MN_INSTALL_SCRIPT_NAME --version v1.2.31
@@ -508,6 +512,9 @@ while [ "$#" -gt 0 ]; do
         -v|--verbose)
             MN_INSTALL_VERBOSE="Y"
             ;;
+        --reset)
+            MN_INSTALL_RESET="Y"
+            ;;
         *)
             MN_INSTALL_ARGS+=("$1")
             ;;
@@ -574,6 +581,257 @@ function mn_script_dir() {
             cd "$(dirname "$source_path")" && pwd
             ;;
     esac
+}
+
+function mn_reset_error() {
+    printf 'error: %s\n' "$1" >&3
+}
+
+function mn_reset_warning() {
+    printf 'warning: %s\n' "$1" >&3
+}
+
+function mn_reset_resolve_home_or_exit() {
+    local configured_home="${MN_HOME:-}"
+    local parent_dir base_name resolved_parent resolved_home
+    local resolved_user_home resolved_pwd script_dir workspace_dir
+
+    if [ -z "$configured_home" ]; then
+        mn_reset_error "MN_HOME is empty; refusing to reset an unresolved path."
+        exit 1
+    fi
+
+    case "$configured_home" in
+        /*) ;;
+        *) configured_home="${PWD}/${configured_home}" ;;
+    esac
+
+    while [ "$configured_home" != "/" ] && [[ "$configured_home" == */ ]]; do
+        configured_home="${configured_home%/}"
+    done
+
+    parent_dir="$(dirname "$configured_home")"
+    base_name="$(basename "$configured_home")"
+    if [ "$base_name" = "." ] || [ "$base_name" = ".." ] || [ ! -d "$parent_dir" ]; then
+        mn_reset_error "Cannot safely resolve reset target: ${configured_home}"
+        mn_reset_error "Set MN_HOME to an installation path whose parent directory exists."
+        exit 1
+    fi
+
+    resolved_parent="$(cd "$parent_dir" && pwd -P)"
+    resolved_home="${resolved_parent}/${base_name}"
+    resolved_user_home="$(cd "$HOME" && pwd -P)"
+    resolved_pwd="$(pwd -P)"
+
+    if [ "$resolved_home" = "/" ] || [ "$resolved_home" = "$resolved_user_home" ]; then
+        mn_reset_error "Refusing to reset protected path: ${resolved_home}"
+        exit 1
+    fi
+    if [ "$resolved_home" = "$resolved_pwd" ]; then
+        mn_reset_error "Refusing to reset the current working directory: ${resolved_home}"
+        exit 1
+    fi
+    if [ -L "$resolved_home" ]; then
+        mn_reset_error "Refusing to reset symlinked MN_HOME: ${resolved_home}"
+        mn_reset_error "Set MN_HOME to the symlink target explicitly, then rerun with --reset."
+        exit 1
+    fi
+    if [ -e "$resolved_home" ] && [ ! -d "$resolved_home" ]; then
+        mn_reset_error "Reset target is not a directory: ${resolved_home}"
+        exit 1
+    fi
+
+    script_dir="$(mn_script_dir)"
+    if [ -d "$script_dir" ]; then
+        script_dir="$(cd "$script_dir" && pwd -P)"
+        workspace_dir="$(dirname "$script_dir")"
+        if [ "$resolved_home" = "$script_dir" ] || [ "$resolved_home" = "$workspace_dir" ]; then
+            mn_reset_error "Refusing to reset a MirrorNeuron source directory: ${resolved_home}"
+            exit 1
+        fi
+        if [ "$(dirname "$resolved_home")" = "$workspace_dir" ] &&
+           { [ -d "${resolved_home}/.git" ] || [ -f "${resolved_home}/.git" ]; }; then
+            mn_reset_error "Refusing to reset a source repository in the MirrorNeuron workspace: ${resolved_home}"
+            exit 1
+        fi
+    fi
+
+    MN_RESET_HOME="$resolved_home"
+}
+
+function mn_reset_read_env_value() {
+    local file="$1"
+    local key="$2"
+    [ -f "$file" ] || return 0
+    awk -F= -v key="$key" '$1 == key {print substr($0, index($0, "=") + 1); exit}' "$file"
+}
+
+function mn_reset_confirm_or_exit() {
+    local confirmation=""
+
+    mn_reset_warning "RESET PERMANENTLY DELETES all MirrorNeuron runtime data in ${MN_RESET_HOME}."
+    mn_reset_warning "MirrorNeuron Docker containers and volumes will be removed, including all Redis data."
+    mn_reset_warning "This cannot be undone, and --yes does not bypass this confirmation."
+    printf 'Type YES to reset MirrorNeuron and continue with a fresh install: ' >&3
+
+    if [ -t 0 ]; then
+        IFS= read -r confirmation || confirmation=""
+    elif { exec 4</dev/tty; } 2>/dev/null; then
+        IFS= read -r confirmation <&4 || confirmation=""
+        exec 4<&-
+    else
+        IFS= read -r confirmation || confirmation=""
+    fi
+
+    if [ "$confirmation" != "YES" ]; then
+        mn_reset_warning "Reset cancelled; no data was changed."
+        exit 0
+    fi
+}
+
+function mn_reset_docker_state_or_exit() {
+    local compose_file="${MN_RESET_HOME}/docker-compose.yml"
+    local compose_env_file="${MN_RESET_HOME}/docker-compose.env"
+    local project_name=""
+    local cleanup_failed="N"
+    local resource_id redis_volume container_name
+    local redis_container="mirror-neuron-redis"
+    local redis_cli_script
+    local -a compose_args=()
+
+    if ! command -v docker >/dev/null 2>&1; then
+        mn_reset_error "docker is required to clear Redis and MirrorNeuron runtime volumes."
+        exit 1
+    fi
+    if ! docker info >/dev/null 2>&1; then
+        mn_reset_error "Docker is not running; reset stopped before deleting ${MN_RESET_HOME}."
+        printf 'Next: start Docker, then rerun install.sh --reset.\n' >&3
+        exit 1
+    fi
+
+    project_name="$(mn_reset_read_env_value "$compose_env_file" "COMPOSE_PROJECT_NAME")"
+    project_name="${project_name:-mirror-neuron}"
+    if ! [[ "$project_name" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]]; then
+        mn_reset_error "Invalid Compose project name in ${compose_env_file}: ${project_name}"
+        exit 1
+    fi
+
+    printf '==> Clearing Redis and stopping the existing MirrorNeuron runtime\n' >&3
+    redis_cli_script='if [ -n "${MN_REDIS_PASSWORD:-}" ]; then
+  redis-cli --no-auth-warning -a "$MN_REDIS_PASSWORD" FLUSHALL
+  redis-cli --no-auth-warning -a "$MN_REDIS_PASSWORD" MEMORY PURGE >/dev/null 2>&1 || true
+else
+  redis-cli FLUSHALL
+  redis-cli MEMORY PURGE >/dev/null 2>&1 || true
+fi'
+    if docker ps --format '{{.Names}}' 2>/dev/null | grep -Fxq "$redis_container"; then
+        if docker exec -i "$redis_container" sh -c "$redis_cli_script" >/dev/null 2>&1; then
+            printf '✓ Cleared all Redis databases.\n' >&3
+        else
+            mn_reset_warning "Redis FLUSHALL failed; removing its persistent Docker volume instead."
+        fi
+    fi
+
+    if [ -f "$compose_file" ]; then
+        if docker compose version >/dev/null 2>&1; then
+            compose_args=(--project-name "$project_name" -f "$compose_file")
+            if [ -f "$compose_env_file" ]; then
+                compose_args=(--env-file "$compose_env_file" "${compose_args[@]}")
+            fi
+            if ! docker compose "${compose_args[@]}" down --remove-orphans --volumes >/dev/null 2>&1; then
+                mn_reset_warning "Docker Compose teardown was incomplete; cleaning owned resources by project label."
+            fi
+        elif command -v docker-compose >/dev/null 2>&1; then
+            compose_args=(--project-name "$project_name" -f "$compose_file")
+            if [ -f "$compose_env_file" ]; then
+                compose_args=(--env-file "$compose_env_file" "${compose_args[@]}")
+            fi
+            if ! docker-compose "${compose_args[@]}" down --remove-orphans --volumes >/dev/null 2>&1; then
+                mn_reset_warning "Docker Compose teardown was incomplete; cleaning owned resources by project label."
+            fi
+        fi
+    fi
+
+    while IFS= read -r resource_id; do
+        [ -n "$resource_id" ] || continue
+        if ! docker rm -f "$resource_id" >/dev/null 2>&1; then
+            cleanup_failed="Y"
+        fi
+    done < <(docker ps -aq --filter "label=com.docker.compose.project=${project_name}" 2>/dev/null || true)
+
+    for container_name in \
+        mirror-neuron-core \
+        mirror-neuron-redis \
+        mirror-neuron-web-ui \
+        mirror-neuron-syncthing \
+        mirror-neuron-context-engine-model \
+        mirror-neuron-context-engine \
+        mirror-neuron-native-sdk-grpc \
+        mn-litellm-proxy \
+        openshell-cluster-openshell; do
+        if docker container inspect "$container_name" >/dev/null 2>&1; then
+            if ! docker rm -f "$container_name" >/dev/null 2>&1; then
+                cleanup_failed="Y"
+            fi
+        fi
+    done
+
+    while IFS= read -r resource_id; do
+        [ -n "$resource_id" ] || continue
+        if ! docker volume rm -f "$resource_id" >/dev/null 2>&1; then
+            cleanup_failed="Y"
+        fi
+    done < <(docker volume ls -q --filter "label=com.docker.compose.project=${project_name}" 2>/dev/null || true)
+
+    redis_volume="${project_name}_redis-data"
+    if docker volume inspect "$redis_volume" >/dev/null 2>&1; then
+        if ! docker volume rm -f "$redis_volume" >/dev/null 2>&1; then
+            cleanup_failed="Y"
+        fi
+    fi
+
+    if [ "$cleanup_failed" = "Y" ]; then
+        mn_reset_error "Could not remove all MirrorNeuron Docker containers or volumes."
+        mn_reset_error "Reset stopped before deleting ${MN_RESET_HOME}."
+        exit 1
+    fi
+    printf '✓ Removed MirrorNeuron Docker runtime and persistent Redis data.\n' >&3
+}
+
+function mn_reset_install_state() {
+    mn_reset_resolve_home_or_exit
+    mn_reset_confirm_or_exit
+    mn_reset_docker_state_or_exit
+
+    printf '==> Recreating MirrorNeuron runtime data directory\n' >&3
+    if [ -d "$MN_RESET_HOME" ]; then
+        chmod -R u+rwX "$MN_RESET_HOME" 2>/dev/null || true
+        if ! rm -rf "$MN_RESET_HOME"; then
+            mn_reset_error "Could not remove MirrorNeuron runtime data: ${MN_RESET_HOME}"
+            exit 1
+        fi
+    fi
+    if ! mkdir -p "$MN_RESET_HOME"; then
+        mn_reset_error "Could not recreate MirrorNeuron runtime data directory: ${MN_RESET_HOME}"
+        exit 1
+    fi
+    chmod u+rwx "$MN_RESET_HOME" 2>/dev/null || true
+    export MN_HOME="$MN_RESET_HOME"
+    printf '✓ Reset MirrorNeuron runtime data. Continuing with a fresh install.\n' >&3
+}
+
+function mn_reset_drop_conflicting_install_args() {
+    local arg
+    local -a filtered_args=()
+
+    for arg in "${MN_INSTALL_ARGS[@]}"; do
+        if [ "$arg" = "--no-reinstall" ]; then
+            mn_reset_warning "Ignoring --no-reinstall because --reset requires a fresh installation."
+        else
+            filtered_args+=("$arg")
+        fi
+    done
+    MN_INSTALL_ARGS=("${filtered_args[@]}")
 }
 
 function mn_github_raw_asset_url() {
@@ -1256,6 +1514,7 @@ Options:
   --version TAG                 Install this release tag from each GitHub repo. If omitted, use each repo's default branch.
   --yes                         Run non-interactively with defaults and flags. This is the default.
   --interactive                 Ask each install question before proceeding.
+  --reset                       Permanently clear runtime data first; requires typing YES.
   -v, --verbose                 Show installation details and command paths.
   --no-reinstall                Keep an existing install instead of overwriting it.
   --web-ui / --no-web-ui        Enable or skip GitHub Web UI install/build.
@@ -2442,8 +2701,12 @@ resolve_python_runtime
 
 EXISTING_INSTALL="N"
 if [ -d "$INSTALL_DIR" ] || [ -f "$BIN_DIR/mn" ]; then
-    print_warning "MirrorNeuron appears to be already installed."
-    if [ "$NON_INTERACTIVE" != "Y" ]; then
+    if [ "$MN_INSTALL_RESET" != "Y" ]; then
+        print_warning "MirrorNeuron appears to be already installed."
+    fi
+    if [ "$MN_INSTALL_RESET" = "Y" ]; then
+        REINSTALL="Y"
+    elif [ "$NON_INTERACTIVE" != "Y" ]; then
         REINSTALL=$(ask "Do you want to reinstall (overwrite old ones)?" "$REINSTALL")
     fi
     if [ "$REINSTALL" = "N" ]; then
@@ -3124,6 +3387,7 @@ Installs MirrorNeuron from local sibling folders under:
 Options:
   --yes                 Run non-interactively with defaults. This is the default.
   --interactive         Ask each install question before proceeding.
+  --reset               Permanently clear runtime data first; requires typing YES.
   -v, --verbose         Show installation details and command paths.
   --web-ui              Enable the local-source Web UI Compose service.
   --no-web-ui           Skip the local-source Web UI Compose service.
@@ -4445,7 +4709,8 @@ if [ "$INSTALL_SKILLS" = "Y" ]; then require_dir "$SKILLS_DIR" "mn-skills"; fi
 print_step "Checking Python runtime"
 resolve_python_runtime
 
-if [ -d "$INSTALL_DIR" ] || [ -L "$INSTALL_DIR" ] || [ -d "$VENV_DIR" ] || [ -f "$BIN_DIR/mn" ]; then
+if [ "$MN_INSTALL_RESET" != "Y" ] &&
+   { [ -d "$INSTALL_DIR" ] || [ -L "$INSTALL_DIR" ] || [ -d "$VENV_DIR" ] || [ -f "$BIN_DIR/mn" ]; }; then
     print_warning "MirrorNeuron appears to be already installed; refreshing local source install."
 fi
 
@@ -4841,6 +5106,7 @@ Options:
   --version TAG                 Install this release version. Default: ${MN_DEFAULT_INSTALL_VERSION}.
   --yes                         Run non-interactively with defaults and flags. This is the default.
   --interactive                 Ask each install question before proceeding.
+  --reset                       Permanently clear runtime data first; requires typing YES.
   -v, --verbose                 Show installation details and command paths.
   --no-reinstall                Keep an existing install instead of overwriting it.
   --web-ui / --no-web-ui        Enable or skip the Web UI Compose service.
@@ -6874,8 +7140,12 @@ fi
 print_success "System ready."
 
 if [ -d "$INSTALL_DIR" ] || [ -f "$BIN_DIR/mn" ]; then
-    print_warning "MirrorNeuron appears to be already installed."
-    REINSTALL=$(ask "Do you want to reinstall (overwrite old ones)?" "$REINSTALL")
+    if [ "$MN_INSTALL_RESET" = "Y" ]; then
+        REINSTALL="Y"
+    else
+        print_warning "MirrorNeuron appears to be already installed."
+        REINSTALL=$(ask "Do you want to reinstall (overwrite old ones)?" "$REINSTALL")
+    fi
     if [ "$REINSTALL" = "N" ]; then
         print_warning "Installation cancelled."
         exit 0
@@ -6975,6 +7245,11 @@ if [ "$INSTALL_CLI" = "Y" ]; then
 fi
 mn_print_cli_verification_prompt
 }
+
+if [ "$MN_INSTALL_RESET" = "Y" ] && [ "$MN_INSTALL_HELP_REQUESTED" != "Y" ]; then
+    mn_reset_install_state
+    mn_reset_drop_conflicting_install_args
+fi
 
 if [ "${#MN_INSTALL_ARGS[@]}" -eq 0 ]; then
     case "$MN_INSTALL_MODE" in
