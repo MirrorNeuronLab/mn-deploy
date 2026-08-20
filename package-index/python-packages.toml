@@ -164,6 +164,14 @@ installer_groups = ["skill"]
 binary_default = false
 
 [[packages]]
+name = "mirrorneuron-job-response-skill"
+path = "mn-skills/job_response_skill"
+publish_group = "skill"
+version = "1.2.31"
+installer_groups = ["skill", "sdk"]
+binary_default = false
+
+[[packages]]
 name = "mirrorneuron-generate-fake-data-skill"
 path = "mn-skills/generate_fake_data_skill"
 publish_group = "skill"
