@@ -34,6 +34,11 @@ must not silently cross into another source type. Explicit component-version
 overrides take precedence over the shared release version only for their named
 component.
 
+All modes use the single `mn runtime start` contract. There is no worker-only
+runtime. The historical `--start-as-worker` spelling may remain temporarily as
+a hidden deprecated alias, but it performs a normal start and must not appear
+in help output or generate worker-specific Compose state.
+
 Local-mode Python resolution presents all selected sibling projects to pip in
 one editable install transaction. Dependencies between MirrorNeuron packages
 must resolve from those workspace checkouts, including packages that have not
@@ -72,10 +77,16 @@ replaces it. Failures identify the failed component and a recovery action.
   Empty variables, home-directory globs, and workspace-wide deletion are
   invalid targets.
 - Credentials and tokens come from the environment or approved credential
-  mechanisms and are never emitted to normal logs.
+  mechanisms and are never emitted to normal logs, except that successful
+  runtime startup intentionally returns the active federation join token and
+  exact `mn node add` command to the invoking operator. Non-interactive
+  installer filtering may forward only that final readiness block, not
+  unrelated command output.
 - Downloaded artifacts and metadata are validated where checksums/signatures or
   version checks are part of the release flow.
-- Listener exposure and cluster joins remain opt-in and visibly reported.
+- Federation joins remain opt-in and visibly reported. LiteLLM must be
+  reachable by authenticated peer gateways; documentation must call out the
+  firewall boundary for its published port.
 - Workspace update helpers may reconcile dirty tracked files automatically only
   when the complete working tree is byte-identical to the fetched remote tip,
   the local branch can fast-forward, and a verified recovery stash protects the

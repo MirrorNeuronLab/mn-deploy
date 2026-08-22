@@ -42,7 +42,6 @@ Common options:
   --openshell / --no-openshell  Enable or skip OpenShell gateway setup.
   --syncthing / --no-syncthing  Enable or skip Syncthing shared-storage replication.
   --start / --no-start          Start or skip starting MirrorNeuron after install.
-  --start-as-worker             Start MirrorNeuron as a worker node after install.
   --python PATH                 Same as MN_PYTHON. Must be Python 3.11.x.
   --no-managed-python           Do not use uv to install a private Python runtime.
   --python-components LIST      Install only these Python components where supported.
@@ -458,16 +457,19 @@ function mn_run_runtime_start_command() {
 
     # Never hide command output while leaving it attached to interactive input.
     # A future CLI prompt must be visible instead of appearing as an installer hang.
-    if [ "$MN_INSTALL_VERBOSE" = "Y" ] ||
-       [ "${START_AS_WORKER:-N}" = "Y" ] ||
-       [ -t 0 ]; then
+    if [ "$MN_INSTALL_VERBOSE" = "Y" ] || [ -t 0 ]; then
         MN_DISABLE_UPDATE_CHECK=1 "$@"
         return
     fi
 
     mkdir -p "$log_dir"
-    if MN_DISABLE_UPDATE_CHECK=1 "$@" </dev/null >"$log_file" 2>&1; then
+    if MN_DISABLE_UPDATE_CHECK=1 MN_CLI_OUTPUT=plain "$@" </dev/null >"$log_file" 2>&1; then
         grep -E '(^|[[:space:]])(! Warning:|warning:|× Error:|error:)' "$log_file" >&3 2>/dev/null || true
+        awk '
+            /^Runtime node ready (successful|confirmed)[.]$/ { showing = 1 }
+            showing { print }
+            showing && /^Next: mn node add / { showing = 0 }
+        ' "$log_file" >&3
         rm -f "$log_file"
         return 0
     else
@@ -861,11 +863,6 @@ function mn_runtime_compose_template_is_valid() {
     [ -f "$template" ] &&
         grep -q '^name: mirror-neuron$' "$template" &&
         grep -q 'mirror-neuron-core' "$template" || return 1
-    if [ "${START_AS_WORKER:-N}" = "Y" ]; then
-        grep -q 'mn-native-sdk-grpc:' "$template" &&
-            grep -q 'mn-litellm-proxy:' "$template" &&
-            grep -q 'MN_NATIVE_SDK_GRPC_TARGET' "$template"
-    fi
 }
 
 function mn_ensure_runtime_compose_template_file() {
@@ -1501,7 +1498,6 @@ SKILLS_REPO="${MN_SKILLS_REPO:-MirrorNeuronLab/mn-skills}"
 MN_SKILLS_GIT_URL="${MN_SKILLS_GIT_URL:-}"
 CORE_RELEASE_TAG="${MN_CORE_RELEASE_TAG:-}"
 CORE_ASSET_URL="${MN_CORE_ASSET_URL:-}"
-START_AS_WORKER="N"
 
 function github_usage() {
     local script_name="${MN_INSTALL_SCRIPT_NAME:-$(basename "$0")}";
@@ -1524,7 +1520,6 @@ Options:
   --openshell / --no-openshell  Enable or skip OpenShell gateway setup.
   --syncthing / --no-syncthing  Enable or skip Syncthing shared-storage replication.
   --start / --no-start          Start or skip starting MirrorNeuron after install.
-  --start-as-worker             Start MirrorNeuron as a worker node after install.
   --python-components LIST      Install only these components: sdk,skill,cli,api.
                                 Use all or none as shortcuts.
   --python-sdk / --no-python-sdk
@@ -1616,7 +1611,10 @@ while [ "$#" -gt 0 ]; do
         --no-syncthing) MN_SYNCTHING_ENABLED="0" ;;
         --start) START_NOW="Y" ;;
         --no-start) START_NOW="N" ;;
-        --start-as-worker) START_AS_WORKER="Y"; START_NOW="Y" ;;
+        --start-as-worker)
+            print_warning "--start-as-worker is deprecated; every runtime is federation-capable, so starting the normal runtime instead."
+            START_NOW="Y"
+            ;;
         --python-sdk) INSTALL_PYTHON_SDK="Y" ;;
         --no-python-sdk) INSTALL_PYTHON_SDK="N" ;;
         --skill|--skills) INSTALL_BLUEPRINT_SUPPORT_SKILL="Y" ;;
@@ -2390,10 +2388,7 @@ function write_runtime_compose_files() {
             api_host="localhost"
         fi
     fi
-    litellm_gateway_bind_host="${MN_LITELLM_GATEWAY_BIND_HOST:-127.0.0.1}"
-    if [ "${START_AS_WORKER:-N}" = "Y" ] && [ -z "${MN_LITELLM_GATEWAY_BIND_HOST:-}" ]; then
-        litellm_gateway_bind_host="0.0.0.0"
-    fi
+    litellm_gateway_bind_host="${MN_LITELLM_GATEWAY_BIND_HOST:-0.0.0.0}"
     network_name="${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
     openshell_gateway_bind_host="$(resolve_openshell_gateway_bind_host "$network_name")"
     openshell_gateway_endpoint="${OPENSHELL_GATEWAY_ENDPOINT:-http://${openshell_gateway_bind_host}:${OPENSHELL_GATEWAY_PORT:-58080}}"
@@ -2999,32 +2994,20 @@ function ensure_shell_profile_exports() {
 
 ensure_shell_profile_exports
 
-if [ "$START_AS_WORKER" = "Y" ]; then
-    print_detail "Start the server: mn runtime start --worker"
-else
-    print_detail "Start the server: mn runtime start"
-fi
+print_detail "Start the server: mn runtime start"
 if [ "$INSTALL_CLI" = "Y" ]; then
     mn_print_next_shell_command "mn node list"
 fi
 
 if [ "$START_NOW" = "Y" ]; then
     print_step "Starting MirrorNeuron services"
-    if [ "$START_AS_WORKER" = "Y" ]; then
-        if ! mn_run_runtime_start_command "$VENV_DIR/bin/mn" runtime start --worker; then
-            [ -n "$MN_RUNTIME_START_LOG" ] && print_warning "CLI startup details: $MN_RUNTIME_START_LOG"
-            print_warning "mn runtime start --worker failed; starting worker gateway services with Docker Compose."
-            runtime_compose up -d mn-native-sdk-grpc mn-litellm-proxy
-        fi
-    else
-        if ! mn_run_runtime_start_command "$VENV_DIR/bin/mn" runtime start; then
-            [ -n "$MN_RUNTIME_START_LOG" ] && print_warning "CLI startup details: $MN_RUNTIME_START_LOG"
-            print_warning "mn runtime start failed; starting MirrorNeuron Docker Compose runtime."
-            mn_run_runtime_compose up -d
-            "$VENV_DIR/bin/mn" runtime restart-sidecars --api >/dev/null 2>&1 || print_warning "MirrorNeuron Core started, but the REST API sidecar did not start automatically."
-        fi
+    if ! mn_run_runtime_start_command "$VENV_DIR/bin/mn" runtime start; then
+        [ -n "$MN_RUNTIME_START_LOG" ] && print_warning "CLI startup details: $MN_RUNTIME_START_LOG"
+        print_warning "mn runtime start failed; starting MirrorNeuron Docker Compose runtime."
+        mn_run_runtime_compose up -d
+        "$VENV_DIR/bin/mn" runtime restart-sidecars --api >/dev/null 2>&1 || print_warning "MirrorNeuron Core started, but the REST API sidecar did not start automatically."
     fi
-    if [ "$INSTALL_OPENSHELL" = "Y" ] && [ "$START_AS_WORKER" != "Y" ]; then
+    if [ "$INSTALL_OPENSHELL" = "Y" ]; then
         reconcile_openshell_gateway_bind_host "${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
         wait_for_openshell_worker_service
     fi
@@ -3131,7 +3114,6 @@ INSTALL_CONTEXT_ENGINE="N"
 INSTALL_OPENSHELL="Y"
 INSTALL_SKILLS="Y"
 START_NOW="Y"
-START_AS_WORKER="N"
 NON_INTERACTIVE="Y"
 
 function print_header() {
@@ -3403,7 +3385,6 @@ Options:
                         by local runtime packages are still installed locally.
   --start               Start MirrorNeuron after install.
   --no-start            Skip starting MirrorNeuron after install.
-  --start-as-worker     Start MirrorNeuron as a worker node after install.
   --python PATH         Same as MN_PYTHON. Must be Python 3.11.x.
   --no-managed-python   Do not use uv to install a private Python runtime.
   MN_PYTHON=/path       Use a specific Python 3.11.x interpreter.
@@ -3432,7 +3413,10 @@ while [ "$#" -gt 0 ]; do
         --no-syncthing) MN_SYNCTHING_ENABLED="0" ;;
         --start) START_NOW="Y" ;;
         --no-start) START_NOW="N" ;;
-        --start-as-worker) START_AS_WORKER="Y"; START_NOW="Y" ;;
+        --start-as-worker)
+            print_warning "--start-as-worker is deprecated; every runtime is federation-capable, so starting the normal runtime instead."
+            START_NOW="Y"
+            ;;
         --python)
             shift
             if [ "$#" -eq 0 ]; then
@@ -4288,10 +4272,7 @@ function write_runtime_compose_files() {
             api_host="localhost"
         fi
     fi
-    litellm_gateway_bind_host="${MN_LITELLM_GATEWAY_BIND_HOST:-127.0.0.1}"
-    if [ "${START_AS_WORKER:-N}" = "Y" ] && [ -z "${MN_LITELLM_GATEWAY_BIND_HOST:-}" ]; then
-        litellm_gateway_bind_host="0.0.0.0"
-    fi
+    litellm_gateway_bind_host="${MN_LITELLM_GATEWAY_BIND_HOST:-0.0.0.0}"
     network_name="${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
     openshell_gateway_bind_host="$(resolve_openshell_gateway_bind_host "$network_name")"
     openshell_gateway_endpoint="${OPENSHELL_GATEWAY_ENDPOINT:-http://${openshell_gateway_bind_host}:${OPENSHELL_GATEWAY_PORT:-58080}}"
@@ -4907,21 +4888,13 @@ ensure_shell_profile_exports
 if [ "$START_NOW" = "Y" ]; then
     print_step "Starting MirrorNeuron services"
     "$VENV_DIR/bin/mn" runtime stop >/dev/null 2>&1 || true
-    if [ "$START_AS_WORKER" = "Y" ]; then
-        if ! mn_run_runtime_start_command "$VENV_DIR/bin/mn" runtime start --worker; then
-            [ -n "$MN_RUNTIME_START_LOG" ] && print_warning "CLI startup details: $MN_RUNTIME_START_LOG"
-            print_warning "mn runtime start --worker failed; starting worker gateway services with Docker Compose."
-            runtime_compose up -d mn-native-sdk-grpc mn-litellm-proxy
-        fi
-    else
-        if ! mn_run_runtime_start_command "$VENV_DIR/bin/mn" runtime start; then
-            [ -n "$MN_RUNTIME_START_LOG" ] && print_warning "CLI startup details: $MN_RUNTIME_START_LOG"
-            print_warning "mn runtime start failed; starting MirrorNeuron Docker Compose runtime."
-            mn_run_runtime_compose up -d
-            "$VENV_DIR/bin/mn" runtime restart-sidecars --api >/dev/null 2>&1 || print_warning "MirrorNeuron Core started, but the REST API sidecar did not start automatically."
-        fi
+    if ! mn_run_runtime_start_command "$VENV_DIR/bin/mn" runtime start; then
+        [ -n "$MN_RUNTIME_START_LOG" ] && print_warning "CLI startup details: $MN_RUNTIME_START_LOG"
+        print_warning "mn runtime start failed; starting MirrorNeuron Docker Compose runtime."
+        mn_run_runtime_compose up -d
+        "$VENV_DIR/bin/mn" runtime restart-sidecars --api >/dev/null 2>&1 || print_warning "MirrorNeuron Core started, but the REST API sidecar did not start automatically."
     fi
-    if [ "$INSTALL_OPENSHELL" = "Y" ] && [ "$START_AS_WORKER" != "Y" ]; then
+    if [ "$INSTALL_OPENSHELL" = "Y" ]; then
         reconcile_openshell_gateway_bind_host "${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
         wait_for_openshell_worker_service
     fi
@@ -4944,8 +4917,6 @@ print_detail "Rebuild after Elixir changes: ${SCRIPT_DIR}/install.sh --mode loca
 
 if [ "$START_NOW" = "Y" ]; then
     mn_print_next_shell_command "mn node list"
-elif [ "$START_AS_WORKER" = "Y" ]; then
-    mn_print_next_shell_command "mn runtime start --worker"
 else
     mn_print_next_shell_command "mn runtime start"
 fi
@@ -5075,7 +5046,6 @@ INSTALL_AGENTS="Y"
 INSTALL_CLI="Y"
 INSTALL_API="Y"
 START_NOW="Y"
-START_AS_WORKER="N"
 REINSTALL="Y"
 NON_INTERACTIVE="Y"
 
@@ -5116,7 +5086,6 @@ Options:
   --openshell / --no-openshell  Enable or skip OpenShell gateway setup.
   --syncthing / --no-syncthing  Enable or skip Syncthing shared-storage replication.
   --start / --no-start          Start or skip starting MirrorNeuron after install.
-  --start-as-worker             Start MirrorNeuron as a worker node after install.
 
 Python component options:
   --python-components LIST      Install only these components: sdk,agents,cli,api.
@@ -5232,7 +5201,10 @@ while [ "$#" -gt 0 ]; do
         --no-syncthing) MN_SYNCTHING_ENABLED="0" ;;
         --start) START_NOW="Y" ;;
         --no-start) START_NOW="N" ;;
-        --start-as-worker) START_AS_WORKER="Y"; START_NOW="Y" ;;
+        --start-as-worker)
+            print_warning "--start-as-worker is deprecated; every runtime is federation-capable, so starting the normal runtime instead."
+            START_NOW="Y"
+            ;;
         --python-sdk) INSTALL_PYTHON_SDK="Y" ;;
         --no-python-sdk) INSTALL_PYTHON_SDK="N" ;;
         --skill|--skills|--no-skill|--no-skills|--all-skills|--no-all-skills) ;;
@@ -6709,10 +6681,7 @@ function write_runtime_compose_files() {
             api_host="localhost"
         fi
     fi
-    litellm_gateway_bind_host="${MN_LITELLM_GATEWAY_BIND_HOST:-127.0.0.1}"
-    if [ "${START_AS_WORKER:-N}" = "Y" ] && [ -z "${MN_LITELLM_GATEWAY_BIND_HOST:-}" ]; then
-        litellm_gateway_bind_host="0.0.0.0"
-    fi
+    litellm_gateway_bind_host="${MN_LITELLM_GATEWAY_BIND_HOST:-0.0.0.0}"
     network_name="${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
     openshell_gateway_bind_host="$(resolve_openshell_gateway_bind_host "$network_name")"
     openshell_gateway_endpoint="${OPENSHELL_GATEWAY_ENDPOINT:-http://${openshell_gateway_bind_host}:${OPENSHELL_GATEWAY_PORT:-58080}}"
@@ -7201,21 +7170,13 @@ fi
 
 if [ "$START_NOW" = "Y" ]; then
     print_step "Starting MirrorNeuron services"
-    if [ "$START_AS_WORKER" = "Y" ]; then
-        if ! mn_run_runtime_start_command "$VENV_DIR/bin/mn" runtime start --worker; then
-            [ -n "$MN_RUNTIME_START_LOG" ] && print_warning "CLI startup details: $MN_RUNTIME_START_LOG"
-            print_warning "mn runtime start --worker failed; starting worker gateway services with Docker Compose."
-            runtime_compose up -d mn-native-sdk-grpc mn-litellm-proxy
-        fi
-    else
-        if ! mn_run_runtime_start_command "$VENV_DIR/bin/mn" runtime start; then
-            [ -n "$MN_RUNTIME_START_LOG" ] && print_warning "CLI startup details: $MN_RUNTIME_START_LOG"
-            print_warning "mn runtime start failed; starting MirrorNeuron Docker Compose runtime."
-            mn_run_runtime_compose up -d
-            "$VENV_DIR/bin/mn" runtime restart-sidecars --api >/dev/null 2>&1 || print_warning "MirrorNeuron Core started, but the REST API sidecar did not start automatically."
-        fi
+    if ! mn_run_runtime_start_command "$VENV_DIR/bin/mn" runtime start; then
+        [ -n "$MN_RUNTIME_START_LOG" ] && print_warning "CLI startup details: $MN_RUNTIME_START_LOG"
+        print_warning "mn runtime start failed; starting MirrorNeuron Docker Compose runtime."
+        mn_run_runtime_compose up -d
+        "$VENV_DIR/bin/mn" runtime restart-sidecars --api >/dev/null 2>&1 || print_warning "MirrorNeuron Core started, but the REST API sidecar did not start automatically."
     fi
-    if [ "$INSTALL_OPENSHELL" = "Y" ] && [ "$START_AS_WORKER" != "Y" ]; then
+    if [ "$INSTALL_OPENSHELL" = "Y" ]; then
         reconcile_openshell_gateway_bind_host "${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
         wait_for_openshell_worker_service
     fi
@@ -7237,8 +7198,6 @@ fi
 if [ "$INSTALL_CLI" = "Y" ]; then
     if [ "$START_NOW" = "Y" ]; then
         mn_print_next_shell_command "mn node list"
-    elif [ "$START_AS_WORKER" = "Y" ]; then
-        mn_print_next_shell_command "mn runtime start --worker"
     else
         mn_print_next_shell_command "mn runtime start"
     fi

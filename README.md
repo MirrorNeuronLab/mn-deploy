@@ -17,6 +17,12 @@ Install the local runtime:
 ./install.sh
 ```
 
+When the installer starts the runtime, it forwards the final
+`Runtime node ready` block from `mn runtime start`. That block contains the
+advertised endpoint, the active federation join token, and the exact
+`mn node add` command for connecting another independently installed Core.
+Treat the token and captured installer output as credentials.
+
 Install a specific release:
 
 ```bash
@@ -102,6 +108,14 @@ Run its isolated Git regression test with:
   profile export for both MirrorNeuron and OtterDesk:
   `export MN_HOME="$HOME/.mn"`.
 - Generated Compose settings are stored in `~/.mn/docker-compose.env`.
+- Every installation starts the same federation-capable runtime; there is no
+  worker-only install or runtime mode. The old `--start-as-worker` installer
+  argument is accepted only as a deprecated compatibility alias for a normal
+  start and is omitted from `--help`.
+- LiteLLM binds to a federation-reachable interface by default so an
+  authenticated peer gateway can route remote model requests through it.
+  Restrict port `4000` to trusted LAN/VPN peers with the host firewall; agents
+  still call their owner Core's LiteLLM gateway first.
 - If the default Blueprint Web UI range (`61000`–`61049`) conflicts with a
   local service, set `MN_BLUEPRINT_WEB_UI_PORT_START` and
   `MN_BLUEPRINT_WEB_UI_PORT_END` for one local install. The selected range is
