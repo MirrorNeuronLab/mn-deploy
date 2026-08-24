@@ -426,6 +426,11 @@ services:
       else exec mix run --no-halt; fi'
     environment:
       HOME: /root
+      # Core runs in Docker while the native response service runs on the host.
+      # Keep the Core side under the mounted runtime directory; the native
+      # service resolves this to its own MN_HOME before opening job data.
+      MN_HOME: /root/.mn
+      MN_JOB_DATA_ROOT: /root/.mn/job-data
       MN_CORE_HOST: 0.0.0.0
       MN_REDIS_HOST: redis
       MN_REDIS_URL: ${MN_REDIS_URL:-redis://redis:6379/0}
