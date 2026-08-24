@@ -668,6 +668,73 @@ function mn_reset_read_env_value() {
     awk -F= -v key="$key" '$1 == key {print substr($0, index($0, "=") + 1); exit}' "$file"
 }
 
+MN_RESET_CLEANUP_IMAGES=()
+
+function mn_reset_add_cleanup_image() {
+    local image="$1"
+    local existing_image
+
+    [ -n "$image" ] || return 0
+    for existing_image in "${MN_RESET_CLEANUP_IMAGES[@]:-}"; do
+        [ "$existing_image" = "$image" ] && return 0
+    done
+    MN_RESET_CLEANUP_IMAGES+=("$image")
+}
+
+function mn_reset_capture_cleanup_images() {
+    local compose_env_file="$1"
+    local project_name="$2"
+    local container_name resource_id image redis_image
+
+    # Prefer images that are already running this runtime. They are guaranteed
+    # to be available locally and avoid pulling an image during a reset.
+    for container_name in \
+        mirror-neuron-redis \
+        mn-litellm-proxy \
+        mirror-neuron-core \
+        mirror-neuron-syncthing \
+        mirror-neuron-context-engine-model \
+        mirror-neuron-context-engine \
+        mirror-neuron-native-sdk-grpc; do
+        image="$(docker container inspect --format '{{.Config.Image}}' "$container_name" 2>/dev/null || true)"
+        mn_reset_add_cleanup_image "$image"
+    done
+
+    while IFS= read -r resource_id; do
+        [ -n "$resource_id" ] || continue
+        image="$(docker container inspect --format '{{.Config.Image}}' "$resource_id" 2>/dev/null || true)"
+        mn_reset_add_cleanup_image "$image"
+    done < <(docker ps -aq --filter "label=com.docker.compose.project=${project_name}" 2>/dev/null || true)
+
+    # A prior reset may already have removed the containers while leaving
+    # Docker-owned bind-mount files behind. Redis is part of the managed
+    # runtime, and its locally cached image provides a small POSIX shell.
+    redis_image="$(mn_reset_read_env_value "$compose_env_file" "MN_REDIS_IMAGE")"
+    redis_image="${redis_image:-redis:8}"
+    if docker image inspect "$redis_image" >/dev/null 2>&1; then
+        mn_reset_add_cleanup_image "$redis_image"
+    fi
+}
+
+function mn_reset_remove_docker_owned_files() {
+    local cleanup_image
+    local cleanup_command='rm -rf /mnt/mn-reset/* /mnt/mn-reset/.[!.]* /mnt/mn-reset/..?*'
+
+    # MN_RESET_HOME was resolved and rejected if it is a symlink before this
+    # function can run. Mount only that exact runtime directory, never its
+    # parent or HOME, and use an image already available on the host.
+    for cleanup_image in "${MN_RESET_CLEANUP_IMAGES[@]:-}"; do
+        [ -n "$cleanup_image" ] || continue
+        if docker run --rm --user 0:0 \
+            --volume "$MN_RESET_HOME:/mnt/mn-reset:rw" \
+            --entrypoint /bin/sh \
+            "$cleanup_image" -ec "$cleanup_command" >/dev/null 2>&1; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 function mn_reset_confirm_or_exit() {
     local confirmation=""
 
@@ -717,6 +784,8 @@ function mn_reset_docker_state_or_exit() {
         mn_reset_error "Invalid Compose project name in ${compose_env_file}: ${project_name}"
         exit 1
     fi
+
+    mn_reset_capture_cleanup_images "$compose_env_file" "$project_name"
 
     printf '==> Clearing Redis and stopping the existing MirrorNeuron runtime\n' >&3
     redis_cli_script='if [ -n "${MN_REDIS_PASSWORD:-}" ]; then
@@ -809,8 +878,16 @@ function mn_reset_install_state() {
     if [ -d "$MN_RESET_HOME" ]; then
         chmod -R u+rwX "$MN_RESET_HOME" 2>/dev/null || true
         if ! rm -rf "$MN_RESET_HOME"; then
-            mn_reset_error "Could not remove MirrorNeuron runtime data: ${MN_RESET_HOME}"
-            exit 1
+            mn_reset_warning "Host removal failed; cleaning Docker-owned runtime files through Docker."
+            if ! mn_reset_remove_docker_owned_files; then
+                mn_reset_error "Could not remove MirrorNeuron runtime data: ${MN_RESET_HOME}"
+                mn_reset_error "Docker could not clean the remaining runtime files. Verify Docker access, then repair ownership and rerun --reset."
+                exit 1
+            fi
+            if ! rm -rf "$MN_RESET_HOME"; then
+                mn_reset_error "Could not remove MirrorNeuron runtime data after Docker cleanup: ${MN_RESET_HOME}"
+                exit 1
+            fi
         fi
     fi
     if ! mkdir -p "$MN_RESET_HOME"; then
