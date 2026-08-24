@@ -443,6 +443,12 @@ services:
       MN_REDIS_RECONNECT_ATTEMPTS: ${MN_REDIS_RECONNECT_ATTEMPTS:-10}
       MN_REDIS_RECONNECT_BACKOFF_MS: ${MN_REDIS_RECONNECT_BACKOFF_MS:-250}
       MN_REDIS_RECONNECT_MAX_BACKOFF_MS: ${MN_REDIS_RECONNECT_MAX_BACKOFF_MS:-2000}
+      # Service-owned Docker Compose projects can take longer than the
+      # historic 15s job-control default to stop cleanly.  Keep this
+      # configurable from docker-compose.env so hosts can raise it without
+      # rebuilding the runtime image.
+      MN_JOB_CALL_TIMEOUT_MS: ${MN_JOB_CALL_TIMEOUT_MS:-15000}
+      MN_CANCEL_JOB_CALL_TIMEOUT_MS: ${MN_CANCEL_JOB_CALL_TIMEOUT_MS:-5000}
       MN_NETWORK_JOIN_TOKEN: ${MN_NETWORK_JOIN_TOKEN:-}
       MN_NETWORK_ADVERTISE_HOST: ${MN_NETWORK_ADVERTISE_HOST:-}
       MN_GRPC_ADVERTISE_PORT: ${MN_GRPC_ADVERTISE_PORT:-${MN_GRPC_PORT:-55051}}
