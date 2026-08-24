@@ -1926,6 +1926,10 @@ function compose_profiles() {
     [ "$INSTALL_WEB_UI" = "Y" ] && profiles+=("web-ui")
     [ "$INSTALL_OPENSHELL" = "Y" ] && profiles+=("openshell")
     [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] && profiles+=("context")
+    case "$(printf '%s' "$MN_SYNCTHING_ENABLED" | tr '[:upper:]' '[:lower:]')" in
+        ''|0|false|no|n|off|disabled) ;;
+        *) profiles+=("syncthing") ;;
+    esac
     if [ "${#profiles[@]}" -eq 0 ]; then
         printf ''
         return 0
@@ -4057,6 +4061,10 @@ function compose_profiles() {
     [ "$INSTALL_WEB_UI" = "Y" ] && profiles+=("web-ui")
     [ "$INSTALL_OPENSHELL" = "Y" ] && profiles+=("openshell")
     [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] && profiles+=("context")
+    case "$(printf '%s' "$MN_SYNCTHING_ENABLED" | tr '[:upper:]' '[:lower:]')" in
+        ''|0|false|no|n|off|disabled) ;;
+        *) profiles+=("syncthing") ;;
+    esac
     if [ "${#profiles[@]}" -eq 0 ]; then
         printf ''
         return 0
@@ -6232,6 +6240,10 @@ function compose_profiles() {
     [ "$INSTALL_WEB_UI" = "Y" ] && profiles+=("web-ui")
     [ "$INSTALL_OPENSHELL" = "Y" ] && profiles+=("openshell")
     [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] && profiles+=("context")
+    case "$(printf '%s' "$MN_SYNCTHING_ENABLED" | tr '[:upper:]' '[:lower:]')" in
+        ''|0|false|no|n|off|disabled) ;;
+        *) profiles+=("syncthing") ;;
+    esac
     if [ "${#profiles[@]}" -eq 0 ]; then
         printf ''
         return 0
