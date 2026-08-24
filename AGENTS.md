@@ -45,6 +45,16 @@ installation or cleanup.
 - Do not run install, uninstall, publish, registry setup, Redis cleanup, or
   cluster mutation as a routine verification step.
 
+## Native Job-Data Ownership
+
+- Core runs in Docker as `root`, while Spark's native SDK runs as the host
+  runtime user. Ensure Core-created job-data directories are group-writable by
+  that host user; do not leave them as `root:root` and inaccessible to native
+  response services.
+- Scope any ownership or permission repair strictly to the managed job-data
+  tree. Preserve least-privilege access rather than making runtime data
+  world-writable.
+
 ## Cross-Host Repository Sync
 
 - Do not `rsync`, `scp`, or otherwise copy tracked source files into a second
