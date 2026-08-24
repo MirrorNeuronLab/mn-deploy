@@ -143,6 +143,9 @@ Run its isolated Git regression test with:
   installing it does not require npm on the host. Binary installs fetch the
   selected `mirrorneuron-web-ui` package version inside the service, while
   local installs mount and build the `mn-web-ui` checkout inside the service.
+  Its local job-UI proxy resolves the authenticated job handle and forwards
+  only that job's declared dashboard and companion ports; it never redirects a
+  browser to a selected remote node's LAN address.
 - Installs are non-interactive by default and use yes/default selections. Use
   `--interactive` for the prompt-driven setup flow.
 - Use `./install.sh` or `./install.sh --mode binary` for release/package installs,

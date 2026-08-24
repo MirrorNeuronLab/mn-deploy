@@ -52,6 +52,12 @@ locations. Generated Compose environment belongs in installed state, not in
 this checkout. Redis is an attached service. Membrane may be prepared lazily
 when a blueprint requires context memory.
 
+The local Web UI Compose service may proxy an external job UI only after it
+loads that job's authenticated durable UI handle from the local API. Its target
+host is fixed by that handle and its ports are limited to the handle's declared
+allowlist; it is never a general LAN proxy or browser redirect to a remote
+runtime node.
+
 Install operations must be restartable after partial completion. Existing
 valid configuration is preserved unless the selected operation explicitly
 replaces it. Failures identify the failed component and a recovery action.

@@ -13,6 +13,7 @@ services:
       MN_WEB_UI_PACKAGE_VERSION: ${MN_WEB_UI_PACKAGE_VERSION:-1.2.31}
       MN_WEB_UI_API_HOST: ${MN_WEB_UI_API_HOST:-host.docker.internal}
       MN_API_PORT: ${MN_API_PORT:-54001}
+      MN_API_TOKEN: ${MN_API_TOKEN:-}
       MN_WEB_UI_PORT: ${MN_WEB_UI_PORT:-55173}
       MN_WEB_UI_SITE_DIR: /work/site
       npm_config_cache: /root/.npm
@@ -53,12 +54,16 @@ services:
           fi
           cat > "$$workdir/server.mjs" <<'NODE'
           import http from "node:http";
+          import https from "node:https";
+          import net from "node:net";
+          import tls from "node:tls";
           import { createReadStream, existsSync, statSync } from "node:fs";
           import { extname, join, relative, resolve } from "node:path";
 
           const siteDir = resolve(process.env.MN_WEB_UI_SITE_DIR || "/work/site");
           const apiHost = process.env.MN_WEB_UI_API_HOST || "host.docker.internal";
           const apiPort = Number(process.env.MN_API_PORT || "54001");
+          const apiToken = process.env.MN_API_TOKEN || "";
           const port = Number(process.env.MN_WEB_UI_PORT || "55173");
           const contentTypes = {
             ".css": "text/css; charset=utf-8",
@@ -98,8 +103,216 @@ services:
             request.pipe(upstream);
           }
 
-          http.createServer((request, response) => {
-            const pathName = new URL(request.url || "/", "http://localhost").pathname;
+          function proxyError(response, statusCode, detail) {
+            response.writeHead(statusCode, { "Content-Type": "application/json" });
+            response.end(JSON.stringify({ detail }));
+          }
+
+          function declaredProxyRequest(pathName) {
+            const match = /^\/job-ui-proxy\/([^/]+)\/(\d+)(?:\/(.*))?$/.exec(pathName);
+            if (!match) return undefined;
+            try {
+              return {
+                jobId: decodeURIComponent(match[1]),
+                port: Number(match[2]),
+                path: match[3] || "",
+              };
+            } catch {
+              return undefined;
+            }
+          }
+
+          function declaredWebSocketProxyRequest(pathName) {
+            const details = declaredProxyRequest(pathName);
+            if (!details) return undefined;
+            const parts = details.path.split("/");
+            if (parts.shift() !== "ws") return undefined;
+            details.path = parts.join("/");
+            return details;
+          }
+
+          function apiHeaders() {
+            return apiToken ? { Authorization: "Bearer " + apiToken } : {};
+          }
+
+          function loadJobWebUi(jobId) {
+            return new Promise((resolve, reject) => {
+              const request = http.request(
+                {
+                  hostname: apiHost,
+                  port: apiPort,
+                  path: "/api/v1/jobs/" + encodeURIComponent(jobId) + "/ui",
+                  method: "GET",
+                  headers: apiHeaders(),
+                },
+                (response) => {
+                  const chunks = [];
+                  response.on("data", (chunk) => chunks.push(chunk));
+                  response.on("end", () => {
+                    if ((response.statusCode || 502) !== 200) {
+                      reject({ statusCode: response.statusCode === 404 ? 404 : 502 });
+                      return;
+                    }
+                    try {
+                      const payload = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+                      if (!payload || typeof payload.web_ui !== "object") throw new Error("invalid handle");
+                      resolve(payload.web_ui);
+                    } catch {
+                      reject({ statusCode: 502 });
+                    }
+                  });
+                },
+              );
+              request.on("error", () => reject({ statusCode: 502 }));
+              request.end();
+            });
+          }
+
+          function allowedPorts(webUi, key, primaryPort) {
+            const policy = webUi && typeof webUi.metadata === "object" && webUi.metadata
+              && typeof webUi.metadata.proxy === "object"
+              ? webUi.metadata.proxy
+              : {};
+            const values = Array.isArray(policy[key]) ? policy[key] : [];
+            const ports = new Set(values.filter((value) => Number.isInteger(value) && value > 0 && value < 65536));
+            if (key === "http_ports") ports.add(primaryPort);
+            return ports;
+          }
+
+          function safeRemotePath(value) {
+            const parts = String(value || "").split("/").filter(Boolean);
+            if (parts.some((part) => {
+              try { return [".", ".."].includes(decodeURIComponent(part)); } catch { return true; }
+            })) {
+              throw new Error("invalid path");
+            }
+            return parts.map((part) => encodeURIComponent(decodeURIComponent(part)).replace(/%3A/gi, ":")).join("/");
+          }
+
+          function jobUiTarget(webUi, requestedPort, requestedPath, search, websocket = false) {
+            let declared;
+            try {
+              declared = new URL(String(webUi && webUi.url || ""));
+            } catch {
+              throw new Error("invalid endpoint");
+            }
+            if (!["http:", "https:"].includes(declared.protocol) || declared.username || declared.password) {
+              throw new Error("invalid endpoint");
+            }
+            const primaryPort = Number(declared.port || (declared.protocol === "https:" ? 443 : 80));
+            const allowed = allowedPorts(webUi, websocket ? "websocket_ports" : "http_ports", primaryPort);
+            if (!allowed.has(requestedPort)) throw new Error("undeclared port");
+            const target = new URL(declared);
+            target.protocol = websocket ? (declared.protocol === "https:" ? "wss:" : "ws:") : declared.protocol;
+            target.port = String(requestedPort);
+            target.pathname = "/" + safeRemotePath(requestedPath);
+            target.search = search || "";
+            target.hash = "";
+            return target;
+          }
+
+          function remoteRequestHeaders(headers) {
+            const excluded = new Set(["host", "authorization", "cookie", "accept-encoding", "connection", "upgrade"]);
+            const forwarded = {};
+            for (const [name, value] of Object.entries(headers)) {
+              if (!excluded.has(name.toLowerCase()) && value !== undefined) forwarded[name] = value;
+            }
+            return forwarded;
+          }
+
+          function remoteResponseHeaders(headers) {
+            const excluded = new Set(["connection", "keep-alive", "transfer-encoding", "upgrade", "content-length", "date", "server", "location", "set-cookie"]);
+            const forwarded = {};
+            for (const [name, value] of Object.entries(headers)) {
+              if (!excluded.has(name.toLowerCase()) && value !== undefined) forwarded[name] = value;
+            }
+            return forwarded;
+          }
+
+          function injectProxyConfig(body, jobId) {
+            const script = "<script>window.__MN_JOB_UI_PROXY_BASE__="
+              + JSON.stringify("/job-ui-proxy/" + encodeURIComponent(jobId)) + ";</script>";
+            const html = body.toString("utf8");
+            const closingHead = html.toLowerCase().lastIndexOf("</head>");
+            return Buffer.from(closingHead >= 0
+              ? html.slice(0, closingHead) + script + html.slice(closingHead)
+              : script + html,
+            );
+          }
+
+          async function proxyJobUi(request, response, details, search) {
+            let webUi;
+            let target;
+            try {
+              webUi = await loadJobWebUi(details.jobId);
+              target = jobUiTarget(webUi, details.port, details.path, search);
+            } catch (error) {
+              proxyError(response, error && error.statusCode === 404 ? 404 : 502,
+                error && error.message === "undeclared port"
+                  ? "That job Web UI connection is not declared."
+                  : "The job Web UI could not be reached.");
+              return;
+            }
+            const transport = target.protocol === "https:" ? https : http;
+            const upstream = transport.request(
+              target,
+              { method: request.method, headers: remoteRequestHeaders(request.headers) },
+              (upstreamResponse) => {
+                const headers = remoteResponseHeaders(upstreamResponse.headers);
+                const contentType = String(headers["content-type"] || "").toLowerCase();
+                response.writeHead(upstreamResponse.statusCode || 502, headers);
+                if (!contentType.includes("text/html")) {
+                  upstreamResponse.pipe(response);
+                  return;
+                }
+                const chunks = [];
+                upstreamResponse.on("data", (chunk) => chunks.push(chunk));
+                upstreamResponse.on("end", () => response.end(injectProxyConfig(Buffer.concat(chunks), details.jobId)));
+              },
+            );
+            upstream.on("error", () => {
+              if (!response.headersSent) proxyError(response, 502, "The job Web UI could not be reached.");
+              else response.end();
+            });
+            request.pipe(upstream);
+          }
+
+          function websocketHeaders(request, target) {
+            const excluded = new Set(["host", "authorization", "cookie"]);
+            const lines = ["Host: " + target.host];
+            for (let index = 0; index < request.rawHeaders.length; index += 2) {
+              const name = request.rawHeaders[index];
+              const value = request.rawHeaders[index + 1];
+              if (!excluded.has(name.toLowerCase())) lines.push(name + ": " + value);
+            }
+            return lines.join("\r\n");
+          }
+
+          async function proxyJobUiWebSocket(request, socket, head, details, search) {
+            let target;
+            try {
+              const webUi = await loadJobWebUi(details.jobId);
+              target = jobUiTarget(webUi, details.port, details.path, search, true);
+            } catch {
+              socket.destroy();
+              return;
+            }
+            const remote = target.protocol === "wss:"
+              ? tls.connect({ host: target.hostname, port: Number(target.port || 443), servername: target.hostname })
+              : net.connect({ host: target.hostname, port: Number(target.port || 80) });
+            remote.once(target.protocol === "wss:" ? "secureConnect" : "connect", () => {
+              remote.write("GET " + target.pathname + target.search + " HTTP/1.1\r\n"
+                + websocketHeaders(request, target) + "\r\n\r\n");
+              if (head.length) remote.write(head);
+              socket.pipe(remote).pipe(socket);
+            });
+            remote.on("error", () => socket.destroy());
+            socket.on("error", () => remote.destroy());
+          }
+
+          const server = http.createServer((request, response) => {
+            const requestUrl = new URL(request.url || "/", "http://localhost");
+            const pathName = requestUrl.pathname;
             if (pathName === "/health") {
               response.writeHead(200, { "Content-Type": "application/json" });
               response.end(JSON.stringify({ status: "ok", component: "web-ui" }));
@@ -107,6 +320,11 @@ services:
             }
             if (pathName === "/api" || pathName.startsWith("/api/")) {
               proxyApi(request, response);
+              return;
+            }
+            const proxyDetails = declaredProxyRequest(pathName);
+            if (proxyDetails) {
+              proxyJobUi(request, response, proxyDetails, requestUrl.search);
               return;
             }
             let requested;
@@ -126,7 +344,17 @@ services:
               ? requested
               : join(siteDir, "index.html");
             serveFile(response, file);
-          }).listen(port, "0.0.0.0", () => {
+          });
+          server.on("upgrade", (request, socket, head) => {
+            const requestUrl = new URL(request.url || "/", "http://localhost");
+            const proxyDetails = declaredWebSocketProxyRequest(requestUrl.pathname);
+            if (!proxyDetails) {
+              socket.destroy();
+              return;
+            }
+            proxyJobUiWebSocket(request, socket, head, proxyDetails, requestUrl.search);
+          });
+          server.listen(port, "0.0.0.0", () => {
             console.log("MirrorNeuron Web UI listening on " + port);
           });
           NODE
