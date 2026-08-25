@@ -739,6 +739,9 @@ function mn_reset_confirm_or_exit() {
     local confirmation=""
 
     mn_reset_warning "RESET PERMANENTLY DELETES all MirrorNeuron runtime data in ${MN_RESET_HOME}."
+    if [ -n "${VENV_DIR:-}" ]; then
+        mn_reset_warning "The MirrorNeuron Python virtual environment at ${VENV_DIR} will also be removed."
+    fi
     mn_reset_warning "MirrorNeuron Docker containers and volumes will be removed, including all Redis data."
     mn_reset_warning "This cannot be undone, and --yes does not bypass this confirmation."
     printf 'Type YES to reset MirrorNeuron and continue with a fresh install: ' >&3
@@ -873,6 +876,11 @@ function mn_reset_install_state() {
     mn_reset_resolve_home_or_exit
     mn_reset_confirm_or_exit
     mn_reset_docker_state_or_exit
+
+    if [ -n "${VENV_DIR:-}" ] && { [ -e "$VENV_DIR" ] || [ -L "$VENV_DIR" ]; }; then
+        printf '==> Clearing MirrorNeuron Python virtual environment\n' >&3
+        mn_remove_path_or_exit "$VENV_DIR" "MirrorNeuron Python virtual environment"
+    fi
 
     printf '==> Recreating MirrorNeuron runtime data directory\n' >&3
     if [ -d "$MN_RESET_HOME" ]; then
