@@ -229,6 +229,99 @@ function mn_wait_for_docker_model_runner() {
     return 1
 }
 
+function mn_nvidia_llamacpp_runner_image() {
+    printf '%s' 'docker/model-runner:local-cuda-b10524'
+}
+
+function mn_nvidia_llamacpp_runner_is_current() {
+    local image
+    image="$(docker container inspect -f '{{.Config.Image}}' docker-model-runner 2>/dev/null || true)"
+    [ "$image" = "$(mn_nvidia_llamacpp_runner_image)" ]
+}
+
+function mn_ensure_nvidia_llamacpp_runner() {
+    local runner_image build_dir
+    runner_image="$(mn_nvidia_llamacpp_runner_image)"
+
+    if mn_nvidia_llamacpp_runner_is_current; then
+        if mn_docker_model_runner_endpoint_ready; then
+            return 0
+        fi
+        print_step "Starting the NVIDIA llama.cpp Docker Model Runner"
+        docker start docker-model-runner >/dev/null 2>&1 || true
+        if mn_wait_for_docker_model_runner; then
+            return 0
+        fi
+        print_warning "The installed NVIDIA llama.cpp Docker Model Runner did not start; rebuilding it."
+    fi
+
+    if ! command -v git >/dev/null 2>&1; then
+        print_error "git is required to build the NVIDIA llama.cpp Docker Model Runner."
+        exit 1
+    fi
+
+    build_dir="$(mktemp -d "${TMPDIR:-/tmp}/mn-dmr-llamacpp.XXXXXX")"
+    print_step "Updating Docker Model Runner to llama.cpp b10524 for NVIDIA"
+    if ! git clone --depth 1 https://github.com/docker/model-runner.git "$build_dir"; then
+        rm -rf "$build_dir"
+        print_error "Could not fetch the Docker Model Runner source needed for the NVIDIA llama.cpp update."
+        exit 1
+    fi
+    if ! docker pull ghcr.io/ggml-org/llama.cpp:server-cuda13-b10524; then
+        rm -rf "$build_dir"
+        print_error "Could not pull llama.cpp CUDA build b10524."
+        exit 1
+    fi
+    if ! (
+        cd "$build_dir"
+        mn_run_docker_build --target final-llamacpp \
+            --build-arg VERSION=v1.2.6-local-b10524 \
+            --build-arg LLAMA_SERVER_VERSION=b10524 \
+            --build-arg LLAMA_SERVER_VARIANT=cuda \
+            --build-arg LLAMA_UPSTREAM_IMAGE=ghcr.io/ggml-org/llama.cpp:server-cuda13-b10524 \
+            -t "$runner_image" .
+    ); then
+        rm -rf "$build_dir"
+        print_error "Could not build the NVIDIA llama.cpp Docker Model Runner."
+        exit 1
+    fi
+    rm -rf "$build_dir"
+
+    # This replaces only the controller container; its named model volume is
+    # retained, so existing model artifacts survive the runtime upgrade.
+    docker rm -f docker-model-runner >/dev/null 2>&1 || true
+    if ! docker run -d \
+        --name docker-model-runner \
+        --restart unless-stopped \
+        --runtime nvidia \
+        --gpus all \
+        --device /dev/dri:/dev/dri \
+        --network bridge \
+        -p 127.0.0.1:12434:12434 \
+        -p 172.17.0.1:12434:12434 \
+        -v docker-model-runner-models:/models:z \
+        -e MODEL_RUNNER_PORT=12434 \
+        -e MODEL_RUNNER_ENVIRONMENT=moby \
+        -e MODEL_RUNNER_SOCK=/var/run/model-runner/model-runner.sock \
+        -e LLAMA_SERVER_PATH=/app \
+        -e LD_LIBRARY_PATH=/app \
+        -e HOME=/home/modelrunner \
+        -e MODELS_PATH=/models \
+        -e NVIDIA_VISIBLE_DEVICES=all \
+        -e NVIDIA_DRIVER_CAPABILITIES=compute,utility \
+        --label com.docker.desktop.service=model-runner \
+        --label com.docker.model-runner.role=controller \
+        "$runner_image" >/dev/null; then
+        print_error "Could not start the NVIDIA llama.cpp Docker Model Runner."
+        exit 1
+    fi
+    if ! mn_wait_for_docker_model_runner; then
+        print_error "The NVIDIA llama.cpp Docker Model Runner did not become ready."
+        exit 1
+    fi
+    print_success "Docker Model Runner is using llama.cpp CUDA build b10524."
+}
+
 function mn_resolve_docker_host_socket() {
     local context_host=""
 
@@ -2703,25 +2796,8 @@ function ensure_docker_model_runner() {
     fi
 
     if [ "$linux_nvidia" = "Y" ]; then
-        if mn_docker_model_runner_endpoint_ready; then
-            return 0
-        fi
-
-        print_warning "NVIDIA hardware detected on Linux; ensuring Docker Model Runner is installed with GPU support."
-        if docker model start-runner >/dev/null 2>&1 && mn_wait_for_docker_model_runner; then
-            return 0
-        fi
-
-        if docker model install-runner --help >/dev/null 2>&1; then
-            print_step "Installing Docker Model Runner (llama.cpp with automatic NVIDIA GPU support)"
-            docker model install-runner \
-                --backend "${MN_DOCKER_MODEL_RUNNER_BACKEND:-llama.cpp}" \
-                --gpu "${MN_DOCKER_MODEL_RUNNER_GPU:-auto}" >/dev/null 2>&1 || true
-            docker model start-runner >/dev/null 2>&1 || true
-            if mn_wait_for_docker_model_runner; then
-                return 0
-            fi
-        fi
+        mn_ensure_nvidia_llamacpp_runner
+        return 0
     else
         if docker model status >/dev/null 2>&1; then
             return 0
@@ -4600,25 +4676,8 @@ function ensure_docker_model_runner() {
     fi
 
     if [ "$linux_nvidia" = "Y" ]; then
-        if mn_docker_model_runner_endpoint_ready; then
-            return 0
-        fi
-
-        print_warning "NVIDIA hardware detected on Linux; ensuring Docker Model Runner is installed with GPU support."
-        if docker model start-runner >/dev/null 2>&1 && mn_wait_for_docker_model_runner; then
-            return 0
-        fi
-
-        if docker model install-runner --help >/dev/null 2>&1; then
-            print_step "Installing Docker Model Runner (llama.cpp with automatic NVIDIA GPU support)"
-            docker model install-runner \
-                --backend "${MN_DOCKER_MODEL_RUNNER_BACKEND:-llama.cpp}" \
-                --gpu "${MN_DOCKER_MODEL_RUNNER_GPU:-auto}" >/dev/null 2>&1 || true
-            docker model start-runner >/dev/null 2>&1 || true
-            if mn_wait_for_docker_model_runner; then
-                return 0
-            fi
-        fi
+        mn_ensure_nvidia_llamacpp_runner
+        return 0
     else
         if docker model status >/dev/null 2>&1; then
             return 0
@@ -7017,25 +7076,8 @@ function ensure_docker_model_runner() {
     fi
 
     if [ "$linux_nvidia" = "Y" ]; then
-        if mn_docker_model_runner_endpoint_ready; then
-            return 0
-        fi
-
-        print_warning "NVIDIA hardware detected on Linux; ensuring Docker Model Runner is installed with GPU support."
-        if docker model start-runner >/dev/null 2>&1 && mn_wait_for_docker_model_runner; then
-            return 0
-        fi
-
-        if docker model install-runner --help >/dev/null 2>&1; then
-            print_step "Installing Docker Model Runner (llama.cpp with automatic NVIDIA GPU support)"
-            docker model install-runner \
-                --backend "${MN_DOCKER_MODEL_RUNNER_BACKEND:-llama.cpp}" \
-                --gpu "${MN_DOCKER_MODEL_RUNNER_GPU:-auto}" >/dev/null 2>&1 || true
-            docker model start-runner >/dev/null 2>&1 || true
-            if mn_wait_for_docker_model_runner; then
-                return 0
-            fi
-        fi
+        mn_ensure_nvidia_llamacpp_runner
+        return 0
     else
         if docker model status >/dev/null 2>&1; then
             return 0
