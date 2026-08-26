@@ -50,8 +50,6 @@ Common options:
   --cli-version TAG             Binary mode: pin mirrorneuron-cli.
   --api-version TAG             Binary mode: pin mirrorneuron-api.
   --web-ui-version TAG          Binary mode: pin mirrorneuron-web-ui.
-  --core-release-tag TAG        Legacy alias for --version in binary mode.
-  --core-asset-url URL          Binary mode release asset URL.
   --gar-project PROJECT         Binary mode Google Artifact Registry project override.
   --gar-location LOCATION       Binary mode GAR location. Default: us-central1.
   --gar-repository NAME         Binary mode GAR Python repository override.
@@ -437,68 +435,12 @@ function mn_deduplicate_profile_line() {
     rm -f "$temporary_profile"
 }
 
-function mn_remove_profile_line() {
-    local profile="$1"
-    local target_line="$2"
-    local temporary_profile
-
-    [ -f "$profile" ] || return 0
-    grep -Fqx -- "$target_line" "$profile" 2>/dev/null || return 0
-
-    temporary_profile="$(mktemp "${profile}.mn.XXXXXX")"
-    if ! MN_PROFILE_TARGET_LINE="$target_line" awk '
-        $0 != ENVIRON["MN_PROFILE_TARGET_LINE"] { print }
-    ' "$profile" > "$temporary_profile"; then
-        rm -f "$temporary_profile"
-        return 1
-    fi
-    if ! cat "$temporary_profile" > "$profile"; then
-        rm -f "$temporary_profile"
-        return 1
-    fi
-    rm -f "$temporary_profile"
-}
-
-function mn_remove_legacy_linux_mn_home_export() {
-    local profile="$1"
-    local temporary_profile
-
-    [ -n "${MN_LEGACY_LINUX_MN_HOME:-}" ] || return 0
-    [ -f "$profile" ] || return 0
-
-    temporary_profile="$(mktemp "${profile}.mn.XXXXXX")"
-    if ! MN_LEGACY_LINUX_MN_HOME="$MN_LEGACY_LINUX_MN_HOME" awk '
-        {
-            candidate = $0
-            sub(/^[[:space:]]*/, "", candidate)
-            sub(/^export[[:space:]]+/, "", candidate)
-            if (candidate == "MN_HOME=" ENVIRON["MN_LEGACY_LINUX_MN_HOME"] ||
-                candidate == "MN_HOME=\"" ENVIRON["MN_LEGACY_LINUX_MN_HOME"] "\"" ||
-                candidate == "MN_HOME=\047" ENVIRON["MN_LEGACY_LINUX_MN_HOME"] "\047") {
-                next
-            }
-            print
-        }
-    ' "$profile" > "$temporary_profile"; then
-        rm -f "$temporary_profile"
-        return 1
-    fi
-    if ! cat "$temporary_profile" > "$profile"; then
-        rm -f "$temporary_profile"
-        return 1
-    fi
-    rm -f "$temporary_profile"
-}
-
 function mn_deduplicate_generated_profile_exports() {
     local profile="$1"
     local path_line="$2"
     local home_line="$3"
-    local legacy_path_line="$4"
 
     mn_deduplicate_profile_line "$profile" "# MN and OTTERDESK"
-    mn_remove_legacy_linux_mn_home_export "$profile"
-    mn_remove_profile_line "$profile" "$legacy_path_line"
     mn_deduplicate_profile_line "$profile" "$path_line"
     mn_deduplicate_profile_line "$profile" "$home_line"
 }
@@ -646,20 +588,6 @@ fi
 
 export MN_INSTALL_VERSION
 export MN_HOME="${MN_HOME:-${HOME}/.mn}"
-
-# Older installers persisted the Linux default as an absolute path. When that
-# shell configuration is reused on macOS, /home is not a writable home root.
-MN_LEGACY_LINUX_MN_HOME=""
-if [ "$(uname -s)" = "Darwin" ]; then
-    mn_home_basename="${HOME##*/}"
-    mn_legacy_linux_default="/home/${mn_home_basename}/.mn"
-    if [ "$MN_HOME" = "$mn_legacy_linux_default" ]; then
-        MN_LEGACY_LINUX_MN_HOME="$MN_HOME"
-        export MN_HOME="${HOME}/.mn"
-        printf 'warning: Migrating legacy MN_HOME=%s to %s for macOS.\n' \
-            "$MN_LEGACY_LINUX_MN_HOME" "$MN_HOME" >&3
-    fi
-fi
 
 function mn_script_dir() {
     local source_path=""
@@ -1134,7 +1062,6 @@ function mn_remove_existing_install_paths() {
     mn_stop_runtime_containers_for_reinstall
     mn_remove_path_or_exit "$INSTALL_DIR" "MirrorNeuron state directory"
     mn_remove_path_or_exit "$VENV_DIR" "MirrorNeuron Python virtual environment"
-    mn_remove_path_or_exit "$LEGACY_UI_DIR" "legacy MirrorNeuron Web UI directory"
     mn_remove_path_or_exit "$BIN_DIR/mn" "MirrorNeuron CLI executable"
     mn_remove_path_or_exit "$BIN_DIR/mn-api" "MirrorNeuron API executable"
 }
@@ -1621,7 +1548,6 @@ SCRIPT_DIR="$(mn_script_dir)"
 RUNTIME_COMPOSE_TEMPLATE="${MN_RUNTIME_COMPOSE_TEMPLATE:-}"
 RUNTIME_COMPOSE_FILE="${INSTALL_DIR}/docker-compose.yml"
 RUNTIME_COMPOSE_ENV="${INSTALL_DIR}/docker-compose.env"
-LEGACY_UI_DIR="${INSTALL_DIR}_ui"
 MN_WEB_UI_SOURCE_MODE="${MN_WEB_UI_SOURCE_MODE:-source}"
 MN_WEB_UI_SOURCE_MOUNT="${MN_WEB_UI_SOURCE_MOUNT:-${INSTALL_DIR}/webui}"
 MN_WEB_UI_PACKAGE_VERSION="${MN_WEB_UI_PACKAGE_VERSION:-}"
@@ -1674,8 +1600,7 @@ MN_PACKAGE_VERSION=""
 CORE_REPO="${MN_CORE_REPO:-MirrorNeuronLab/MirrorNeuron}"
 SKILLS_REPO="${MN_SKILLS_REPO:-MirrorNeuronLab/mn-skills}"
 MN_SKILLS_GIT_URL="${MN_SKILLS_GIT_URL:-}"
-CORE_RELEASE_TAG="${MN_CORE_RELEASE_TAG:-}"
-CORE_ASSET_URL="${MN_CORE_ASSET_URL:-}"
+CORE_RELEASE_TAG=""
 
 function github_usage() {
     local script_name="${MN_INSTALL_SCRIPT_NAME:-$(basename "$0")}";
@@ -1712,8 +1637,6 @@ Options:
   MN_AGENTS_REF=REF             Agent template catalog ref. Default: --version or repo default branch.
   --python PATH                 Same as MN_PYTHON. Must be Python 3.11.x.
   --no-managed-python           Do not use uv to install a private Python runtime.
-  --core-release-tag TAG        Legacy alias for --version.
-  --core-asset-url URL          Accepted for CLI compatibility; used by binary mode.
   MN_HOME=/path                 Override the runtime state directory. Defaults to ${HOME}/.mn.
   GITHUB_TOKEN/GH_TOKEN         Token for private GitHub repositories. An existing gh auth login is also used.
   -h, --help                    Show this help.
@@ -1789,10 +1712,6 @@ while [ "$#" -gt 0 ]; do
         --no-syncthing) MN_SYNCTHING_ENABLED="0" ;;
         --start) START_NOW="Y" ;;
         --no-start) START_NOW="N" ;;
-        --start-as-worker)
-            print_warning "--start-as-worker is deprecated; every runtime is federation-capable, so starting the normal runtime instead."
-            START_NOW="Y"
-            ;;
         --python-sdk) INSTALL_PYTHON_SDK="Y" ;;
         --no-python-sdk) INSTALL_PYTHON_SDK="N" ;;
         --skill|--skills) INSTALL_BLUEPRINT_SUPPORT_SKILL="Y" ;;
@@ -1853,26 +1772,6 @@ while [ "$#" -gt 0 ]; do
             ;;
         --python=*) MN_PYTHON="${1#*=}" ;;
         --no-managed-python) MN_MANAGED_PYTHON=0 ;;
-        --core-release-tag)
-            shift
-            if [ "$#" -eq 0 ]; then
-                print_error "--core-release-tag requires a value."
-                github_usage
-                exit 1
-            fi
-            CORE_RELEASE_TAG="$1"
-            ;;
-        --core-release-tag=*) CORE_RELEASE_TAG="${1#*=}" ;;
-        --core-asset-url)
-            shift
-            if [ "$#" -eq 0 ]; then
-                print_error "--core-asset-url requires a value."
-                github_usage
-                exit 1
-            fi
-            CORE_ASSET_URL="$1"
-            ;;
-        --core-asset-url=*) CORE_ASSET_URL="${1#*=}" ;;
         -h|--help) github_usage; exit 0 ;;
         *)
             print_error "Unknown option: $1"
@@ -1884,15 +1783,6 @@ while [ "$#" -gt 0 ]; do
 done
 
 function finalize_github_install_version() {
-    if [ -n "$CORE_RELEASE_TAG" ]; then
-        if [ "$INSTALL_VERSION_EXPLICIT" = "Y" ] && [ "$INSTALL_VERSION" != "$CORE_RELEASE_TAG" ]; then
-            print_error "--version (${INSTALL_VERSION}) and --core-release-tag (${CORE_RELEASE_TAG}) must match."
-            exit 1
-        fi
-        INSTALL_VERSION="$CORE_RELEASE_TAG"
-        INSTALL_VERSION_EXPLICIT="Y"
-    fi
-
     if [ -n "$INSTALL_VERSION" ]; then
         mn_validate_version_tag_or_exit "$INSTALL_VERSION"
         MN_INSTALL_VERSION="$INSTALL_VERSION"
@@ -3007,7 +2897,6 @@ if [ "$INSTALL_WEB_UI" = "Y" ]; then
     fi
     (
         UI_DIR="${INSTALL_DIR}/webui"
-        rm -rf "$LEGACY_UI_DIR"
         if [ -z "${INSTALL_VERSION:-}" ] && [ -n "$SOURCE_WORKSPACE" ] && [ -d "$SOURCE_WORKSPACE/mn-web-ui" ]; then
             rm -rf "$UI_DIR"
             ln -s "$SOURCE_WORKSPACE/mn-web-ui" "$UI_DIR"
@@ -3118,19 +3007,18 @@ function ensure_shell_profile_exports() {
     shell_profile="$(mn_preferred_shell_profile)"
     local detected_profiles=("$shell_profile")
 
-    local profile path_line legacy_path_line home_line wrote_header wrote_profile
+    local profile path_line home_line wrote_header wrote_profile
     if [ "$INSTALL_DIR" = "$default_home" ]; then
         home_line='export MN_HOME="$HOME/.mn"'
     else
         home_line="export MN_HOME=$(shell_escape_value "$INSTALL_DIR")"
     fi
     path_line='export PATH="$MN_HOME/bin:$PATH"'
-    legacy_path_line="export PATH=\"$BIN_DIR:\$PATH\""
 
     for profile in "${detected_profiles[@]}"; do
         wrote_header="N"
         wrote_profile="N"
-        mn_deduplicate_generated_profile_exports "$profile" "$path_line" "$home_line" "$legacy_path_line"
+        mn_deduplicate_generated_profile_exports "$profile" "$path_line" "$home_line"
         if [ "$needs_runtime_home" = "Y" ] && ! profile_has_runtime_home "$profile"; then
             [ "$wrote_header" = "N" ] && echo -e "\n# MN and OTTERDESK" >> "$profile" && wrote_header="Y"
             echo "$home_line" >> "$profile"
@@ -3220,7 +3108,6 @@ INSTALL_DIR="${MN_HOME:-${HOME}/.mn}"
 BIN_DIR="${HOME}/.local/bin"
 VENV_DIR="${HOME}/.local/share/mn_venv"
 UI_LINK_DIR="${INSTALL_DIR}/webui"
-LEGACY_UI_LINK_DIR="${INSTALL_DIR}_ui"
 RUNTIME_COMPOSE_TEMPLATE="${SCRIPT_DIR}/docker-compose.yml"
 RUNTIME_COMPOSE_FILE="${INSTALL_DIR}/docker-compose.yml"
 RUNTIME_COMPOSE_ENV="${INSTALL_DIR}/docker-compose.env"
@@ -3567,7 +3454,6 @@ while [ "$#" -gt 0 ]; do
     case "$1" in
         --yes|-y) NON_INTERACTIVE="Y" ;;
         --interactive) NON_INTERACTIVE="N" ;;
-        --no-reinstall) ;; # Backward-compatible no-op; local installs refresh in place.
         --web-ui) INSTALL_WEB_UI="Y" ;;
         --no-web-ui) INSTALL_WEB_UI="N" ;;
         --redis) INSTALL_REDIS="Y" ;;
@@ -3581,10 +3467,6 @@ while [ "$#" -gt 0 ]; do
         --no-syncthing) MN_SYNCTHING_ENABLED="0" ;;
         --start) START_NOW="Y" ;;
         --no-start) START_NOW="N" ;;
-        --start-as-worker)
-            print_warning "--start-as-worker is deprecated; every runtime is federation-capable, so starting the normal runtime instead."
-            START_NOW="Y"
-            ;;
         --python)
             shift
             if [ "$#" -eq 0 ]; then
@@ -4162,7 +4044,6 @@ function start_core_container() {
     cmd+=("-e" "MN_COOKIE=${mn_cookie}")
     cmd+=("-e" "MN_GRPC_AUTH_TOKEN=mirror_neuron_password")
     cmd+=("-e" "MN_GRPC_ADMIN_TOKEN=mirror_neuron_password_admin")
-    cmd+=("-e" "MN_CORE_ALLOW_NATIVE_SANDBOX_PREP=${MN_CORE_ALLOW_NATIVE_SANDBOX_PREP:-0}")
     cmd+=("-e" "MN_GRPC_PORT=${grpc_port}")
     if [ -n "${MN_NODE_NAME:-}" ]; then
         cmd+=("-e" "MN_NODE_NAME=${MN_NODE_NAME}")
@@ -4789,19 +4670,18 @@ function ensure_shell_profile_exports() {
     shell_profile="$(mn_preferred_shell_profile)"
     local detected_profiles=("$shell_profile")
 
-    local profile path_line legacy_path_line home_line wrote_header wrote_profile
+    local profile path_line home_line wrote_header wrote_profile
     if [ "$INSTALL_DIR" = "$default_home" ]; then
         home_line='export MN_HOME="$HOME/.mn"'
     else
         home_line="export MN_HOME=$(shell_escape_value "$INSTALL_DIR")"
     fi
     path_line='export PATH="$MN_HOME/bin:$PATH"'
-    legacy_path_line="export PATH=\"$BIN_DIR:\$PATH\""
 
     for profile in "${detected_profiles[@]}"; do
         wrote_header="N"
         wrote_profile="N"
-        mn_deduplicate_generated_profile_exports "$profile" "$path_line" "$home_line" "$legacy_path_line"
+        mn_deduplicate_generated_profile_exports "$profile" "$path_line" "$home_line"
         if [ "$needs_runtime_home" = "Y" ] && ! profile_has_runtime_home "$profile"; then
             [ "$wrote_header" = "N" ] && echo "" >> "$profile" && echo "# MN and OTTERDESK" >> "$profile" && wrote_header="Y"
             echo "$home_line" >> "$profile"
@@ -5008,9 +4888,6 @@ trap - EXIT
 
 if [ "$INSTALL_WEB_UI" = "Y" ]; then
     print_step "Preparing local Web UI source for Docker Compose"
-    if [ -e "$LEGACY_UI_LINK_DIR" ] || [ -L "$LEGACY_UI_LINK_DIR" ]; then
-        rm -rf "$LEGACY_UI_LINK_DIR"
-    fi
     if [ -e "$UI_LINK_DIR" ] || [ -L "$UI_LINK_DIR" ]; then
         rm -rf "$UI_LINK_DIR"
     fi
@@ -5128,7 +5005,6 @@ SCRIPT_DIR="$(mn_script_dir)"
 INSTALL_DIR="${MN_HOME:-${HOME}/.mn}"
 BIN_DIR="${INSTALL_DIR}/bin"
 VENV_DIR="${HOME}/.local/share/mn_venv"
-LEGACY_UI_DIR="${INSTALL_DIR}_ui"
 MN_WEB_UI_SOURCE_MODE="${MN_WEB_UI_SOURCE_MODE:-package}"
 MN_WEB_UI_SOURCE_MOUNT="${MN_WEB_UI_SOURCE_MOUNT:-${INSTALL_DIR}/web-ui-source}"
 MN_WEB_UI_PACKAGE_VERSION="${MN_WEB_UI_PACKAGE_VERSION:-}"
@@ -5139,7 +5015,7 @@ CORE_REPO="${MN_CORE_REPO:-MirrorNeuronLab/MirrorNeuron}"
 INSTALL_VERSION="${MN_INSTALL_VERSION:-}"
 INSTALL_VERSION_EXPLICIT="N"
 [ -n "$INSTALL_VERSION" ] && INSTALL_VERSION_EXPLICIT="Y"
-CORE_RELEASE_TAG="${MN_CORE_RELEASE_TAG:-}"
+CORE_RELEASE_TAG=""
 CORE_INSTALL_VERSION="${MN_CORE_VERSION:-}"
 PYTHON_SDK_INSTALL_VERSION="${MN_PYTHON_SDK_VERSION:-}"
 CLI_INSTALL_VERSION="${MN_CLI_VERSION:-}"
@@ -5149,7 +5025,6 @@ DEFAULT_PYTHON_SDK_INSTALL_VERSION="${MN_DEFAULT_PYTHON_SDK_VERSION:-v1.2.31}"
 DEFAULT_CLI_INSTALL_VERSION="${MN_DEFAULT_CLI_VERSION:-v1.2.32}"
 DEFAULT_API_INSTALL_VERSION="${MN_DEFAULT_API_VERSION:-v1.2.31}"
 DEFAULT_WEB_UI_INSTALL_VERSION="${MN_DEFAULT_WEB_UI_VERSION:-v1.2.31}"
-CORE_ASSET_URL="${MN_CORE_ASSET_URL:-}"
 CORE_IMAGE="${MN_CORE_IMAGE:-}"
 CORE_GAR_PROJECT="${MN_CORE_GAR_PROJECT:-mirrorneuron-public-packages}"
 CORE_GAR_LOCATION="${MN_CORE_GAR_LOCATION:-us-central1}"
@@ -5159,9 +5034,6 @@ MN_PACKAGE_VERSION=""
 MN_PYTHON_SDK_PACKAGE_VERSION=""
 MN_CLI_PACKAGE_VERSION=""
 MN_API_PACKAGE_VERSION=""
-SKILLS_REPO="${MN_SKILLS_REPO:-MirrorNeuronLab/mn-skills}"
-MEMBRANE_REPO="${MN_MEMBRANE_REPO:-MirrorNeuronLab/Membrane}"
-MEMBRANE_GIT_URL="${MN_MEMBRANE_GIT_URL:-}"
 MEMBRANE_DIR="${MN_MEMBRANE_DIR:-${INSTALL_DIR}/Membrane}"
 MN_AGENTS_ROOT="${MN_AGENTS_ROOT:-}"
 PACKAGE_INDEX_FILE="${MN_PACKAGE_INDEX_FILE:-}"
@@ -5259,8 +5131,6 @@ Python component options:
   --agents / --no-agents        Install or skip indexed agent packages from the configured pip index.
   --cli / --no-cli
   --api / --no-api
-  --skill / --no-skill / --all-skills / --no-all-skills
-                                Accepted for compatibility; blueprints install their skill packages.
 
 Release/source options:
   --version TAG                 Set the common default release for all components.
@@ -5269,10 +5139,6 @@ Release/source options:
   --cli-version TAG             Pin mirrorneuron-cli. Env: MN_CLI_VERSION.
   --api-version TAG             Pin mirrorneuron-api. Env: MN_API_VERSION.
   --web-ui-version TAG          Pin mirrorneuron-web-ui. Env: MN_WEB_UI_VERSION.
-  --core-release-tag TAG        Legacy alias for --version.
-  --core-asset-url URL          Same as MN_CORE_ASSET_URL. Explicit legacy
-                                OTP-archive install path; normal binary installs
-                                pull the GAR Core image.
   --gar-project PROJECT         Same as MN_GAR_PROJECT. Overrides the default public package index.
   --gar-location LOCATION       Same as MN_GAR_LOCATION. Default: us-central1.
   --gar-repository NAME         Same as MN_GAR_REPOSITORY. Default: agent-skills.
@@ -5281,11 +5147,6 @@ Release/source options:
   --python PATH                 Same as MN_PYTHON. Must be Python 3.11+.
   --no-managed-python           Do not use uv to install a private Python runtime.
   MN_HOME=/path                 Override the runtime state directory. Defaults to ${HOME}/.mn.
-  --skills-repo / --skills-git-url
-                                Accepted for CLI compatibility; source inputs are ignored in binary mode.
-  --membrane-repo / --membrane-git-url
-                                Accepted for CLI compatibility; binary mode uses
-                                the GAR Core and Membrane images plus GAR packages.
   MN_AGENTS_ROOT=/path          Optional local development override for packaged agent discovery.
   -h, --help                    Show this help.
 
@@ -5322,7 +5183,6 @@ function set_python_components() {
                 INSTALL_CLI="Y"
                 INSTALL_API="Y"
                 ;;
-            all-skills|skills-all) ;;
             agent|agents)
                 INSTALL_AGENTS="Y"
                 ;;
@@ -5331,7 +5191,6 @@ function set_python_components() {
             sdk|python-sdk)
                 INSTALL_PYTHON_SDK="Y"
                 ;;
-            skill|skills|blueprint-support|blueprint-support-skill) ;;
             cli)
                 INSTALL_CLI="Y"
                 ;;
@@ -5366,13 +5225,8 @@ while [ "$#" -gt 0 ]; do
         --no-syncthing) MN_SYNCTHING_ENABLED="0" ;;
         --start) START_NOW="Y" ;;
         --no-start) START_NOW="N" ;;
-        --start-as-worker)
-            print_warning "--start-as-worker is deprecated; every runtime is federation-capable, so starting the normal runtime instead."
-            START_NOW="Y"
-            ;;
         --python-sdk) INSTALL_PYTHON_SDK="Y" ;;
         --no-python-sdk) INSTALL_PYTHON_SDK="N" ;;
-        --skill|--skills|--no-skill|--no-skills|--all-skills|--no-all-skills) ;;
         --agents) INSTALL_AGENTS="Y" ;;
         --no-agents) INSTALL_AGENTS="N" ;;
         --cli) INSTALL_CLI="Y" ;;
@@ -5465,30 +5319,6 @@ while [ "$#" -gt 0 ]; do
         --python-components=*)
             set_python_components "${1#*=}"
             ;;
-        --core-release-tag)
-            shift
-            if [ "$#" -eq 0 ]; then
-                print_error "--core-release-tag requires a value."
-                usage
-                exit 1
-            fi
-            CORE_RELEASE_TAG="$1"
-            ;;
-        --core-release-tag=*)
-            CORE_RELEASE_TAG="${1#*=}"
-            ;;
-        --core-asset-url)
-            shift
-            if [ "$#" -eq 0 ]; then
-                print_error "--core-asset-url requires a value."
-                usage
-                exit 1
-            fi
-            CORE_ASSET_URL="$1"
-            ;;
-        --core-asset-url=*)
-            CORE_ASSET_URL="${1#*=}"
-            ;;
         --gar-project)
             shift
             if [ "$#" -eq 0 ]; then
@@ -5564,54 +5394,6 @@ while [ "$#" -gt 0 ]; do
         --no-managed-python)
             MN_MANAGED_PYTHON=0
             ;;
-        --skills-repo)
-            shift
-            if [ "$#" -eq 0 ]; then
-                print_error "--skills-repo requires a value."
-                usage
-                exit 1
-            fi
-            SKILLS_REPO="$1"
-            ;;
-        --skills-repo=*)
-            SKILLS_REPO="${1#*=}"
-            ;;
-        --skills-git-url)
-            shift
-            if [ "$#" -eq 0 ]; then
-                print_error "--skills-git-url requires a value."
-                usage
-                exit 1
-            fi
-            MN_SKILLS_GIT_URL="$1"
-            ;;
-        --skills-git-url=*)
-            MN_SKILLS_GIT_URL="${1#*=}"
-            ;;
-        --membrane-repo)
-            shift
-            if [ "$#" -eq 0 ]; then
-                print_error "--membrane-repo requires a value."
-                usage
-                exit 1
-            fi
-            MEMBRANE_REPO="$1"
-            ;;
-        --membrane-repo=*)
-            MEMBRANE_REPO="${1#*=}"
-            ;;
-        --membrane-git-url)
-            shift
-            if [ "$#" -eq 0 ]; then
-                print_error "--membrane-git-url requires a value."
-                usage
-                exit 1
-            fi
-            MEMBRANE_GIT_URL="$1"
-            ;;
-        --membrane-git-url=*)
-            MEMBRANE_GIT_URL="${1#*=}"
-            ;;
         -h|--help)
             usage
             exit 0
@@ -5626,14 +5408,6 @@ while [ "$#" -gt 0 ]; do
 done
 
 function finalize_binary_install_version() {
-    if [ -n "$CORE_RELEASE_TAG" ]; then
-        if [ "$INSTALL_VERSION_EXPLICIT" = "Y" ] && [ "$INSTALL_VERSION" != "$CORE_RELEASE_TAG" ]; then
-            print_error "--version (${INSTALL_VERSION}) and --core-release-tag (${CORE_RELEASE_TAG}) must match."
-            exit 1
-        fi
-        INSTALL_VERSION="$CORE_RELEASE_TAG"
-        INSTALL_VERSION_EXPLICIT="Y"
-    fi
     if [ -z "$INSTALL_VERSION" ] && [ -n "$CORE_INSTALL_VERSION" ]; then
         INSTALL_VERSION="$CORE_INSTALL_VERSION"
     fi
@@ -6027,48 +5801,6 @@ function validate_selections() {
     fi
 }
 
-function docker_platform() {
-    local arch
-    arch="$(docker version --format '{{.Server.Arch}}' 2>/dev/null || uname -m)"
-    case "$arch" in
-        arm64|aarch64) echo "linux-arm64" ;;
-        amd64|x86_64) echo "linux-x64" ;;
-        *)
-            print_error "Unsupported Docker architecture '$arch'. Expected amd64/x86_64 or arm64/aarch64."
-            exit 1
-            ;;
-    esac
-}
-
-function resolve_core_release_tag() {
-    local effective_url tag
-
-    if [ "$CORE_RELEASE_TAG" != "latest" ]; then
-        printf '%s' "$CORE_RELEASE_TAG"
-        return 0
-    fi
-
-    effective_url="$(curl_github -fsSL -o /dev/null -w '%{url_effective}' "https://github.com/${CORE_REPO}/releases/latest")"
-    tag="${effective_url##*/releases/tag/}"
-    tag="${tag%%\?*}"
-
-    if [ -z "$tag" ] || [ "$tag" = "$effective_url" ]; then
-        local script_name="${MN_INSTALL_SCRIPT_NAME:-$(basename "$0")}"
-        print_error "Could not resolve the latest MirrorNeuron release tag from $effective_url."
-        print_error "Set MN_CORE_RELEASE_TAG explicitly, for example: MN_CORE_RELEASE_TAG=v1.2.31 ./$script_name"
-        exit 1
-    fi
-
-    printf '%s' "$tag"
-}
-
-function core_asset_url_for_tag() {
-    local tag="$1"
-    local platform="$2"
-
-    printf 'https://github.com/%s/releases/download/%s/MirrorNeuron-%s-%s-otp-release.tar.gz' "$CORE_REPO" "$tag" "$tag" "$platform"
-}
-
 function core_gar_image_for_tag() {
     local tag="$1"
 
@@ -6088,7 +5820,7 @@ function core_gar_image_for_tag() {
 function install_core_from_gar() {
     local tag image image_version image_revision image_digest
 
-    tag="$(resolve_core_release_tag)"
+    tag="$CORE_RELEASE_TAG"
     image="$(core_gar_image_for_tag "$tag")"
     print_detail "Pulling Core GAR image $image."
 
@@ -6126,95 +5858,8 @@ function install_core_from_gar() {
 EOF
 }
 
-function install_core_from_otp_asset() {
-    local platform tag asset_url work_dir tarball context_dir
-    platform="$(docker_platform)"
-    work_dir="${TMPDIR:-/tmp}/mirror_neuron_core_release.$$"
-    tarball="$work_dir/core.tar.gz"
-    context_dir="$work_dir/docker-context"
-
-    mkdir -p "$work_dir" "$context_dir"
-
-    tag="$CORE_RELEASE_TAG"
-    asset_url="$CORE_ASSET_URL"
-
-    print_detail "Core release $tag for Docker platform $platform."
-    run_quiet "download-core-release" curl_github -fL "$asset_url" -o "$tarball"
-
-    mn_remove_path_or_exit "$INSTALL_DIR" "MirrorNeuron state directory"
-    mkdir -p "$INSTALL_DIR"
-    tar -xzf "$tarball" -C "$INSTALL_DIR"
-
-    cp -R "$INSTALL_DIR/mirror_neuron" "$context_dir/mirror_neuron"
-    cat > "$context_dir/Dockerfile" <<'EOF'
-FROM ubuntu:24.04
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    bash \
-    ca-certificates \
-    curl \
-    docker.io \
-    docker-buildx \
-    libgcc-s1 \
-    libstdc++6 \
-    libssl3t64 \
-    ncurses-bin \
-    openssl \
-    procps \
-    python3 \
-    python3-pip \
-    python3-venv \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN python3 --version && \
-    python3 -m pip install --no-cache-dir --break-system-packages "litellm[proxy]>=1.72.0"
-
-ARG OPENSHELL_VERSION=v0.0.47
-RUN set -eux; \
-    arch="$(dpkg --print-architecture)"; \
-    case "$arch" in \
-      arm64) openshell_target="aarch64-unknown-linux-musl"; openshell_sha="a6aa05593aa5bd6936bbb87fa3958510c1a6d82ef11b8ed8498e884de50847c0" ;; \
-      amd64) openshell_target="x86_64-unknown-linux-musl"; openshell_sha="75ea23c19c23a931ac34b274f719c60dd20c6f788f2a4551862ec17572d84c17" ;; \
-      *) echo "unsupported architecture for OpenShell: $arch" >&2; exit 1 ;; \
-    esac; \
-    curl -fLsS -o /tmp/openshell.tar.gz \
-      "https://github.com/NVIDIA/OpenShell/releases/download/${OPENSHELL_VERSION}/openshell-${openshell_target}.tar.gz"; \
-    echo "${openshell_sha}  /tmp/openshell.tar.gz" | sha256sum -c -; \
-    tar -xzf /tmp/openshell.tar.gz -C /usr/local/bin openshell; \
-    chmod 0755 /usr/local/bin/openshell; \
-    rm -f /tmp/openshell.tar.gz; \
-    openshell --version
-
-WORKDIR /opt/mirror_neuron
-COPY mirror_neuron /opt/mirror_neuron
-
-ARG CORE_RELEASE_TAG
-LABEL org.opencontainers.image.version="${CORE_RELEASE_TAG}"
-
-ENV HOME=/opt/mirror_neuron
-EXPOSE 50051 4369 54370
-
-CMD ["bin/mirror_neuron", "start"]
-EOF
-
-    DOCKER_BUILDKIT="${DOCKER_BUILDKIT:-1}" mn_run_docker_build --build-arg "CORE_RELEASE_TAG=$tag" -t mirror-neuron-core:latest "$context_dir" >/dev/null
-    cat > "$INSTALL_METADATA_FILE" <<EOF
-{
-  "core_release_tag": "$tag",
-  "core_platform": "$platform",
-  "core_asset_url": "$asset_url",
-  "updated_at": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-}
-EOF
-    rm -rf "$work_dir"
-}
-
 function install_core_from_release() {
-    if [ -n "$CORE_ASSET_URL" ]; then
-        install_core_from_otp_asset
-    else
-        install_core_from_gar
-    fi
+    install_core_from_gar
 }
 
 PIP_INDEX_ARGS=()
@@ -7189,19 +6834,18 @@ function add_shell_profile_exports() {
     shell_profile="$(mn_preferred_shell_profile)"
     local detected_profiles=("$shell_profile")
 
-    local profile path_line legacy_path_line home_line wrote_header wrote_profile
+    local profile path_line home_line wrote_header wrote_profile
     if [ "$INSTALL_DIR" = "$default_home" ]; then
         home_line='export MN_HOME="$HOME/.mn"'
     else
         home_line="export MN_HOME=$(shell_escape_value "$INSTALL_DIR")"
     fi
     path_line='export PATH="$MN_HOME/bin:$PATH"'
-    legacy_path_line="export PATH=\"$BIN_DIR:\$PATH\""
 
     for profile in "${detected_profiles[@]}"; do
         wrote_header="N"
         wrote_profile="N"
-        mn_deduplicate_generated_profile_exports "$profile" "$path_line" "$home_line" "$legacy_path_line"
+        mn_deduplicate_generated_profile_exports "$profile" "$path_line" "$home_line"
         if [ "$needs_runtime_home" = "Y" ] && ! profile_has_runtime_home "$profile"; then
             [ "$wrote_header" = "N" ] && echo -e "\n# MN and OTTERDESK" >> "$profile" && wrote_header="Y"
             echo "$home_line" >> "$profile"

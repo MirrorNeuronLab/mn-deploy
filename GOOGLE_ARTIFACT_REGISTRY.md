@@ -23,11 +23,9 @@ than one of those formats.
   `us-central1-docker.pkg.dev/mirrorneuron-public-packages/mirrorneuron-runtime/membrane-context-engine:<tag>`.
 - `mirrorneuron-binaries` (Generic): public binary release archives.
 
-The normal binary installer downloads the Python SDK, CLI, API, Membrane Python
-SDK, agents, and skills from `agent-skills`; it pulls the immutable Core and
-Membrane engine images from `mirrorneuron-runtime`. The Web UI is published to
-npm. Core OTP archives remain GitHub Release assets only for an explicit
-`--core-asset-url` compatibility install.
+The binary installer downloads the Python SDK, CLI, API, Membrane Python SDK,
+agents, and skills from `agent-skills`; it pulls the immutable Core and Membrane
+engine images from `mirrorneuron-runtime`. The Web UI is published to npm.
 
 ## Runtime Image Release Contract
 

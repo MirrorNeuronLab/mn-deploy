@@ -35,9 +35,7 @@ overrides take precedence over the shared release version only for their named
 component.
 
 All modes use the single `mn runtime start` contract. There is no worker-only
-runtime. The historical `--start-as-worker` spelling may remain temporarily as
-a hidden deprecated alias, but it performs a normal start and must not appear
-in help output or generate worker-specific Compose state.
+runtime, and worker-only installer flags are rejected.
 
 Local-mode Python resolution presents all selected sibling projects to pip in
 one editable install transaction. Dependencies between MirrorNeuron packages
@@ -109,12 +107,12 @@ code must quote values, handle spaces in paths, and avoid undocumented global
 tools. Non-interactive execution is line-oriented and deterministic; color is
 TTY-only and disabled by `NO_COLOR`.
 
-## Compatibility
+## Current installer contract
 
 Install mode meanings, installed paths, service names, support file formats,
-default component selection, cleanup scope, and public flags are compatibility
-contracts. Changes require installer regression tests and release notes. A new
-release uses a new support snapshot rather than mutating an old one.
+default component selection, cleanup scope, and public flags define the current
+installer contract. Changes require installer regression tests and release
+notes. A new release uses a new support snapshot rather than mutating an old one.
 
 ## Verification
 

@@ -108,7 +108,6 @@ fi
 
 INSTALL_DIR="${MN_HOME:-${HOME}/.mn}"
 UI_DIR="${INSTALL_DIR}/webui"
-LEGACY_UI_DIR="${INSTALL_DIR}_ui"
 BIN_DIR="${HOME}/.local/bin"
 RUNTIME_BIN_DIR="${INSTALL_DIR}/bin"
 VENV_DIR="${HOME}/.local/share/mn_venv"
@@ -218,30 +217,6 @@ function remove_compose_project_resources() {
     [ "$cleanup_failed" = "N" ]
 }
 
-function remove_legacy_runtime_containers() {
-    local container_name
-    local cleanup_failed="N"
-
-    for container_name in \
-        mirror-neuron-core \
-        mirror-neuron-redis \
-        mirror-neuron-web-ui \
-        mirror-neuron-syncthing \
-        mirror-neuron-context-engine-model \
-        mirror-neuron-context-engine \
-        mirror-neuron-native-sdk-grpc \
-        mn-litellm-proxy \
-        openshell-cluster-openshell; do
-        if docker container inspect "$container_name" >/dev/null 2>&1; then
-            if ! docker rm -f "$container_name" >/dev/null 2>&1; then
-                cleanup_failed="Y"
-            fi
-        fi
-    done
-
-    [ "$cleanup_failed" = "N" ]
-}
-
 function remove_docker_runtime_project() {
     local cleanup_failed="N"
 
@@ -263,10 +238,6 @@ function remove_docker_runtime_project() {
     if ! remove_compose_project_resources; then
         cleanup_failed="Y"
     fi
-    if ! remove_legacy_runtime_containers; then
-        cleanup_failed="Y"
-    fi
-
     if [ "$cleanup_failed" = "Y" ]; then
         print_error "Some MirrorNeuron Docker resources could not be removed."
         printf 'Next: resolve active Docker attachments, then rerun ./uninstall.sh --yes\n' >&3
@@ -303,12 +274,6 @@ if [ -d "$INSTALL_DIR" ]; then
 else
     print_success "Core installation not found, skipping."
 fi
-LEGACY_INSTALL_DIR="${HOME}/.mirror_neuron"
-if [ "$LEGACY_INSTALL_DIR" != "$INSTALL_DIR" ] && [ -d "$LEGACY_INSTALL_DIR" ]; then
-    rm -rf "$LEGACY_INSTALL_DIR"
-    print_success "Removed legacy core installation at $LEGACY_INSTALL_DIR"
-fi
-
 print_step "Removing Web UI Installation"
 if [ -d "$UI_DIR" ] || [ -L "$UI_DIR" ]; then
     rm -rf "$UI_DIR"
@@ -316,16 +281,6 @@ if [ -d "$UI_DIR" ] || [ -L "$UI_DIR" ]; then
 else
     print_success "Web UI installation not found, skipping."
 fi
-if [ -d "$LEGACY_UI_DIR" ] || [ -L "$LEGACY_UI_DIR" ]; then
-    rm -rf "$LEGACY_UI_DIR"
-    print_success "Removed legacy Web UI installation at $LEGACY_UI_DIR"
-fi
-OLD_LEGACY_UI_DIR="${HOME}/.mirror_neuron_ui"
-if [ "$OLD_LEGACY_UI_DIR" != "$LEGACY_UI_DIR" ] && { [ -d "$OLD_LEGACY_UI_DIR" ] || [ -L "$OLD_LEGACY_UI_DIR" ]; }; then
-    rm -rf "$OLD_LEGACY_UI_DIR"
-    print_success "Removed legacy Web UI installation at $OLD_LEGACY_UI_DIR"
-fi
-
 print_step "Removing Docker Images and OpenShell Artifacts"
 if command -v docker &> /dev/null; then
     if docker image inspect mirror-neuron-core:latest >/dev/null 2>&1; then
@@ -351,8 +306,7 @@ if command -v docker &> /dev/null; then
         "ghcr.io/nvidia/openshell/gateway:latest" \
         "ghcr.io/nvidia/openshell/gateway:0.0.47" \
         "ghcr.io/nvidia/openshell/cluster:0.0.16" \
-        "ghcr.io/nvidia/openshell/cluster:latest" \
-        "mirrorneuronlab/openshell:latest"; do
+        "ghcr.io/nvidia/openshell/cluster:latest"; do
         if docker image inspect "$image" >/dev/null 2>&1; then
             docker rmi "$image" >/dev/null 2>&1 || true
             removed_image="Y"

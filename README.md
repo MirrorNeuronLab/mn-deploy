@@ -111,9 +111,7 @@ Run its isolated Git regression test with:
   `export MN_HOME="$HOME/.mn"`.
 - Generated Compose settings are stored in `~/.mn/docker-compose.env`.
 - Every installation starts the same federation-capable runtime; there is no
-  worker-only install or runtime mode. The old `--start-as-worker` installer
-  argument is accepted only as a deprecated compatibility alias for a normal
-  start and is omitted from `--help`.
+  worker-only install or runtime mode.
 - LiteLLM binds to a federation-reachable interface by default so an
   authenticated peer gateway can route remote model requests through it.
   Restrict port `4000` to trusted LAN/VPN peers with the host firewall; agents
