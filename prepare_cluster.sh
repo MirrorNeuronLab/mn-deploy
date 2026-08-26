@@ -6,7 +6,61 @@ detect_lan_ip() {
     return 0
   fi
   python3 - <<'PY'
+import ipaddress
 import socket
+import subprocess
+
+
+def physical_interface_addresses():
+    """Return ordinary interface addresses before VPN/tunnel addresses.
+
+    A UDP route probe can select an overlay route (for example macOS ipsec0),
+    whose address is often unreachable from a peer on the physical LAN.  The
+    advertised cluster endpoint must prefer an address on a non-point-to-point
+    network interface instead.
+    """
+    try:
+        output = subprocess.run(
+            ["ifconfig"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return []
+
+    addresses = []
+    is_usable_interface = False
+    for raw_line in output.splitlines():
+        if raw_line and not raw_line[0].isspace() and ":" in raw_line:
+            interface, details = raw_line.split(":", 1)
+            is_virtual = interface.startswith(
+                ("docker", "br-", "veth", "virbr", "tailscale", "utun", "ipsec", "tun", "tap", "wg")
+            )
+            is_usable_interface = (
+                "LOOPBACK" not in details
+                and "POINTOPOINT" not in details
+                and not is_virtual
+            )
+            continue
+
+        fields = raw_line.split()
+        if not is_usable_interface or len(fields) < 2 or fields[0] != "inet":
+            continue
+        try:
+            address = ipaddress.ip_address(fields[1])
+        except ValueError:
+            continue
+        if not address.is_loopback and not address.is_link_local:
+            addresses.append(address)
+
+    private_addresses = [address for address in addresses if address.is_private]
+    return [str(address) for address in private_addresses or addresses]
+
+
+for candidate in physical_interface_addresses():
+    print(candidate)
+    raise SystemExit(0)
 
 probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 try:
