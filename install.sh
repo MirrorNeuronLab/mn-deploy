@@ -3160,6 +3160,9 @@ MN_WEB_UI_PACKAGE_VERSION="${MN_WEB_UI_PACKAGE_VERSION:-}"
 SKILLS_DIR="${WORKSPACE_DIR}/mn-skills"
 AGENTS_DIR="${WORKSPACE_DIR}/mn-agents"
 BLUEPRINT_SUPPORT_SKILL_DIR="${SKILLS_DIR}/blueprint_support_skill"
+JOB_RESPONSE_SKILL_DIR="${SKILLS_DIR}/job_response_skill"
+MCP_CLIENT_SKILL_DIR="${SKILLS_DIR}/mcp_client_skill"
+RAG_SKILL_DIR="${SKILLS_DIR}/rag_skill"
 WEB_UI_SKILL_DIR="${SKILLS_DIR}/web_ui_skill"
 BLUEPRINTS_DIR="${WORKSPACE_DIR}/mn-blueprints"
 DOCS_DIR="${WORKSPACE_DIR}/mn-docs"
@@ -4775,6 +4778,13 @@ require_mix_project_file "$CORE_DIR/mix.exs"
 require_dir "$CLI_DIR" "mn-cli"
 require_dir "$API_DIR" "mn-api"
 require_dir "$PY_SDK_DIR" "mn-python-sdk"
+require_file \
+    "$JOB_RESPONSE_SKILL_DIR/pyproject.toml" \
+    "mn-skills Job response skill project"
+require_file \
+    "$MCP_CLIENT_SKILL_DIR/pyproject.toml" \
+    "mn-skills MCP client skill project"
+require_file "$RAG_SKILL_DIR/pyproject.toml" "mn-skills RAG skill project"
 require_file "$WEB_UI_SKILL_DIR/pyproject.toml" "mn-skills Web UI skill project"
 
 if [ "$INSTALL_WEB_UI" = "Y" ]; then require_dir "$WEB_UI_DIR" "mn-web-ui"; fi
@@ -4872,6 +4882,9 @@ function install_local_editable_python_packages() {
         editable_requirements+=(-e "$BLUEPRINT_SUPPORT_SKILL_DIR")
     fi
     editable_requirements+=(
+        -e "$JOB_RESPONSE_SKILL_DIR"
+        -e "$MCP_CLIENT_SKILL_DIR"
+        -e "$RAG_SKILL_DIR"
         -e "$WEB_UI_SKILL_DIR"
         -e "$CLI_DIR"
         -e "$API_DIR"
@@ -4885,7 +4898,7 @@ function install_local_editable_python_packages() {
         for skill_pyproject in "$SKILLS_DIR"/*/pyproject.toml; do
             skill_dir="$(dirname "$skill_pyproject")"
             case "$skill_dir" in
-                "$BLUEPRINT_SUPPORT_SKILL_DIR"|"$WEB_UI_SKILL_DIR") continue ;;
+                "$BLUEPRINT_SUPPORT_SKILL_DIR"|"$JOB_RESPONSE_SKILL_DIR"|"$MCP_CLIENT_SKILL_DIR"|"$RAG_SKILL_DIR"|"$WEB_UI_SKILL_DIR") continue ;;
             esac
             editable_requirements+=(-e "$skill_dir")
         done

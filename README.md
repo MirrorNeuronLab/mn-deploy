@@ -157,7 +157,8 @@ Run its isolated Git regression test with:
   from sibling repositories. This allows local installs to use newly created
   MirrorNeuron packages before they are published to the package registry.
   `--no-skills` skips optional skill packages but keeps local skills required by
-  the runtime packages.
+  runtime services, including the definition-scoped Job response engine and its
+  local dependency closure.
 - Local installs persist `MN_MEMBRANE_SOURCE_MODE=source`, so both initial and
   lazy context-engine starts build the linked `Membrane` checkout. Release and
   GitHub installs use the versioned GAR runtime image unless

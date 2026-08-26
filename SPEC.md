@@ -42,7 +42,10 @@ in help output or generate worker-specific Compose state.
 Local-mode Python resolution presents all selected sibling projects to pip in
 one editable install transaction. Dependencies between MirrorNeuron packages
 must resolve from those workspace checkouts, including packages that have not
-yet been published. Package-index resolution remains a binary-mode concern.
+yet been published. `--no-skills` excludes optional blueprint capabilities but
+retains skills imported by installed runtime services, including the Job
+response engine and its local dependency closure. Package-index resolution
+remains a binary-mode concern.
 
 ## Installed State
 
