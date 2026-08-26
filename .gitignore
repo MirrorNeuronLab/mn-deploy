@@ -3,3 +3,4 @@
 dist/python-packages/
 local-python-index/
 dist
+.DS_Store
