@@ -28,13 +28,13 @@ if [ -z "$advertise_host" ]; then
   exit 1
 fi
 
-mn stop
+mn runtime stop
 
 MN_NETWORK_ADVERTISE_HOST="$advertise_host" \
 MN_GRPC_BIND_HOST="${MN_GRPC_BIND_HOST:-0.0.0.0}" \
 MN_EPMD_BIND_HOST="${MN_EPMD_BIND_HOST:-0.0.0.0}" \
 MN_DIST_BIND_HOST="${MN_DIST_BIND_HOST:-0.0.0.0}" \
 ERL_EPMD_ADDRESS="${ERL_EPMD_ADDRESS:-0.0.0.0}" \
-mn start
+mn runtime start
 
 docker port mirror-neuron-core 50051
