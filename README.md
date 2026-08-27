@@ -183,11 +183,11 @@ Run its isolated Git regression test with:
 - For URL installs without a local checkout, the installer downloads the
   versioned runtime Docker Compose template and binary package index from the
   public `mn-deploy` GitHub repository.
-- Initial installs skip the Membrane context engine by default to keep setup
-  light. Use `--context-engine` to install the Membrane Python runtime and
-  pull the versioned GAR engine image before running a context-memory
-  blueprint. `mn runtime ensure-context-engine` performs the same explicit
-  package preparation for an existing install.
+- Installs prepare the Membrane context engine by default: the installer pulls
+  the versioned GAR image before any context-memory blueprint runs. Use
+  `--no-context-engine` only when the local runtime must omit it. `mn runtime
+  ensure-context-engine` performs the same package preparation for an existing
+  install.
 - Python packages published to Google Artifact Registry are controlled by
   `package-index/python-packages.toml`.
 - Binary mode uses the current public package repository by default:

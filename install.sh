@@ -1551,7 +1551,7 @@ RUNTIME_COMPOSE_ENV="${INSTALL_DIR}/docker-compose.env"
 MN_WEB_UI_SOURCE_MODE="${MN_WEB_UI_SOURCE_MODE:-source}"
 MN_WEB_UI_SOURCE_MOUNT="${MN_WEB_UI_SOURCE_MOUNT:-${INSTALL_DIR}/webui}"
 MN_WEB_UI_PACKAGE_VERSION="${MN_WEB_UI_PACKAGE_VERSION:-}"
-INSTALL_CONTEXT_ENGINE="N"
+INSTALL_CONTEXT_ENGINE="Y"
 MEMBRANE_REPO="${MN_MEMBRANE_REPO:-MirrorNeuronLab/Membrane}"
 MEMBRANE_GIT_URL="${MN_MEMBRANE_GIT_URL:-}"
 MEMBRANE_DIR="${MN_MEMBRANE_DIR:-${INSTALL_DIR}/Membrane}"
@@ -1984,8 +1984,32 @@ function context_engine_source_dir() {
 function setup_context_engine() {
     remove_stale_runtime_containers_for_services context-engine-model membrane-context-engine
     ensure_docker_model_runner
-    runtime_compose pull membrane-context-engine
+    pull_context_engine_image
     runtime_compose up -d --no-build membrane-context-engine >/dev/null
+}
+
+function pull_context_engine_image() {
+    local image docker_config
+    image="$(read_env_value "$RUNTIME_COMPOSE_ENV" "MN_MEMBRANE_ENGINE_IMAGE")"
+    [ -n "$image" ] || image="$(read_env_value "$RUNTIME_COMPOSE_ENV" "ENGINE_IMAGE")"
+    [ -n "$image" ] || {
+        print_error "Membrane context-engine image is not configured."
+        return 1
+    }
+    case "$image" in
+        us-central1-docker.pkg.dev/mirrorneuron-public-packages/*)
+            docker_config="$(mktemp -d "${TMPDIR:-/tmp}/mn-public-gar-docker-config.XXXXXX")"
+            if ! DOCKER_CONFIG="$docker_config" docker pull "$image"; then
+                rm -rf "$docker_config"
+                print_error "Could not pull the public Membrane image from Google Artifact Registry."
+                return 1
+            fi
+            rm -rf "$docker_config"
+            ;;
+        *)
+            runtime_compose pull membrane-context-engine
+            ;;
+    esac
 }
 
 function compose_profiles() {
@@ -2734,7 +2758,7 @@ function prepare_runtime_compose_sidecars() {
         remove_stale_runtime_containers_for_services context-engine-model "${RUNTIME_COMPOSE_SIDECARS[@]}"
         ensure_docker_model_runner
         if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
-            mn_run_runtime_compose pull membrane-context-engine
+            pull_context_engine_image
         fi
     fi
 }
@@ -3169,7 +3193,7 @@ MN_UV_BIN=""
 
 INSTALL_WEB_UI="Y"
 INSTALL_REDIS="Y"
-INSTALL_CONTEXT_ENGINE="N"
+INSTALL_CONTEXT_ENGINE="Y"
 INSTALL_OPENSHELL="Y"
 INSTALL_SKILLS="Y"
 START_NOW="Y"
@@ -4101,8 +4125,32 @@ function restart_core_container() {
 function setup_context_engine() {
     remove_stale_runtime_containers_for_services context-engine-model membrane-context-engine
     ensure_docker_model_runner
-    runtime_compose pull membrane-context-engine
+    pull_context_engine_image
     runtime_compose up -d --no-build membrane-context-engine >/dev/null
+}
+
+function pull_context_engine_image() {
+    local image docker_config
+    image="$(read_env_value "$RUNTIME_COMPOSE_ENV" "MN_MEMBRANE_ENGINE_IMAGE")"
+    [ -n "$image" ] || image="$(read_env_value "$RUNTIME_COMPOSE_ENV" "ENGINE_IMAGE")"
+    [ -n "$image" ] || {
+        print_error "Membrane context-engine image is not configured."
+        return 1
+    }
+    case "$image" in
+        us-central1-docker.pkg.dev/mirrorneuron-public-packages/*)
+            docker_config="$(mktemp -d "${TMPDIR:-/tmp}/mn-public-gar-docker-config.XXXXXX")"
+            if ! DOCKER_CONFIG="$docker_config" docker pull "$image"; then
+                rm -rf "$docker_config"
+                print_error "Could not pull the public Membrane image from Google Artifact Registry."
+                return 1
+            fi
+            rm -rf "$docker_config"
+            ;;
+        *)
+            runtime_compose pull membrane-context-engine
+            ;;
+    esac
 }
 
 function compose_profiles() {
@@ -4613,7 +4661,7 @@ function prepare_runtime_compose_sidecars() {
         remove_stale_runtime_containers_for_services context-engine-model "${RUNTIME_COMPOSE_SIDECARS[@]}"
         ensure_docker_model_runner
         if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
-            mn_run_runtime_compose pull membrane-context-engine
+            pull_context_engine_image
         fi
     fi
 }
@@ -5088,7 +5136,7 @@ MN_PYTHON_BIN=""
 
 INSTALL_WEB_UI="Y"
 INSTALL_REDIS="Y"
-INSTALL_CONTEXT_ENGINE="N"
+INSTALL_CONTEXT_ENGINE="Y"
 INSTALL_OPENSHELL="Y"
 INSTALL_PYTHON_SDK="Y"
 INSTALL_AGENTS="Y"
@@ -6046,8 +6094,32 @@ function install_python_packages() {
 function setup_context_engine() {
     remove_stale_runtime_containers_for_services context-engine-model membrane-context-engine
     ensure_docker_model_runner
-    runtime_compose pull membrane-context-engine
+    pull_context_engine_image
     runtime_compose up -d --no-build membrane-context-engine >/dev/null
+}
+
+function pull_context_engine_image() {
+    local image docker_config
+    image="$(read_env_value "$RUNTIME_COMPOSE_ENV" "MN_MEMBRANE_ENGINE_IMAGE")"
+    [ -n "$image" ] || image="$(read_env_value "$RUNTIME_COMPOSE_ENV" "ENGINE_IMAGE")"
+    [ -n "$image" ] || {
+        print_error "Membrane context-engine image is not configured."
+        return 1
+    }
+    case "$image" in
+        us-central1-docker.pkg.dev/mirrorneuron-public-packages/*)
+            docker_config="$(mktemp -d "${TMPDIR:-/tmp}/mn-public-gar-docker-config.XXXXXX")"
+            if ! DOCKER_CONFIG="$docker_config" docker pull "$image"; then
+                rm -rf "$docker_config"
+                print_error "Could not pull the public Membrane image from Google Artifact Registry."
+                return 1
+            fi
+            rm -rf "$docker_config"
+            ;;
+        *)
+            runtime_compose pull membrane-context-engine
+            ;;
+    esac
 }
 
 function compose_profiles() {
@@ -6786,7 +6858,7 @@ function prepare_runtime_compose_sidecars() {
         remove_stale_runtime_containers_for_services context-engine-model "${RUNTIME_COMPOSE_SIDECARS[@]}"
         ensure_docker_model_runner
         if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
-            mn_run_runtime_compose pull membrane-context-engine
+            pull_context_engine_image
         fi
     fi
 }
