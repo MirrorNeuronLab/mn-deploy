@@ -1982,11 +1982,10 @@ function context_engine_source_dir() {
 }
 
 function setup_context_engine() {
-    context_engine_source_dir >/dev/null
     remove_stale_runtime_containers_for_services context-engine-model membrane-context-engine
     ensure_docker_model_runner
-    runtime_compose build membrane-context-engine
-    runtime_compose up -d membrane-context-engine >/dev/null
+    runtime_compose pull membrane-context-engine
+    runtime_compose up -d --no-build membrane-context-engine >/dev/null
 }
 
 function compose_profiles() {
@@ -2456,9 +2455,6 @@ function prepare_litellm_gateway_config() {
 
 function write_runtime_compose_files() {
     local model_runner_model profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_agents_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image litellm_gateway_bind_host openshell_gateway_bind_host openshell_gateway_endpoint api_host
-    if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
-        context_engine_source_dir >/dev/null
-    fi
     model_runner_model="${MN_CONTEXT_MODEL_RUNNER_MODEL:-hf.co/homerquan/mn-context-engine-model-v-Q4_K_M}"
     profiles="$(compose_profiles)"
     api_host="${MN_API_HOST:-}"
@@ -2487,7 +2483,7 @@ function write_runtime_compose_files() {
     if [[ "$membrane_engine_tag" != v* ]]; then
         membrane_engine_tag="v${membrane_engine_tag}"
     fi
-    membrane_engine_image="${ENGINE_IMAGE:-${MN_MEMBRANE_ENGINE_IMAGE:-us-central1-docker.pkg.dev/mirrorneuron-public-packages/mirrorneuron-runtime/membrane-context-engine:${membrane_engine_tag}}}"
+    membrane_engine_image="${MN_MEMBRANE_ENGINE_IMAGE:-${MN_CONTEXT_ENGINE_IMAGE:-us-central1-docker.pkg.dev/mirrorneuron-public-packages/mirrorneuron-runtime/membrane-context-engine:${membrane_engine_tag}}}"
     context_memory_enabled="${MN_CONTEXT_MEMORY_ENABLED:-1}"
     otterdesk_context_memory_enabled="${OTTERDESK_CONTEXT_MEMORY_ENABLED:-$context_memory_enabled}"
     if [ -n "${PACKAGE_INDEX_FILE:-}" ] && [ -f "$PACKAGE_INDEX_FILE" ]; then
@@ -2525,8 +2521,7 @@ MN_SYNCTHING_RESCAN_INTERVAL_SECONDS=${MN_SYNCTHING_RESCAN_INTERVAL_SECONDS}
 MN_BLUEPRINT_PYTHON_ENVS_DIR=${MN_BLUEPRINT_PYTHON_ENVS_DIR}
 MN_HOST_OPENSHELL_CONFIG_DIR=${MN_HOST_OPENSHELL_CONFIG_DIR}
 MN_HOST_OPENSHELL_STATE_DIR=${MN_HOST_OPENSHELL_STATE_DIR}
-MEMBRANE_DIR=${MEMBRANE_DIR}
-MN_MEMBRANE_SOURCE_MODE=${MN_MEMBRANE_SOURCE_MODE:-}
+MN_MEMBRANE_SOURCE_MODE=${MN_MEMBRANE_SOURCE_MODE:-image}
 ENGINE_IMAGE=${membrane_engine_image}
 MN_MEMBRANE_ENGINE_IMAGE=${membrane_engine_image}
 MN_MEMBRANE_ENGINE_IMAGE_TAG=${membrane_engine_tag}
@@ -2739,7 +2734,7 @@ function prepare_runtime_compose_sidecars() {
         remove_stale_runtime_containers_for_services context-engine-model "${RUNTIME_COMPOSE_SIDECARS[@]}"
         ensure_docker_model_runner
         if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
-            mn_run_runtime_compose build membrane-context-engine
+            mn_run_runtime_compose pull membrane-context-engine
         fi
     fi
 }
@@ -2747,7 +2742,7 @@ function prepare_runtime_compose_sidecars() {
 function start_runtime_compose_sidecars() {
     prepare_runtime_compose_sidecars
     if [ "${#RUNTIME_COMPOSE_SIDECARS[@]}" -gt 0 ]; then
-        mn_run_runtime_compose up -d "${RUNTIME_COMPOSE_SIDECARS[@]}"
+        mn_run_runtime_compose up -d --no-build "${RUNTIME_COMPOSE_SIDECARS[@]}"
     fi
     if [ "$INSTALL_OPENSHELL" = "Y" ]; then
         reconcile_openshell_gateway_bind_host "${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
@@ -3066,7 +3061,7 @@ if [ "$START_NOW" = "Y" ]; then
     if ! mn_run_runtime_start_command "$VENV_DIR/bin/mn" runtime start; then
         [ -n "$MN_RUNTIME_START_LOG" ] && print_warning "CLI startup details: $MN_RUNTIME_START_LOG"
         print_warning "mn runtime start failed; starting MirrorNeuron Docker Compose runtime."
-        mn_run_runtime_compose up -d
+        mn_run_runtime_compose up -d --no-build
         "$VENV_DIR/bin/mn" runtime restart-sidecars --api >/dev/null 2>&1 || print_warning "MirrorNeuron Core started, but the REST API sidecar did not start automatically."
     fi
     if [ "$INSTALL_OPENSHELL" = "Y" ]; then
@@ -3140,7 +3135,7 @@ BLUEPRINTS_DIR="${WORKSPACE_DIR}/mn-blueprints"
 DOCS_DIR="${WORKSPACE_DIR}/mn-docs"
 SYSTEM_TESTS_DIR="${WORKSPACE_DIR}/mn-system-tests"
 MEMBRANE_DIR="${WORKSPACE_DIR}/Membrane"
-MN_MEMBRANE_SOURCE_MODE="${MN_MEMBRANE_SOURCE_MODE:-source}"
+MN_MEMBRANE_SOURCE_MODE="${MN_MEMBRANE_SOURCE_MODE:-image}"
 MN_HOST_HOME_DIR="${MN_HOST_HOME_DIR:-${MN_HOST_MN_DIR:-${INSTALL_DIR}}}"
 MN_AGENTS_ROOT="${MN_AGENTS_ROOT:-}"
 MN_HOST_ARTIFACTS_DIR="${MN_HOST_ARTIFACTS_DIR:-${MN_HOST_HOME_DIR}/runs}"
@@ -4106,8 +4101,8 @@ function restart_core_container() {
 function setup_context_engine() {
     remove_stale_runtime_containers_for_services context-engine-model membrane-context-engine
     ensure_docker_model_runner
-    runtime_compose build membrane-context-engine
-    runtime_compose up -d membrane-context-engine >/dev/null
+    runtime_compose pull membrane-context-engine
+    runtime_compose up -d --no-build membrane-context-engine >/dev/null
 }
 
 function compose_profiles() {
@@ -4361,7 +4356,7 @@ function write_runtime_compose_files() {
     if [[ "$membrane_engine_tag" != v* ]]; then
         membrane_engine_tag="v${membrane_engine_tag}"
     fi
-    membrane_engine_image="${ENGINE_IMAGE:-${MN_MEMBRANE_ENGINE_IMAGE:-us-central1-docker.pkg.dev/mirrorneuron-public-packages/mirrorneuron-runtime/membrane-context-engine:${membrane_engine_tag}}}"
+    membrane_engine_image="${MN_MEMBRANE_ENGINE_IMAGE:-${MN_CONTEXT_ENGINE_IMAGE:-us-central1-docker.pkg.dev/mirrorneuron-public-packages/mirrorneuron-runtime/membrane-context-engine:${membrane_engine_tag}}}"
     context_memory_enabled="${MN_CONTEXT_MEMORY_ENABLED:-1}"
     otterdesk_context_memory_enabled="${OTTERDESK_CONTEXT_MEMORY_ENABLED:-$context_memory_enabled}"
     if [ -n "${PACKAGE_INDEX_FILE:-}" ] && [ -f "$PACKAGE_INDEX_FILE" ]; then
@@ -4405,8 +4400,7 @@ MN_SYNCTHING_RESCAN_INTERVAL_SECONDS=${MN_SYNCTHING_RESCAN_INTERVAL_SECONDS}
 MN_BLUEPRINT_PYTHON_ENVS_DIR=${MN_BLUEPRINT_PYTHON_ENVS_DIR}
 MN_HOST_OPENSHELL_CONFIG_DIR=${MN_HOST_OPENSHELL_CONFIG_DIR}
 MN_HOST_OPENSHELL_STATE_DIR=${MN_HOST_OPENSHELL_STATE_DIR}
-MEMBRANE_DIR=${MEMBRANE_DIR}
-MN_MEMBRANE_SOURCE_MODE=${MN_MEMBRANE_SOURCE_MODE:-}
+MN_MEMBRANE_SOURCE_MODE=${MN_MEMBRANE_SOURCE_MODE:-image}
 ENGINE_IMAGE=${membrane_engine_image}
 MN_MEMBRANE_ENGINE_IMAGE=${membrane_engine_image}
 MN_MEMBRANE_ENGINE_IMAGE_TAG=${membrane_engine_tag}
@@ -4619,7 +4613,7 @@ function prepare_runtime_compose_sidecars() {
         remove_stale_runtime_containers_for_services context-engine-model "${RUNTIME_COMPOSE_SIDECARS[@]}"
         ensure_docker_model_runner
         if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
-            mn_run_runtime_compose build membrane-context-engine
+            mn_run_runtime_compose pull membrane-context-engine
         fi
     fi
 }
@@ -4627,7 +4621,7 @@ function prepare_runtime_compose_sidecars() {
 function start_runtime_compose_sidecars() {
     prepare_runtime_compose_sidecars
     if [ "${#RUNTIME_COMPOSE_SIDECARS[@]}" -gt 0 ]; then
-        mn_run_runtime_compose up -d "${RUNTIME_COMPOSE_SIDECARS[@]}"
+        mn_run_runtime_compose up -d --no-build "${RUNTIME_COMPOSE_SIDECARS[@]}"
     fi
     if [ "$INSTALL_OPENSHELL" = "Y" ]; then
         reconcile_openshell_gateway_bind_host "${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
@@ -4951,7 +4945,7 @@ if [ "$START_NOW" = "Y" ]; then
     if ! mn_run_runtime_start_command "$VENV_DIR/bin/mn" runtime start; then
         [ -n "$MN_RUNTIME_START_LOG" ] && print_warning "CLI startup details: $MN_RUNTIME_START_LOG"
         print_warning "mn runtime start failed; starting MirrorNeuron Docker Compose runtime."
-        mn_run_runtime_compose up -d
+        mn_run_runtime_compose up -d --no-build
         "$VENV_DIR/bin/mn" runtime restart-sidecars --api >/dev/null 2>&1 || print_warning "MirrorNeuron Core started, but the REST API sidecar did not start automatically."
     fi
     if [ "$INSTALL_OPENSHELL" = "Y" ]; then
@@ -6052,7 +6046,8 @@ function install_python_packages() {
 function setup_context_engine() {
     remove_stale_runtime_containers_for_services context-engine-model membrane-context-engine
     ensure_docker_model_runner
-    runtime_compose up -d membrane-context-engine >/dev/null
+    runtime_compose pull membrane-context-engine
+    runtime_compose up -d --no-build membrane-context-engine >/dev/null
 }
 
 function compose_profiles() {
@@ -6540,7 +6535,7 @@ function write_runtime_compose_files() {
     if [[ "$membrane_engine_tag" != v* ]]; then
         membrane_engine_tag="v${membrane_engine_tag}"
     fi
-    membrane_engine_image="${ENGINE_IMAGE:-${MN_MEMBRANE_ENGINE_IMAGE:-us-central1-docker.pkg.dev/mirrorneuron-public-packages/mirrorneuron-runtime/membrane-context-engine:${membrane_engine_tag}}}"
+    membrane_engine_image="${MN_MEMBRANE_ENGINE_IMAGE:-${MN_CONTEXT_ENGINE_IMAGE:-us-central1-docker.pkg.dev/mirrorneuron-public-packages/mirrorneuron-runtime/membrane-context-engine:${membrane_engine_tag}}}"
     context_memory_enabled="${MN_CONTEXT_MEMORY_ENABLED:-1}"
     otterdesk_context_memory_enabled="${OTTERDESK_CONTEXT_MEMORY_ENABLED:-$context_memory_enabled}"
     if [ -n "${PACKAGE_INDEX_FILE:-}" ] && [ -f "$PACKAGE_INDEX_FILE" ]; then
@@ -6578,8 +6573,7 @@ MN_SYNCTHING_RESCAN_INTERVAL_SECONDS=${MN_SYNCTHING_RESCAN_INTERVAL_SECONDS}
 MN_BLUEPRINT_PYTHON_ENVS_DIR=${MN_BLUEPRINT_PYTHON_ENVS_DIR}
 MN_HOST_OPENSHELL_CONFIG_DIR=${MN_HOST_OPENSHELL_CONFIG_DIR}
 MN_HOST_OPENSHELL_STATE_DIR=${MN_HOST_OPENSHELL_STATE_DIR}
-MEMBRANE_DIR=${MEMBRANE_DIR}
-MN_MEMBRANE_SOURCE_MODE=${MN_MEMBRANE_SOURCE_MODE:-}
+MN_MEMBRANE_SOURCE_MODE=${MN_MEMBRANE_SOURCE_MODE:-image}
 ENGINE_IMAGE=${membrane_engine_image}
 MN_MEMBRANE_ENGINE_IMAGE=${membrane_engine_image}
 MN_MEMBRANE_ENGINE_IMAGE_TAG=${membrane_engine_tag}
@@ -6791,13 +6785,16 @@ function prepare_runtime_compose_sidecars() {
     if [ "${#RUNTIME_COMPOSE_SIDECARS[@]}" -gt 0 ]; then
         remove_stale_runtime_containers_for_services context-engine-model "${RUNTIME_COMPOSE_SIDECARS[@]}"
         ensure_docker_model_runner
+        if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
+            mn_run_runtime_compose pull membrane-context-engine
+        fi
     fi
 }
 
 function start_runtime_compose_sidecars() {
     prepare_runtime_compose_sidecars
     if [ "${#RUNTIME_COMPOSE_SIDECARS[@]}" -gt 0 ]; then
-        mn_run_runtime_compose up -d "${RUNTIME_COMPOSE_SIDECARS[@]}"
+        mn_run_runtime_compose up -d --no-build "${RUNTIME_COMPOSE_SIDECARS[@]}"
     fi
     if [ "$INSTALL_OPENSHELL" = "Y" ]; then
         reconcile_openshell_gateway_bind_host "${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
@@ -6996,7 +6993,7 @@ if [ "$START_NOW" = "Y" ]; then
     if ! mn_run_runtime_start_command "$VENV_DIR/bin/mn" runtime start; then
         [ -n "$MN_RUNTIME_START_LOG" ] && print_warning "CLI startup details: $MN_RUNTIME_START_LOG"
         print_warning "mn runtime start failed; starting MirrorNeuron Docker Compose runtime."
-        mn_run_runtime_compose up -d
+        mn_run_runtime_compose up -d --no-build
         "$VENV_DIR/bin/mn" runtime restart-sidecars --api >/dev/null 2>&1 || print_warning "MirrorNeuron Core started, but the REST API sidecar did not start automatically."
     fi
     if [ "$INSTALL_OPENSHELL" = "Y" ]; then

@@ -132,8 +132,9 @@ Run its isolated Git regression test with:
   Query Engine support for vector search. Set `MN_REDIS_IMAGE` before install
   or in `~/.mn/docker-compose.env` to pin a specific Redis 8+ tag or digest.
 - The installer can set up the core, SDK, CLI, API, Web UI, Redis, and
-  OpenShell depending on selected options. The Membrane context engine is
-  provisioned lazily when a blueprint that requires context memory runs.
+  OpenShell depending on selected options. `--context-engine` prepares the
+  versioned Membrane GAR image before use. A blueprint that requires context
+  memory only starts that prepared image; it never builds Membrane source.
 - OpenShell sandbox JWT keys are bootstrapped by the pinned gateway container;
   installing OpenSSL on the host is not required.
 - The OpenShell host endpoint follows its published Compose bind address:
@@ -157,10 +158,10 @@ Run its isolated Git regression test with:
   `--no-skills` skips optional skill packages but keeps local skills required by
   runtime services, including the definition-scoped Job response engine and its
   local dependency closure.
-- Local installs persist `MN_MEMBRANE_SOURCE_MODE=source`, so both initial and
-  lazy context-engine starts build the linked `Membrane` checkout. Release and
-  GitHub installs use the versioned GAR runtime image unless
-  `MN_MEMBRANE_SOURCE_MODE` is explicitly overridden.
+- Local, GitHub, and binary installs persist `MN_MEMBRANE_SOURCE_MODE=image`
+  and use the versioned Membrane GAR runtime image. The context engine is a
+  released container package in every install mode; its source checkout is not
+  cloned or built when a blueprint starts.
 - GitHub mode without `--version` installs from each repository's default branch.
   Use `--version v1.2.8` only when you want to pin GitHub installs to matching
   release tags.
@@ -183,9 +184,10 @@ Run its isolated Git regression test with:
   versioned runtime Docker Compose template and binary package index from the
   public `mn-deploy` GitHub repository.
 - Initial installs skip the Membrane context engine by default to keep setup
-  light. In binary mode, use `--context-engine` to install the Membrane Python
-  runtime from GAR and start the versioned GAR engine image instead of waiting
-  for the first context-memory blueprint run.
+  light. Use `--context-engine` to install the Membrane Python runtime and
+  pull the versioned GAR engine image before running a context-memory
+  blueprint. `mn runtime ensure-context-engine` performs the same explicit
+  package preparation for an existing install.
 - Python packages published to Google Artifact Registry are controlled by
   `package-index/python-packages.toml`.
 - Binary mode uses the current public package repository by default:

@@ -50,8 +50,11 @@ remains a binary-mode concern.
 Runtime state and generated configuration live below the configured
 `MN_HOME` (documented default `~/.mn`) and established executable/install
 locations. Generated Compose environment belongs in installed state, not in
-this checkout. Redis is an attached service. Membrane may be prepared lazily
-when a blueprint requires context memory.
+this checkout. Redis is an attached service. Membrane preparation is an
+explicit package-install operation: installers and `mn runtime
+ensure-context-engine` pull the versioned GAR image before it is needed. A
+blueprint that requires context memory may start that prepared image but must
+not build or clone Membrane source.
 
 The local Web UI Compose service may proxy an external job UI only after it
 loads that job's authenticated durable UI handle from the local API. Its target
