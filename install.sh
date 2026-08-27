@@ -5,13 +5,79 @@ set -euo pipefail
 # Keep installer output visible even when a subcommand redirects stdout/stderr.
 exec 3>&1
 
+# =============================================================================
+# COMPONENT VERSION AND IMAGE DEFAULTS — EDIT HERE
+# =============================================================================
+# These are the installer defaults, grouped by installation source so a release
+# can advance one component without silently changing the others. A matching
+# command-line option or component environment variable still takes precedence.
+#
+# Pip-installed add-ons are deliberately single-sourced in
+# package-index/python-packages.toml. MN_DEFAULT_AGENT_PACKAGE_INDEX_VERSION
+# selects that indexed inventory; do not duplicate its individual package pins
+# here.
+
+# MirrorNeuron releases by installation source.
+# Core is a GAR Docker image.
+MN_DEFAULT_CORE_VERSION="${MN_DEFAULT_CORE_VERSION:-v1.2.31}"
+# SDK, CLI, and API are pip packages.
+MN_DEFAULT_PYTHON_SDK_VERSION="${MN_DEFAULT_PYTHON_SDK_VERSION:-v1.2.31}"
+MN_DEFAULT_CLI_VERSION="${MN_DEFAULT_CLI_VERSION:-v1.2.32}"
+MN_DEFAULT_API_VERSION="${MN_DEFAULT_API_VERSION:-v1.2.31}"
+# Web UI is an npm package (the installer strips the leading `v`).
+MN_DEFAULT_WEB_UI_VERSION="${MN_DEFAULT_WEB_UI_VERSION:-v1.2.31}"
+# Additional pip packages are selected from the versioned package index.
+MN_DEFAULT_AGENT_PACKAGE_INDEX_VERSION="${MN_DEFAULT_AGENT_PACKAGE_INDEX_VERSION:-v1.2.31}"
+# Membrane context engine is a GAR Docker image.
+MN_DEFAULT_MEMBRANE_CONTEXT_ENGINE_VERSION="${MN_DEFAULT_MEMBRANE_CONTEXT_ENGINE_VERSION:-v1.2.31}"
+
+# Google Artifact Registry coordinates.
+MN_DEFAULT_CORE_GAR_PROJECT="${MN_DEFAULT_CORE_GAR_PROJECT:-mirrorneuron-public-packages}"
+MN_DEFAULT_CORE_GAR_LOCATION="${MN_DEFAULT_CORE_GAR_LOCATION:-us-central1}"
+MN_DEFAULT_CORE_GAR_DOCKER_REPOSITORY="${MN_DEFAULT_CORE_GAR_DOCKER_REPOSITORY:-mirrorneuron-runtime}"
+MN_DEFAULT_CORE_GAR_DOCKER_IMAGE_NAME="${MN_DEFAULT_CORE_GAR_DOCKER_IMAGE_NAME:-mirror-neuron-core}"
+MN_DEFAULT_MEMBRANE_GAR_IMAGE="${MN_DEFAULT_MEMBRANE_GAR_IMAGE:-us-central1-docker.pkg.dev/mirrorneuron-public-packages/mirrorneuron-runtime/membrane-context-engine}"
+MN_DEFAULT_PIP_INDEX_URL="${MN_DEFAULT_PIP_INDEX_URL:-https://us-central1-python.pkg.dev/mirrorneuron-public-packages/agent-skills/simple/}"
+MN_DEFAULT_PYTHON_GAR_LOCATION="${MN_DEFAULT_PYTHON_GAR_LOCATION:-us-central1}"
+MN_DEFAULT_PYTHON_GAR_REPOSITORY="${MN_DEFAULT_PYTHON_GAR_REPOSITORY:-agent-skills}"
+
+# Docker images started directly by the installer or generated Compose config.
+MN_DEFAULT_REDIS_IMAGE="${MN_DEFAULT_REDIS_IMAGE:-redis:8}"
+MN_DEFAULT_WEB_UI_IMAGE="${MN_DEFAULT_WEB_UI_IMAGE:-node:22-alpine}"
+# These upstream images intentionally retain their existing mutable `latest`
+# policy. Replace `latest` with a release tag or digest here to pin them.
+MN_DEFAULT_SYNCTHING_IMAGE="${MN_DEFAULT_SYNCTHING_IMAGE:-syncthing/syncthing:latest}"
+MN_DEFAULT_OPENSHELL_SANDBOX_IMAGE="${MN_DEFAULT_OPENSHELL_SANDBOX_IMAGE:-ghcr.io/nvidia/openshell/sandbox:latest}"
+MN_DEFAULT_OPENSHELL_SUPERVISOR_IMAGE="${MN_DEFAULT_OPENSHELL_SUPERVISOR_IMAGE:-ghcr.io/nvidia/openshell/supervisor:latest}"
+MN_DEFAULT_OPENSHELL_VERSION="${MN_DEFAULT_OPENSHELL_VERSION:-v0.0.47}"
+MN_DEFAULT_OPENSHELL_GATEWAY_IMAGE="${MN_DEFAULT_OPENSHELL_GATEWAY_IMAGE:-ghcr.io/nvidia/openshell/gateway:0.0.47}"
+
+# Docker Model Runner's NVIDIA source build.
+MN_DEFAULT_DOCKER_MODEL_PLUGIN_PACKAGE="${MN_DEFAULT_DOCKER_MODEL_PLUGIN_PACKAGE:-docker-model-plugin}"
+# Empty preserves the OS package repository’s selected version. Set an exact
+# package version here when the Ubuntu Docker repository is pinned.
+MN_DEFAULT_DOCKER_MODEL_PLUGIN_VERSION="${MN_DEFAULT_DOCKER_MODEL_PLUGIN_VERSION:-}"
+MN_DEFAULT_NVIDIA_LLAMA_CPP_BUILD="${MN_DEFAULT_NVIDIA_LLAMA_CPP_BUILD:-b10524}"
+MN_DEFAULT_NVIDIA_LLAMA_CPP_IMAGE="${MN_DEFAULT_NVIDIA_LLAMA_CPP_IMAGE:-ghcr.io/ggml-org/llama.cpp:server-cuda13-b10524}"
+MN_DEFAULT_NVIDIA_MODEL_RUNNER_IMAGE="${MN_DEFAULT_NVIDIA_MODEL_RUNNER_IMAGE:-docker/model-runner:local-cuda-b10524}"
+MN_DEFAULT_NVIDIA_MODEL_RUNNER_BUILD_VERSION="${MN_DEFAULT_NVIDIA_MODEL_RUNNER_BUILD_VERSION:-v1.2.6-local-b10524}"
+
+# Python toolchain. Leave MN_DEFAULT_UV_VERSION empty to preserve the upstream
+# installer’s current-release behavior; set it to a uv release to pin it.
+MN_DEFAULT_MANAGED_PYTHON_VERSION="${MN_DEFAULT_MANAGED_PYTHON_VERSION:-3.11}"
+MN_MANAGED_PYTHON_VERSION="${MN_MANAGED_PYTHON_VERSION:-$MN_DEFAULT_MANAGED_PYTHON_VERSION}"
+MN_DEFAULT_UV_VERSION="${MN_DEFAULT_UV_VERSION:-}"
+
+# Model artifacts referenced by generated Compose configuration.
+MN_DEFAULT_CONTEXT_MODEL_RUNNER_MODEL="${MN_DEFAULT_CONTEXT_MODEL_RUNNER_MODEL:-hf.co/homerquan/mn-context-engine-model-v-Q4_K_M}"
+MN_DEFAULT_LLM_MODEL_RUNNER_MODEL="${MN_DEFAULT_LLM_MODEL_RUNNER_MODEL:-gemma4:e2b}"
+
 MN_INSTALL_MODE="${MN_INSTALL_MODE:-binary}"
 MN_INSTALL_MODE_EXPLICIT="N"
 MN_INSTALL_HELP_REQUESTED="N"
 MN_INSTALL_VERBOSE="${MN_INSTALL_VERBOSE:-N}"
 MN_INSTALL_RESET="N"
-LATEST="v1.2.31"
-MN_DEFAULT_INSTALL_VERSION="${MN_DEFAULT_INSTALL_VERSION:-$LATEST}"
+MN_DEFAULT_INSTALL_VERSION="${MN_DEFAULT_INSTALL_VERSION:-$MN_DEFAULT_CORE_VERSION}"
 MN_INSTALL_VERSION="${MN_INSTALL_VERSION:-}"
 MN_INSTALL_SCRIPT_NAME="$(basename "$0")"
 MN_INSTALL_ARGS=()
@@ -93,6 +159,25 @@ function mn_web_ui_package_version_from_tag() {
     printf '%s' "${tag#v}"
 }
 
+function mn_default_membrane_engine_tag() {
+    if [ "${INSTALL_VERSION_EXPLICIT:-N}" = "Y" ] && [ -n "${INSTALL_VERSION:-}" ]; then
+        printf '%s' "$INSTALL_VERSION"
+    else
+        printf '%s' "$MN_DEFAULT_MEMBRANE_CONTEXT_ENGINE_VERSION"
+    fi
+}
+
+function mn_run_uv_installer() {
+    local installer="$1"
+    local target_dir="$2"
+
+    if [ -n "$MN_DEFAULT_UV_VERSION" ]; then
+        UV_UNMANAGED_INSTALL="$target_dir" UV_VERSION="$MN_DEFAULT_UV_VERSION" sh "$installer"
+    else
+        UV_UNMANAGED_INSTALL="$target_dir" sh "$installer"
+    fi
+}
+
 function mn_install_support_asset_path() {
     local relative_path="$1"
     if [ -n "${MN_INSTALL_VERSION:-}" ]; then
@@ -151,7 +236,14 @@ function mn_print_docker_model_runner_install_hint() {
 }
 
 function mn_install_ubuntu_docker_model_plugin() {
+    local package_name package_version
     local -a privilege=()
+
+    package_name="${MN_DOCKER_MODEL_PLUGIN_PACKAGE:-$MN_DEFAULT_DOCKER_MODEL_PLUGIN_PACKAGE}"
+    package_version="${MN_DOCKER_MODEL_PLUGIN_VERSION:-$MN_DEFAULT_DOCKER_MODEL_PLUGIN_VERSION}"
+    if [ -n "$package_version" ]; then
+        package_name="${package_name}=${package_version}"
+    fi
 
     if ! command -v apt-get >/dev/null 2>&1; then
         print_error "'apt-get' is required to install docker-model-plugin on Ubuntu."
@@ -183,7 +275,7 @@ function mn_install_ubuntu_docker_model_plugin() {
         mn_print_docker_model_runner_install_hint
         exit 1
     fi
-    if ! "${privilege[@]}" apt-get install docker-model-plugin -y; then
+    if ! "${privilege[@]}" apt-get install "$package_name" -y; then
         print_error "Could not install docker-model-plugin."
         mn_print_docker_model_runner_install_hint
         exit 1
@@ -228,7 +320,7 @@ function mn_wait_for_docker_model_runner() {
 }
 
 function mn_nvidia_llamacpp_runner_image() {
-    printf '%s' 'docker/model-runner:local-cuda-b10524'
+    printf '%s' "${MN_DOCKER_MODEL_RUNNER_NVIDIA_IMAGE:-$MN_DEFAULT_NVIDIA_MODEL_RUNNER_IMAGE}"
 }
 
 function mn_nvidia_llamacpp_runner_is_current() {
@@ -238,8 +330,11 @@ function mn_nvidia_llamacpp_runner_is_current() {
 }
 
 function mn_ensure_nvidia_llamacpp_runner() {
-    local runner_image build_dir
+    local runner_image build_dir llama_server_image llama_server_build runner_build_version
     runner_image="$(mn_nvidia_llamacpp_runner_image)"
+    llama_server_image="${MN_NVIDIA_LLAMA_CPP_IMAGE:-$MN_DEFAULT_NVIDIA_LLAMA_CPP_IMAGE}"
+    llama_server_build="${MN_NVIDIA_LLAMA_CPP_BUILD:-$MN_DEFAULT_NVIDIA_LLAMA_CPP_BUILD}"
+    runner_build_version="${MN_NVIDIA_MODEL_RUNNER_BUILD_VERSION:-$MN_DEFAULT_NVIDIA_MODEL_RUNNER_BUILD_VERSION}"
 
     if mn_nvidia_llamacpp_runner_is_current; then
         if mn_docker_model_runner_endpoint_ready; then
@@ -259,24 +354,24 @@ function mn_ensure_nvidia_llamacpp_runner() {
     fi
 
     build_dir="$(mktemp -d "${TMPDIR:-/tmp}/mn-dmr-llamacpp.XXXXXX")"
-    print_step "Updating Docker Model Runner to llama.cpp b10524 for NVIDIA"
+    print_step "Updating Docker Model Runner to llama.cpp ${llama_server_build} for NVIDIA"
     if ! git clone --depth 1 https://github.com/docker/model-runner.git "$build_dir"; then
         rm -rf "$build_dir"
         print_error "Could not fetch the Docker Model Runner source needed for the NVIDIA llama.cpp update."
         exit 1
     fi
-    if ! docker pull ghcr.io/ggml-org/llama.cpp:server-cuda13-b10524; then
+    if ! docker pull "$llama_server_image"; then
         rm -rf "$build_dir"
-        print_error "Could not pull llama.cpp CUDA build b10524."
+        print_error "Could not pull llama.cpp CUDA build ${llama_server_build}."
         exit 1
     fi
     if ! (
         cd "$build_dir"
         mn_run_docker_build --target final-llamacpp \
-            --build-arg VERSION=v1.2.6-local-b10524 \
-            --build-arg LLAMA_SERVER_VERSION=b10524 \
+            --build-arg VERSION="$runner_build_version" \
+            --build-arg LLAMA_SERVER_VERSION="$llama_server_build" \
             --build-arg LLAMA_SERVER_VARIANT=cuda \
-            --build-arg LLAMA_UPSTREAM_IMAGE=ghcr.io/ggml-org/llama.cpp:server-cuda13-b10524 \
+            --build-arg LLAMA_UPSTREAM_IMAGE="$llama_server_image" \
             -t "$runner_image" .
     ); then
         rm -rf "$build_dir"
@@ -317,7 +412,7 @@ function mn_ensure_nvidia_llamacpp_runner() {
         print_error "The NVIDIA llama.cpp Docker Model Runner did not become ready."
         exit 1
     fi
-    print_success "Docker Model Runner is using llama.cpp CUDA build b10524."
+    print_success "Docker Model Runner is using llama.cpp CUDA build ${llama_server_build}."
 }
 
 function mn_resolve_docker_host_socket() {
@@ -731,7 +826,7 @@ function mn_reset_capture_cleanup_images() {
     # Docker-owned bind-mount files behind. Redis is part of the managed
     # runtime, and its locally cached image provides a small POSIX shell.
     redis_image="$(mn_reset_read_env_value "$compose_env_file" "MN_REDIS_IMAGE")"
-    redis_image="${redis_image:-redis:8}"
+    redis_image="${redis_image:-$MN_DEFAULT_REDIS_IMAGE}"
     if docker image inspect "$redis_image" >/dev/null 2>&1; then
         mn_reset_add_cleanup_image "$redis_image"
     fi
@@ -1132,7 +1227,7 @@ else
 fi
 
 MN_MANAGED_PYTHON="${MN_MANAGED_PYTHON:-1}"
-MN_MANAGED_PYTHON_VERSION="${MN_MANAGED_PYTHON_VERSION:-3.11}"
+MN_MANAGED_PYTHON_VERSION="${MN_MANAGED_PYTHON_VERSION:-$MN_DEFAULT_MANAGED_PYTHON_VERSION}"
 MN_MANAGED_PYTHON_ROOT="${MN_MANAGED_PYTHON_DIR:-${HOME}/.local/share/mn_python}"
 MN_UV_ROOT="${MN_UV_DIR:-${HOME}/.local/share/mn_uv}"
 MN_UV_BIN=""
@@ -1397,7 +1492,7 @@ function install_uv() {
         exit 1
     fi
 
-    if ! UV_UNMANAGED_INSTALL="$uv_bin_dir" sh "$installer" >/dev/null 2>&1; then
+    if ! mn_run_uv_installer "$installer" "$uv_bin_dir" >/dev/null 2>&1; then
         rm -f "$installer"
         print_error "Could not install uv."
         print_error "Install uv manually or set MN_PYTHON=/path/to/python3.11."
@@ -1550,7 +1645,7 @@ RUNTIME_COMPOSE_FILE="${INSTALL_DIR}/docker-compose.yml"
 RUNTIME_COMPOSE_ENV="${INSTALL_DIR}/docker-compose.env"
 MN_WEB_UI_SOURCE_MODE="${MN_WEB_UI_SOURCE_MODE:-source}"
 MN_WEB_UI_SOURCE_MOUNT="${MN_WEB_UI_SOURCE_MOUNT:-${INSTALL_DIR}/webui}"
-MN_WEB_UI_PACKAGE_VERSION="${MN_WEB_UI_PACKAGE_VERSION:-}"
+MN_WEB_UI_PACKAGE_VERSION="${MN_WEB_UI_PACKAGE_VERSION:-${MN_DEFAULT_WEB_UI_VERSION#v}}"
 INSTALL_CONTEXT_ENGINE="Y"
 MEMBRANE_REPO="${MN_MEMBRANE_REPO:-MirrorNeuronLab/Membrane}"
 MEMBRANE_GIT_URL="${MN_MEMBRANE_GIT_URL:-}"
@@ -1564,7 +1659,7 @@ MN_HOST_ARTIFACTS_DIR="${MN_HOST_ARTIFACTS_DIR:-${MN_HOST_HOME_DIR}/runs}"
 MN_HOST_BLOB_STORE_DIR="${MN_HOST_BLOB_STORE_DIR:-${MN_HOST_HOME_DIR}/blobs}"
 MN_HOST_SHARED_STORAGE_ROOT="${MN_HOST_SHARED_STORAGE_ROOT:-${MN_HOST_SHARED_ARTIFACT_ROOT:-${MN_HOST_HOME_DIR}/shared}}"
 MN_SYNCTHING_ENABLED="${MN_SYNCTHING_ENABLED:-auto}"
-MN_SYNCTHING_IMAGE="${MN_SYNCTHING_IMAGE:-syncthing/syncthing:latest}"
+MN_SYNCTHING_IMAGE="${MN_SYNCTHING_IMAGE:-$MN_DEFAULT_SYNCTHING_IMAGE}"
 MN_SYNCTHING_GUI_PORT="${MN_SYNCTHING_GUI_PORT:-58384}"
 MN_SYNCTHING_SYNC_PORT="${MN_SYNCTHING_SYNC_PORT:-22000}"
 MN_SYNCTHING_RESCAN_INTERVAL_SECONDS="${MN_SYNCTHING_RESCAN_INTERVAL_SECONDS:-3600}"
@@ -2031,7 +2126,7 @@ function compose_profiles() {
 
 function generate_openshell_jwt_keys() {
     local jwt_dir="$1"
-    local gateway_image="${OPENSHELL_GATEWAY_IMAGE:-ghcr.io/nvidia/openshell/gateway:0.0.47}"
+    local gateway_image="${OPENSHELL_GATEWAY_IMAGE:-$MN_DEFAULT_OPENSHELL_GATEWAY_IMAGE}"
     local bootstrap_dir name
 
     bootstrap_dir="$(mktemp -d "${MN_HOST_OPENSHELL_STATE_DIR}/.jwt-bootstrap.XXXXXX")"
@@ -2092,8 +2187,8 @@ bind_address = "0.0.0.0:${OPENSHELL_GATEWAY_PORT:-58080}"
 log_level = "info"
 compute_drivers = ["docker"]
 sandbox_namespace = "mirror-neuron"
-default_image = "ghcr.io/nvidia/openshell/sandbox:latest"
-supervisor_image = "ghcr.io/nvidia/openshell/supervisor:latest"
+default_image = "${OPENSHELL_SANDBOX_IMAGE:-$MN_DEFAULT_OPENSHELL_SANDBOX_IMAGE}"
+supervisor_image = "${OPENSHELL_SUPERVISOR_IMAGE:-$MN_DEFAULT_OPENSHELL_SUPERVISOR_IMAGE}"
 
 [openshell.gateway.gateway_jwt]
 signing_key_path = "${jwt_dir}/signing.pem"
@@ -2106,7 +2201,7 @@ ttl_secs = 3600
 allow_unauthenticated_users = true
 
 [openshell.drivers.docker]
-default_image = "ghcr.io/nvidia/openshell/sandbox:latest"
+default_image = "${OPENSHELL_SANDBOX_IMAGE:-$MN_DEFAULT_OPENSHELL_SANDBOX_IMAGE}"
 image_pull_policy = "IfNotPresent"
 sandbox_namespace = "mirror-neuron"
 grpc_endpoint = "http://openshell:${OPENSHELL_GATEWAY_PORT:-58080}"
@@ -2120,7 +2215,7 @@ function install_openshell_cli() {
     fi
     local installer="${TMPDIR:-/tmp}/mirror_neuron_openshell_install.sh"
     curl_github -fLsS https://raw.githubusercontent.com/NVIDIA/OpenShell/main/install.sh -o "$installer"
-    OPENSHELL_VERSION="${OPENSHELL_VERSION:-v0.0.47}" sh "$installer" >/dev/null
+    OPENSHELL_VERSION="${OPENSHELL_VERSION:-$MN_DEFAULT_OPENSHELL_VERSION}" sh "$installer" >/dev/null
     rm -f "$installer"
 }
 
@@ -2479,7 +2574,7 @@ function prepare_litellm_gateway_config() {
 
 function write_runtime_compose_files() {
     local model_runner_model profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_agents_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image litellm_gateway_bind_host openshell_gateway_bind_host openshell_gateway_endpoint api_host
-    model_runner_model="${MN_CONTEXT_MODEL_RUNNER_MODEL:-hf.co/homerquan/mn-context-engine-model-v-Q4_K_M}"
+    model_runner_model="${MN_CONTEXT_MODEL_RUNNER_MODEL:-$MN_DEFAULT_CONTEXT_MODEL_RUNNER_MODEL}"
     profiles="$(compose_profiles)"
     api_host="${MN_API_HOST:-}"
     if [ -z "$api_host" ]; then
@@ -2503,11 +2598,11 @@ function write_runtime_compose_files() {
     runtime_skills_root="${MN_SKILLS_ROOT:-${MN_HOST_HOME_DIR}/skills}"
     runtime_agents_root="$(ensure_agent_catalog_root)"
     runtime_package_index="${MN_PACKAGE_INDEX_FILE:-}"
-    membrane_engine_tag="${MN_MEMBRANE_ENGINE_IMAGE_TAG:-${INSTALL_VERSION:-v${MN_PACKAGE_VERSION:-1.2.31}}}"
+    membrane_engine_tag="${MN_MEMBRANE_ENGINE_IMAGE_TAG:-$(mn_default_membrane_engine_tag)}"
     if [[ "$membrane_engine_tag" != v* ]]; then
         membrane_engine_tag="v${membrane_engine_tag}"
     fi
-    membrane_engine_image="${MN_MEMBRANE_ENGINE_IMAGE:-${MN_CONTEXT_ENGINE_IMAGE:-us-central1-docker.pkg.dev/mirrorneuron-public-packages/mirrorneuron-runtime/membrane-context-engine:${membrane_engine_tag}}}"
+    membrane_engine_image="${MN_MEMBRANE_ENGINE_IMAGE:-${MN_CONTEXT_ENGINE_IMAGE:-${MN_DEFAULT_MEMBRANE_GAR_IMAGE}:${membrane_engine_tag}}}"
     context_memory_enabled="${MN_CONTEXT_MEMORY_ENABLED:-1}"
     otterdesk_context_memory_enabled="${OTTERDESK_CONTEXT_MEMORY_ENABLED:-$context_memory_enabled}"
     if [ -n "${PACKAGE_INDEX_FILE:-}" ] && [ -f "$PACKAGE_INDEX_FILE" ]; then
@@ -2549,9 +2644,9 @@ MN_MEMBRANE_SOURCE_MODE=${MN_MEMBRANE_SOURCE_MODE:-image}
 ENGINE_IMAGE=${membrane_engine_image}
 MN_MEMBRANE_ENGINE_IMAGE=${membrane_engine_image}
 MN_MEMBRANE_ENGINE_IMAGE_TAG=${membrane_engine_tag}
-MN_REDIS_IMAGE=${MN_REDIS_IMAGE:-redis:8}
+MN_REDIS_IMAGE=${MN_REDIS_IMAGE:-$MN_DEFAULT_REDIS_IMAGE}
 MN_CONTEXT_MODEL_RUNNER_MODEL=${model_runner_model}
-MN_LLM_MODEL_RUNNER_MODEL=${MN_LLM_MODEL_RUNNER_MODEL:-gemma4:e2b}
+MN_LLM_MODEL_RUNNER_MODEL=${MN_LLM_MODEL_RUNNER_MODEL:-$MN_DEFAULT_LLM_MODEL_RUNNER_MODEL}
 MN_GRPC_BIND_HOST=${MN_GRPC_BIND_HOST:-127.0.0.1}
 MN_GRPC_PORT=${MN_GRPC_PORT:-55051}
 MN_GRPC_TARGET=${MN_GRPC_TARGET:-localhost:${MN_GRPC_PORT:-55051}}
@@ -2573,7 +2668,7 @@ MN_DIST_PORT=${MN_DIST_PORT:-54370}
 MN_WEB_UI_HOST=${MN_WEB_UI_HOST:-localhost}
 MN_WEB_UI_PORT=${MN_WEB_UI_PORT:-55173}
 MN_WEB_UI_BIND_HOST=${MN_WEB_UI_BIND_HOST:-127.0.0.1}
-MN_WEB_UI_IMAGE=${MN_WEB_UI_IMAGE:-node:22-alpine}
+MN_WEB_UI_IMAGE=${MN_WEB_UI_IMAGE:-$MN_DEFAULT_WEB_UI_IMAGE}
 MN_WEB_UI_SOURCE_MODE=${MN_WEB_UI_SOURCE_MODE}
 MN_WEB_UI_SOURCE_MOUNT=${MN_WEB_UI_SOURCE_MOUNT}
 MN_WEB_UI_PACKAGE_VERSION=${MN_WEB_UI_PACKAGE_VERSION}
@@ -2591,7 +2686,7 @@ MN_WORKSPACE_ROOT=${MN_WORKSPACE_ROOT:-}
 MN_AGENTS_ROOT=${runtime_agents_root}
 MN_SKILLS_ROOT=${runtime_skills_root}
 MN_PACKAGE_INDEX_FILE=${runtime_package_index}
-MN_PIP_INDEX_URL=${MN_PIP_INDEX_URL:-${MN_PYTHON_INDEX_URL:-${MN_DEFAULT_PIP_INDEX_URL:-https://us-central1-python.pkg.dev/mirrorneuron-public-packages/agent-skills/simple/}}}
+MN_PIP_INDEX_URL=${MN_PIP_INDEX_URL:-${MN_PYTHON_INDEX_URL:-${MN_DEFAULT_PIP_INDEX_URL}}}
 MN_PIP_EXTRA_INDEX_URL=${MN_PIP_EXTRA_INDEX_URL:-${MN_PYTHON_EXTRA_INDEX_URL:-https://pypi.org/simple}}
 MN_RUNTIME_MODULE_VERSION=${MN_RUNTIME_MODULE_VERSION:-${MN_PACKAGE_VERSION:-}}
 MN_CONTEXT_MEMORY_ENABLED=${context_memory_enabled}
@@ -2631,6 +2726,7 @@ OPENSHELL_GATEWAY_ENDPOINT=${openshell_gateway_endpoint}
 OPENSHELL_GATEWAY_BIND_HOST=${openshell_gateway_bind_host}
 OPENSHELL_GATEWAY_USER=${OPENSHELL_GATEWAY_USER}
 OPENSHELL_GATEWAY_DOCKER_GROUP=${OPENSHELL_GATEWAY_DOCKER_GROUP}
+OPENSHELL_GATEWAY_IMAGE=${OPENSHELL_GATEWAY_IMAGE:-$MN_DEFAULT_OPENSHELL_GATEWAY_IMAGE}
 DOCKER_HOST_SOCKET=${DOCKER_HOST_SOCKET}
 COMPOSE_PARALLEL_LIMIT=${COMPOSE_PARALLEL_LIMIT:-1}
 MN_COOKIE=${mn_cookie}
@@ -3147,7 +3243,7 @@ PY_SDK_DIR="${WORKSPACE_DIR}/mn-python-sdk"
 WEB_UI_DIR="${WORKSPACE_DIR}/mn-web-ui"
 MN_WEB_UI_SOURCE_MODE="${MN_WEB_UI_SOURCE_MODE:-source}"
 MN_WEB_UI_SOURCE_MOUNT="${MN_WEB_UI_SOURCE_MOUNT:-${WEB_UI_DIR}}"
-MN_WEB_UI_PACKAGE_VERSION="${MN_WEB_UI_PACKAGE_VERSION:-}"
+MN_WEB_UI_PACKAGE_VERSION="${MN_WEB_UI_PACKAGE_VERSION:-${MN_DEFAULT_WEB_UI_VERSION#v}}"
 SKILLS_DIR="${WORKSPACE_DIR}/mn-skills"
 AGENTS_DIR="${WORKSPACE_DIR}/mn-agents"
 BLUEPRINT_SUPPORT_SKILL_DIR="${SKILLS_DIR}/blueprint_support_skill"
@@ -3166,7 +3262,7 @@ MN_HOST_ARTIFACTS_DIR="${MN_HOST_ARTIFACTS_DIR:-${MN_HOST_HOME_DIR}/runs}"
 MN_HOST_BLOB_STORE_DIR="${MN_HOST_BLOB_STORE_DIR:-${MN_HOST_HOME_DIR}/blobs}"
 MN_HOST_SHARED_STORAGE_ROOT="${MN_HOST_SHARED_STORAGE_ROOT:-${MN_HOST_SHARED_ARTIFACT_ROOT:-${MN_HOST_HOME_DIR}/shared}}"
 MN_SYNCTHING_ENABLED="${MN_SYNCTHING_ENABLED:-auto}"
-MN_SYNCTHING_IMAGE="${MN_SYNCTHING_IMAGE:-syncthing/syncthing:latest}"
+MN_SYNCTHING_IMAGE="${MN_SYNCTHING_IMAGE:-$MN_DEFAULT_SYNCTHING_IMAGE}"
 MN_SYNCTHING_GUI_PORT="${MN_SYNCTHING_GUI_PORT:-58384}"
 MN_SYNCTHING_SYNC_PORT="${MN_SYNCTHING_SYNC_PORT:-22000}"
 MN_SYNCTHING_RESCAN_INTERVAL_SECONDS="${MN_SYNCTHING_RESCAN_INTERVAL_SECONDS:-3600}"
@@ -3186,7 +3282,7 @@ MN_DYNAMIC_REDIS_PORT_START="${MN_DYNAMIC_REDIS_PORT_START:-56379}"
 MN_DYNAMIC_REDIS_PORT_END="${MN_DYNAMIC_REDIS_PORT_END:-56478}"
 MN_PYTHON_BIN=""
 MN_MANAGED_PYTHON="${MN_MANAGED_PYTHON:-1}"
-MN_MANAGED_PYTHON_VERSION="${MN_MANAGED_PYTHON_VERSION:-3.11}"
+MN_MANAGED_PYTHON_VERSION="${MN_MANAGED_PYTHON_VERSION:-$MN_DEFAULT_MANAGED_PYTHON_VERSION}"
 MN_MANAGED_PYTHON_ROOT="${MN_MANAGED_PYTHON_DIR:-${HOME}/.local/share/mn_python}"
 MN_UV_ROOT="${MN_UV_DIR:-${HOME}/.local/share/mn_uv}"
 MN_UV_BIN=""
@@ -3301,7 +3397,7 @@ function install_uv() {
         exit 1
     fi
 
-    if ! UV_UNMANAGED_INSTALL="$uv_bin_dir" sh "$installer" >/dev/null 2>&1; then
+    if ! mn_run_uv_installer "$installer" "$uv_bin_dir" >/dev/null 2>&1; then
         rm -f "$installer"
         print_error "Could not install uv."
         print_error "Install uv manually or set MN_PYTHON=/path/to/python3.11."
@@ -3746,7 +3842,7 @@ function replace_symlink() {
 
 function generate_openshell_jwt_keys() {
     local jwt_dir="$1"
-    local gateway_image="${OPENSHELL_GATEWAY_IMAGE:-ghcr.io/nvidia/openshell/gateway:0.0.47}"
+    local gateway_image="${OPENSHELL_GATEWAY_IMAGE:-$MN_DEFAULT_OPENSHELL_GATEWAY_IMAGE}"
     local bootstrap_dir name
 
     bootstrap_dir="$(mktemp -d "${MN_HOST_OPENSHELL_STATE_DIR}/.jwt-bootstrap.XXXXXX")"
@@ -4196,8 +4292,8 @@ bind_address = "0.0.0.0:${OPENSHELL_GATEWAY_PORT:-58080}"
 log_level = "info"
 compute_drivers = ["docker"]
 sandbox_namespace = "mirror-neuron"
-default_image = "ghcr.io/nvidia/openshell/sandbox:latest"
-supervisor_image = "ghcr.io/nvidia/openshell/supervisor:latest"
+default_image = "${OPENSHELL_SANDBOX_IMAGE:-$MN_DEFAULT_OPENSHELL_SANDBOX_IMAGE}"
+supervisor_image = "${OPENSHELL_SUPERVISOR_IMAGE:-$MN_DEFAULT_OPENSHELL_SUPERVISOR_IMAGE}"
 
 [openshell.gateway.gateway_jwt]
 signing_key_path = "${jwt_dir}/signing.pem"
@@ -4210,7 +4306,7 @@ ttl_secs = 3600
 allow_unauthenticated_users = true
 
 [openshell.drivers.docker]
-default_image = "ghcr.io/nvidia/openshell/sandbox:latest"
+default_image = "${OPENSHELL_SANDBOX_IMAGE:-$MN_DEFAULT_OPENSHELL_SANDBOX_IMAGE}"
 image_pull_policy = "IfNotPresent"
 sandbox_namespace = "mirror-neuron"
 grpc_endpoint = "http://openshell:${OPENSHELL_GATEWAY_PORT:-58080}"
@@ -4224,7 +4320,7 @@ function install_openshell_cli() {
     fi
     local installer="${TMPDIR:-/tmp}/mirror_neuron_openshell_install.sh"
     curl_github -fLsS https://raw.githubusercontent.com/NVIDIA/OpenShell/main/install.sh -o "$installer"
-    OPENSHELL_VERSION="${OPENSHELL_VERSION:-v0.0.47}" sh "$installer" >/dev/null
+    OPENSHELL_VERSION="${OPENSHELL_VERSION:-$MN_DEFAULT_OPENSHELL_VERSION}" sh "$installer" >/dev/null
     rm -f "$installer"
 }
 
@@ -4376,7 +4472,7 @@ function prepare_litellm_gateway_config() {
 
 function write_runtime_compose_files() {
     local model_runner_model profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_agents_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image litellm_gateway_bind_host openshell_gateway_bind_host openshell_gateway_endpoint api_host blueprint_web_ui_port_start blueprint_web_ui_port_end
-    model_runner_model="${MN_CONTEXT_MODEL_RUNNER_MODEL:-hf.co/homerquan/mn-context-engine-model-v-Q4_K_M}"
+    model_runner_model="${MN_CONTEXT_MODEL_RUNNER_MODEL:-$MN_DEFAULT_CONTEXT_MODEL_RUNNER_MODEL}"
     profiles="$(compose_profiles)"
     api_host="${MN_API_HOST:-}"
     if [ -z "$api_host" ]; then
@@ -4400,11 +4496,11 @@ function write_runtime_compose_files() {
     runtime_skills_root="${MN_SKILLS_ROOT:-${MN_HOST_HOME_DIR}/skills}"
     runtime_agents_root="$(ensure_agent_catalog_root)"
     runtime_package_index="${MN_PACKAGE_INDEX_FILE:-}"
-    membrane_engine_tag="${MN_MEMBRANE_ENGINE_IMAGE_TAG:-${INSTALL_VERSION:-v${MN_PACKAGE_VERSION:-1.2.31}}}"
+    membrane_engine_tag="${MN_MEMBRANE_ENGINE_IMAGE_TAG:-$(mn_default_membrane_engine_tag)}"
     if [[ "$membrane_engine_tag" != v* ]]; then
         membrane_engine_tag="v${membrane_engine_tag}"
     fi
-    membrane_engine_image="${MN_MEMBRANE_ENGINE_IMAGE:-${MN_CONTEXT_ENGINE_IMAGE:-us-central1-docker.pkg.dev/mirrorneuron-public-packages/mirrorneuron-runtime/membrane-context-engine:${membrane_engine_tag}}}"
+    membrane_engine_image="${MN_MEMBRANE_ENGINE_IMAGE:-${MN_CONTEXT_ENGINE_IMAGE:-${MN_DEFAULT_MEMBRANE_GAR_IMAGE}:${membrane_engine_tag}}}"
     context_memory_enabled="${MN_CONTEXT_MEMORY_ENABLED:-1}"
     otterdesk_context_memory_enabled="${OTTERDESK_CONTEXT_MEMORY_ENABLED:-$context_memory_enabled}"
     if [ -n "${PACKAGE_INDEX_FILE:-}" ] && [ -f "$PACKAGE_INDEX_FILE" ]; then
@@ -4452,9 +4548,9 @@ MN_MEMBRANE_SOURCE_MODE=${MN_MEMBRANE_SOURCE_MODE:-image}
 ENGINE_IMAGE=${membrane_engine_image}
 MN_MEMBRANE_ENGINE_IMAGE=${membrane_engine_image}
 MN_MEMBRANE_ENGINE_IMAGE_TAG=${membrane_engine_tag}
-MN_REDIS_IMAGE=${MN_REDIS_IMAGE:-redis:8}
+MN_REDIS_IMAGE=${MN_REDIS_IMAGE:-$MN_DEFAULT_REDIS_IMAGE}
 MN_CONTEXT_MODEL_RUNNER_MODEL=${model_runner_model}
-MN_LLM_MODEL_RUNNER_MODEL=${MN_LLM_MODEL_RUNNER_MODEL:-gemma4:e2b}
+MN_LLM_MODEL_RUNNER_MODEL=${MN_LLM_MODEL_RUNNER_MODEL:-$MN_DEFAULT_LLM_MODEL_RUNNER_MODEL}
 MN_GRPC_BIND_HOST=${MN_GRPC_BIND_HOST:-127.0.0.1}
 MN_GRPC_PORT=${MN_GRPC_PORT:-55051}
 MN_GRPC_TARGET=${MN_GRPC_TARGET:-localhost:${MN_GRPC_PORT:-55051}}
@@ -4476,7 +4572,7 @@ MN_DIST_PORT=${MN_DIST_PORT:-54370}
 MN_WEB_UI_HOST=${MN_WEB_UI_HOST:-localhost}
 MN_WEB_UI_PORT=${MN_WEB_UI_PORT:-55173}
 MN_WEB_UI_BIND_HOST=${MN_WEB_UI_BIND_HOST:-127.0.0.1}
-MN_WEB_UI_IMAGE=${MN_WEB_UI_IMAGE:-node:22-alpine}
+MN_WEB_UI_IMAGE=${MN_WEB_UI_IMAGE:-$MN_DEFAULT_WEB_UI_IMAGE}
 MN_WEB_UI_SOURCE_MODE=${MN_WEB_UI_SOURCE_MODE}
 MN_WEB_UI_SOURCE_MOUNT=${MN_WEB_UI_SOURCE_MOUNT}
 MN_WEB_UI_PACKAGE_VERSION=${MN_WEB_UI_PACKAGE_VERSION}
@@ -4494,7 +4590,7 @@ MN_WORKSPACE_ROOT=${MN_WORKSPACE_ROOT:-}
 MN_AGENTS_ROOT=${runtime_agents_root}
 MN_SKILLS_ROOT=${runtime_skills_root}
 MN_PACKAGE_INDEX_FILE=${runtime_package_index}
-MN_PIP_INDEX_URL=${MN_PIP_INDEX_URL:-${MN_PYTHON_INDEX_URL:-${MN_DEFAULT_PIP_INDEX_URL:-https://us-central1-python.pkg.dev/mirrorneuron-public-packages/agent-skills/simple/}}}
+MN_PIP_INDEX_URL=${MN_PIP_INDEX_URL:-${MN_PYTHON_INDEX_URL:-${MN_DEFAULT_PIP_INDEX_URL}}}
 MN_PIP_EXTRA_INDEX_URL=${MN_PIP_EXTRA_INDEX_URL:-${MN_PYTHON_EXTRA_INDEX_URL:-https://pypi.org/simple}}
 MN_RUNTIME_MODULE_VERSION=${MN_RUNTIME_MODULE_VERSION:-${MN_PACKAGE_VERSION:-}}
 MN_CONTEXT_MEMORY_ENABLED=${context_memory_enabled}
@@ -4534,6 +4630,7 @@ OPENSHELL_GATEWAY_ENDPOINT=${openshell_gateway_endpoint}
 OPENSHELL_GATEWAY_BIND_HOST=${openshell_gateway_bind_host}
 OPENSHELL_GATEWAY_USER=${OPENSHELL_GATEWAY_USER}
 OPENSHELL_GATEWAY_DOCKER_GROUP=${OPENSHELL_GATEWAY_DOCKER_GROUP}
+OPENSHELL_GATEWAY_IMAGE=${OPENSHELL_GATEWAY_IMAGE:-$MN_DEFAULT_OPENSHELL_GATEWAY_IMAGE}
 DOCKER_HOST_SOCKET=${DOCKER_HOST_SOCKET}
 COMPOSE_PARALLEL_LIMIT=${COMPOSE_PARALLEL_LIMIT:-1}
 MN_COOKIE=${mn_cookie}
@@ -5081,15 +5178,15 @@ PYTHON_SDK_INSTALL_VERSION="${MN_PYTHON_SDK_VERSION:-}"
 CLI_INSTALL_VERSION="${MN_CLI_VERSION:-}"
 API_INSTALL_VERSION="${MN_API_VERSION:-}"
 WEB_UI_INSTALL_VERSION="${MN_WEB_UI_VERSION:-}"
-DEFAULT_PYTHON_SDK_INSTALL_VERSION="${MN_DEFAULT_PYTHON_SDK_VERSION:-v1.2.31}"
-DEFAULT_CLI_INSTALL_VERSION="${MN_DEFAULT_CLI_VERSION:-v1.2.32}"
-DEFAULT_API_INSTALL_VERSION="${MN_DEFAULT_API_VERSION:-v1.2.31}"
-DEFAULT_WEB_UI_INSTALL_VERSION="${MN_DEFAULT_WEB_UI_VERSION:-v1.2.31}"
+DEFAULT_PYTHON_SDK_INSTALL_VERSION="$MN_DEFAULT_PYTHON_SDK_VERSION"
+DEFAULT_CLI_INSTALL_VERSION="$MN_DEFAULT_CLI_VERSION"
+DEFAULT_API_INSTALL_VERSION="$MN_DEFAULT_API_VERSION"
+DEFAULT_WEB_UI_INSTALL_VERSION="$MN_DEFAULT_WEB_UI_VERSION"
 CORE_IMAGE="${MN_CORE_IMAGE:-}"
-CORE_GAR_PROJECT="${MN_CORE_GAR_PROJECT:-mirrorneuron-public-packages}"
-CORE_GAR_LOCATION="${MN_CORE_GAR_LOCATION:-us-central1}"
-CORE_GAR_DOCKER_REPOSITORY="${MN_CORE_GAR_DOCKER_REPOSITORY:-mirrorneuron-runtime}"
-CORE_GAR_DOCKER_IMAGE_NAME="${MN_CORE_GAR_DOCKER_IMAGE_NAME:-mirror-neuron-core}"
+CORE_GAR_PROJECT="${MN_CORE_GAR_PROJECT:-$MN_DEFAULT_CORE_GAR_PROJECT}"
+CORE_GAR_LOCATION="${MN_CORE_GAR_LOCATION:-$MN_DEFAULT_CORE_GAR_LOCATION}"
+CORE_GAR_DOCKER_REPOSITORY="${MN_CORE_GAR_DOCKER_REPOSITORY:-$MN_DEFAULT_CORE_GAR_DOCKER_REPOSITORY}"
+CORE_GAR_DOCKER_IMAGE_NAME="${MN_CORE_GAR_DOCKER_IMAGE_NAME:-$MN_DEFAULT_CORE_GAR_DOCKER_IMAGE_NAME}"
 MN_PACKAGE_VERSION=""
 MN_PYTHON_SDK_PACKAGE_VERSION=""
 MN_CLI_PACKAGE_VERSION=""
@@ -5097,10 +5194,10 @@ MN_API_PACKAGE_VERSION=""
 MEMBRANE_DIR="${MN_MEMBRANE_DIR:-${INSTALL_DIR}/Membrane}"
 MN_AGENTS_ROOT="${MN_AGENTS_ROOT:-}"
 PACKAGE_INDEX_FILE="${MN_PACKAGE_INDEX_FILE:-}"
+PACKAGE_INDEX_VERSION="${MN_PACKAGE_INDEX_VERSION:-}"
 MN_GAR_PROJECT="${MN_GAR_PROJECT:-}"
-MN_GAR_LOCATION="${MN_GAR_LOCATION:-us-central1}"
-MN_GAR_REPOSITORY="${MN_GAR_REPOSITORY:-agent-skills}"
-MN_DEFAULT_PIP_INDEX_URL="${MN_DEFAULT_PIP_INDEX_URL:-https://us-central1-python.pkg.dev/mirrorneuron-public-packages/agent-skills/simple/}"
+MN_GAR_LOCATION="${MN_GAR_LOCATION:-$MN_DEFAULT_PYTHON_GAR_LOCATION}"
+MN_GAR_REPOSITORY="${MN_GAR_REPOSITORY:-$MN_DEFAULT_PYTHON_GAR_REPOSITORY}"
 MN_PIP_INDEX_URL="${MN_PIP_INDEX_URL:-${MN_PYTHON_INDEX_URL:-}}"
 MN_PIP_EXTRA_INDEX_URL="${MN_PIP_EXTRA_INDEX_URL:-${MN_PYTHON_EXTRA_INDEX_URL:-https://pypi.org/simple}}"
 MN_HOST_HOME_DIR="${MN_HOST_HOME_DIR:-${MN_HOST_MN_DIR:-${INSTALL_DIR}}}"
@@ -5108,7 +5205,7 @@ MN_HOST_ARTIFACTS_DIR="${MN_HOST_ARTIFACTS_DIR:-${MN_HOST_HOME_DIR}/runs}"
 MN_HOST_BLOB_STORE_DIR="${MN_HOST_BLOB_STORE_DIR:-${MN_HOST_HOME_DIR}/blobs}"
 MN_HOST_SHARED_STORAGE_ROOT="${MN_HOST_SHARED_STORAGE_ROOT:-${MN_HOST_SHARED_ARTIFACT_ROOT:-${MN_HOST_HOME_DIR}/shared}}"
 MN_SYNCTHING_ENABLED="${MN_SYNCTHING_ENABLED:-auto}"
-MN_SYNCTHING_IMAGE="${MN_SYNCTHING_IMAGE:-syncthing/syncthing:latest}"
+MN_SYNCTHING_IMAGE="${MN_SYNCTHING_IMAGE:-$MN_DEFAULT_SYNCTHING_IMAGE}"
 MN_SYNCTHING_GUI_PORT="${MN_SYNCTHING_GUI_PORT:-58384}"
 MN_SYNCTHING_SYNC_PORT="${MN_SYNCTHING_SYNC_PORT:-22000}"
 MN_SYNCTHING_RESCAN_INTERVAL_SECONDS="${MN_SYNCTHING_RESCAN_INTERVAL_SECONDS:-3600}"
@@ -5128,7 +5225,7 @@ MN_DYNAMIC_REDIS_PORT_START="${MN_DYNAMIC_REDIS_PORT_START:-56379}"
 MN_DYNAMIC_REDIS_PORT_END="${MN_DYNAMIC_REDIS_PORT_END:-56478}"
 INSTALL_METADATA_FILE="${INSTALL_DIR}/install_metadata.json"
 MN_MANAGED_PYTHON="${MN_MANAGED_PYTHON:-1}"
-MN_MANAGED_PYTHON_VERSION="${MN_MANAGED_PYTHON_VERSION:-3.11}"
+MN_MANAGED_PYTHON_VERSION="${MN_MANAGED_PYTHON_VERSION:-$MN_DEFAULT_MANAGED_PYTHON_VERSION}"
 MN_MANAGED_PYTHON_ROOT="${MN_MANAGED_PYTHON_DIR:-${HOME}/.local/share/mn_python}"
 MN_UV_ROOT="${MN_UV_DIR:-${HOME}/.local/share/mn_uv}"
 MN_UV_BIN=""
@@ -5479,17 +5576,20 @@ function finalize_binary_install_version() {
         CLI_INSTALL_VERSION="${CLI_INSTALL_VERSION:-$INSTALL_VERSION}"
         API_INSTALL_VERSION="${API_INSTALL_VERSION:-$INSTALL_VERSION}"
         WEB_UI_INSTALL_VERSION="${WEB_UI_INSTALL_VERSION:-$INSTALL_VERSION}"
+        PACKAGE_INDEX_VERSION="${PACKAGE_INDEX_VERSION:-$INSTALL_VERSION}"
     else
         PYTHON_SDK_INSTALL_VERSION="${PYTHON_SDK_INSTALL_VERSION:-$DEFAULT_PYTHON_SDK_INSTALL_VERSION}"
         CLI_INSTALL_VERSION="${CLI_INSTALL_VERSION:-$DEFAULT_CLI_INSTALL_VERSION}"
         API_INSTALL_VERSION="${API_INSTALL_VERSION:-$DEFAULT_API_INSTALL_VERSION}"
         WEB_UI_INSTALL_VERSION="${WEB_UI_INSTALL_VERSION:-$DEFAULT_WEB_UI_INSTALL_VERSION}"
+        PACKAGE_INDEX_VERSION="${PACKAGE_INDEX_VERSION:-$MN_DEFAULT_AGENT_PACKAGE_INDEX_VERSION}"
     fi
     mn_validate_version_tag_or_exit "$CORE_INSTALL_VERSION"
     mn_validate_version_tag_or_exit "$PYTHON_SDK_INSTALL_VERSION"
     mn_validate_version_tag_or_exit "$CLI_INSTALL_VERSION"
     mn_validate_version_tag_or_exit "$API_INSTALL_VERSION"
     mn_validate_version_tag_or_exit "$WEB_UI_INSTALL_VERSION"
+    mn_validate_version_tag_or_exit "$PACKAGE_INDEX_VERSION"
     MN_INSTALL_VERSION="$INSTALL_VERSION"
     CORE_RELEASE_TAG="$CORE_INSTALL_VERSION"
     MN_PYTHON_SDK_PACKAGE_VERSION="$(mn_package_version_from_tag "$PYTHON_SDK_INSTALL_VERSION")"
@@ -5498,7 +5598,7 @@ function finalize_binary_install_version() {
     MN_PACKAGE_VERSION="$MN_PYTHON_SDK_PACKAGE_VERSION"
     MN_WEB_UI_PACKAGE_VERSION="${MN_WEB_UI_PACKAGE_VERSION:-$(mn_web_ui_package_version_from_tag "$WEB_UI_INSTALL_VERSION")}"
     RUNTIME_COMPOSE_TEMPLATE="${RUNTIME_COMPOSE_TEMPLATE:-${SCRIPT_DIR}/install_support/${INSTALL_VERSION}/docker-compose.yml}"
-    PACKAGE_INDEX_FILE="${PACKAGE_INDEX_FILE:-${SCRIPT_DIR}/install_support/${INSTALL_VERSION}/package-index/python-packages.toml}"
+    PACKAGE_INDEX_FILE="${PACKAGE_INDEX_FILE:-${SCRIPT_DIR}/install_support/${PACKAGE_INDEX_VERSION}/package-index/python-packages.toml}"
     export MN_INSTALL_VERSION
 }
 
@@ -5699,7 +5799,7 @@ function install_uv() {
         exit 1
     fi
 
-    if ! UV_UNMANAGED_INSTALL="$uv_bin_dir" sh "$installer" >/dev/null 2>&1; then
+    if ! mn_run_uv_installer "$installer" "$uv_bin_dir" >/dev/null 2>&1; then
         rm -f "$installer"
         print_error "Could not install uv."
         print_error "Install uv manually or set MN_PYTHON=/path/to/python3.11."
@@ -6141,7 +6241,7 @@ function compose_profiles() {
 
 function generate_openshell_jwt_keys() {
     local jwt_dir="$1"
-    local gateway_image="${OPENSHELL_GATEWAY_IMAGE:-ghcr.io/nvidia/openshell/gateway:0.0.47}"
+    local gateway_image="${OPENSHELL_GATEWAY_IMAGE:-$MN_DEFAULT_OPENSHELL_GATEWAY_IMAGE}"
     local bootstrap_dir name
 
     bootstrap_dir="$(mktemp -d "${MN_HOST_OPENSHELL_STATE_DIR}/.jwt-bootstrap.XXXXXX")"
@@ -6202,8 +6302,8 @@ bind_address = "0.0.0.0:${OPENSHELL_GATEWAY_PORT:-58080}"
 log_level = "info"
 compute_drivers = ["docker"]
 sandbox_namespace = "mirror-neuron"
-default_image = "ghcr.io/nvidia/openshell/sandbox:latest"
-supervisor_image = "ghcr.io/nvidia/openshell/supervisor:latest"
+default_image = "${OPENSHELL_SANDBOX_IMAGE:-$MN_DEFAULT_OPENSHELL_SANDBOX_IMAGE}"
+supervisor_image = "${OPENSHELL_SUPERVISOR_IMAGE:-$MN_DEFAULT_OPENSHELL_SUPERVISOR_IMAGE}"
 
 [openshell.gateway.gateway_jwt]
 signing_key_path = "${jwt_dir}/signing.pem"
@@ -6216,7 +6316,7 @@ ttl_secs = 3600
 allow_unauthenticated_users = true
 
 [openshell.drivers.docker]
-default_image = "ghcr.io/nvidia/openshell/sandbox:latest"
+default_image = "${OPENSHELL_SANDBOX_IMAGE:-$MN_DEFAULT_OPENSHELL_SANDBOX_IMAGE}"
 image_pull_policy = "IfNotPresent"
 sandbox_namespace = "mirror-neuron"
 grpc_endpoint = "http://openshell:${OPENSHELL_GATEWAY_PORT:-58080}"
@@ -6579,7 +6679,7 @@ function prepare_litellm_gateway_config() {
 
 function write_runtime_compose_files() {
     local model_runner_model profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_agents_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image litellm_gateway_bind_host openshell_gateway_bind_host openshell_gateway_endpoint api_host
-    model_runner_model="${MN_CONTEXT_MODEL_RUNNER_MODEL:-hf.co/homerquan/mn-context-engine-model-v-Q4_K_M}"
+    model_runner_model="${MN_CONTEXT_MODEL_RUNNER_MODEL:-$MN_DEFAULT_CONTEXT_MODEL_RUNNER_MODEL}"
     profiles="$(compose_profiles)"
     api_host="${MN_API_HOST:-}"
     if [ -z "$api_host" ]; then
@@ -6603,11 +6703,11 @@ function write_runtime_compose_files() {
     runtime_skills_root="${MN_SKILLS_ROOT:-${MN_HOST_HOME_DIR}/skills}"
     runtime_agents_root="${MN_AGENTS_ROOT:-}"
     runtime_package_index="${MN_PACKAGE_INDEX_FILE:-}"
-    membrane_engine_tag="${MN_MEMBRANE_ENGINE_IMAGE_TAG:-${INSTALL_VERSION:-v${MN_PACKAGE_VERSION:-1.2.31}}}"
+    membrane_engine_tag="${MN_MEMBRANE_ENGINE_IMAGE_TAG:-$(mn_default_membrane_engine_tag)}"
     if [[ "$membrane_engine_tag" != v* ]]; then
         membrane_engine_tag="v${membrane_engine_tag}"
     fi
-    membrane_engine_image="${MN_MEMBRANE_ENGINE_IMAGE:-${MN_CONTEXT_ENGINE_IMAGE:-us-central1-docker.pkg.dev/mirrorneuron-public-packages/mirrorneuron-runtime/membrane-context-engine:${membrane_engine_tag}}}"
+    membrane_engine_image="${MN_MEMBRANE_ENGINE_IMAGE:-${MN_CONTEXT_ENGINE_IMAGE:-${MN_DEFAULT_MEMBRANE_GAR_IMAGE}:${membrane_engine_tag}}}"
     context_memory_enabled="${MN_CONTEXT_MEMORY_ENABLED:-1}"
     otterdesk_context_memory_enabled="${OTTERDESK_CONTEXT_MEMORY_ENABLED:-$context_memory_enabled}"
     if [ -n "${PACKAGE_INDEX_FILE:-}" ] && [ -f "$PACKAGE_INDEX_FILE" ]; then
@@ -6649,9 +6749,9 @@ MN_MEMBRANE_SOURCE_MODE=${MN_MEMBRANE_SOURCE_MODE:-image}
 ENGINE_IMAGE=${membrane_engine_image}
 MN_MEMBRANE_ENGINE_IMAGE=${membrane_engine_image}
 MN_MEMBRANE_ENGINE_IMAGE_TAG=${membrane_engine_tag}
-MN_REDIS_IMAGE=${MN_REDIS_IMAGE:-redis:8}
+MN_REDIS_IMAGE=${MN_REDIS_IMAGE:-$MN_DEFAULT_REDIS_IMAGE}
 MN_CONTEXT_MODEL_RUNNER_MODEL=${model_runner_model}
-MN_LLM_MODEL_RUNNER_MODEL=${MN_LLM_MODEL_RUNNER_MODEL:-gemma4:e2b}
+MN_LLM_MODEL_RUNNER_MODEL=${MN_LLM_MODEL_RUNNER_MODEL:-$MN_DEFAULT_LLM_MODEL_RUNNER_MODEL}
 MN_GRPC_BIND_HOST=${MN_GRPC_BIND_HOST:-127.0.0.1}
 MN_GRPC_PORT=${MN_GRPC_PORT:-55051}
 MN_GRPC_TARGET=${MN_GRPC_TARGET:-localhost:${MN_GRPC_PORT:-55051}}
@@ -6673,7 +6773,7 @@ MN_DIST_PORT=${MN_DIST_PORT:-54370}
 MN_WEB_UI_HOST=${MN_WEB_UI_HOST:-localhost}
 MN_WEB_UI_PORT=${MN_WEB_UI_PORT:-55173}
 MN_WEB_UI_BIND_HOST=${MN_WEB_UI_BIND_HOST:-127.0.0.1}
-MN_WEB_UI_IMAGE=${MN_WEB_UI_IMAGE:-node:22-alpine}
+MN_WEB_UI_IMAGE=${MN_WEB_UI_IMAGE:-$MN_DEFAULT_WEB_UI_IMAGE}
 MN_WEB_UI_SOURCE_MODE=${MN_WEB_UI_SOURCE_MODE}
 MN_WEB_UI_SOURCE_MOUNT=${MN_WEB_UI_SOURCE_MOUNT}
 MN_WEB_UI_PACKAGE_VERSION=${MN_WEB_UI_PACKAGE_VERSION}
@@ -6691,7 +6791,7 @@ MN_WORKSPACE_ROOT=${MN_WORKSPACE_ROOT:-}
 MN_AGENTS_ROOT=${runtime_agents_root}
 MN_SKILLS_ROOT=${runtime_skills_root}
 MN_PACKAGE_INDEX_FILE=${runtime_package_index}
-MN_PIP_INDEX_URL=${MN_PIP_INDEX_URL:-${MN_PYTHON_INDEX_URL:-${MN_DEFAULT_PIP_INDEX_URL:-https://us-central1-python.pkg.dev/mirrorneuron-public-packages/agent-skills/simple/}}}
+MN_PIP_INDEX_URL=${MN_PIP_INDEX_URL:-${MN_PYTHON_INDEX_URL:-${MN_DEFAULT_PIP_INDEX_URL}}}
 MN_PIP_EXTRA_INDEX_URL=${MN_PIP_EXTRA_INDEX_URL:-${MN_PYTHON_EXTRA_INDEX_URL:-https://pypi.org/simple}}
 MN_RUNTIME_MODULE_VERSION=${MN_RUNTIME_MODULE_VERSION:-${MN_PACKAGE_VERSION:-}}
 MN_CONTEXT_MEMORY_ENABLED=${context_memory_enabled}
@@ -6731,6 +6831,7 @@ OPENSHELL_GATEWAY_ENDPOINT=${openshell_gateway_endpoint}
 OPENSHELL_GATEWAY_BIND_HOST=${openshell_gateway_bind_host}
 OPENSHELL_GATEWAY_USER=${OPENSHELL_GATEWAY_USER}
 OPENSHELL_GATEWAY_DOCKER_GROUP=${OPENSHELL_GATEWAY_DOCKER_GROUP}
+OPENSHELL_GATEWAY_IMAGE=${OPENSHELL_GATEWAY_IMAGE:-$MN_DEFAULT_OPENSHELL_GATEWAY_IMAGE}
 DOCKER_HOST_SOCKET=${DOCKER_HOST_SOCKET}
 COMPOSE_PARALLEL_LIMIT=${COMPOSE_PARALLEL_LIMIT:-1}
 MN_COOKIE=${mn_cookie}
