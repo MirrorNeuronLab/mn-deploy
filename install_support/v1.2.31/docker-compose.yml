@@ -224,6 +224,8 @@ services:
       context: ${MEMBRANE_DIR:-../Membrane}
       dockerfile: Dockerfile
       target: runtime
+      args:
+        DEBIAN_MIRROR: ${MN_MEMBRANE_APT_MIRROR:-http://deb.debian.org}
     restart: unless-stopped
     expose:
       - "50052"
