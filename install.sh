@@ -2393,21 +2393,30 @@ function wait_for_openshell_worker_service() {
     local network_name="${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
     local gateway_endpoint="http://openshell:${OPENSHELL_GATEWAY_PORT:-58080}"
     local attempt=1
+    local max_attempts=60
+    local readiness_announced="N"
 
-    while [ "$attempt" -le 30 ]; do
+    while [ "$attempt" -le "$max_attempts" ]; do
         if docker run --rm \
             --network "$network_name" \
             --entrypoint openshell \
             mirror-neuron-core:latest \
             --gateway-endpoint "$gateway_endpoint" \
             sandbox list >/dev/null 2>&1; then
+            if [ "$readiness_announced" = "Y" ]; then
+                print_success "OpenShell gateway is ready."
+            fi
             return 0
+        fi
+        if [ "$readiness_announced" != "Y" ]; then
+            print_step "Waiting for OpenShell gateway to become ready"
+            readiness_announced="Y"
         fi
         sleep 1
         attempt=$((attempt + 1))
     done
 
-    print_error "OpenShell worker service did not become ready at ${gateway_endpoint}."
+    print_error "OpenShell worker service did not become ready at ${gateway_endpoint} after ${max_attempts} seconds."
     print_error "Next: docker logs openshell-cluster-openshell"
     return 1
 }
@@ -4261,21 +4270,30 @@ function wait_for_openshell_worker_service() {
     local network_name="${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
     local gateway_endpoint="http://openshell:${OPENSHELL_GATEWAY_PORT:-58080}"
     local attempt=1
+    local max_attempts=60
+    local readiness_announced="N"
 
-    while [ "$attempt" -le 30 ]; do
+    while [ "$attempt" -le "$max_attempts" ]; do
         if docker run --rm \
             --network "$network_name" \
             --entrypoint openshell \
             mirror-neuron-core:latest \
             --gateway-endpoint "$gateway_endpoint" \
             sandbox list >/dev/null 2>&1; then
+            if [ "$readiness_announced" = "Y" ]; then
+                print_success "OpenShell gateway is ready."
+            fi
             return 0
+        fi
+        if [ "$readiness_announced" != "Y" ]; then
+            print_step "Waiting for OpenShell gateway to become ready"
+            readiness_announced="Y"
         fi
         sleep 1
         attempt=$((attempt + 1))
     done
 
-    print_error "OpenShell worker service did not become ready at ${gateway_endpoint}."
+    print_error "OpenShell worker service did not become ready at ${gateway_endpoint} after ${max_attempts} seconds."
     print_error "Next: docker logs openshell-cluster-openshell"
     return 1
 }
@@ -6431,21 +6449,30 @@ function wait_for_openshell_worker_service() {
     local network_name="${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
     local gateway_endpoint="http://openshell:${OPENSHELL_GATEWAY_PORT:-58080}"
     local attempt=1
+    local max_attempts=60
+    local readiness_announced="N"
 
-    while [ "$attempt" -le 30 ]; do
+    while [ "$attempt" -le "$max_attempts" ]; do
         if docker run --rm \
             --network "$network_name" \
             --entrypoint openshell \
             mirror-neuron-core:latest \
             --gateway-endpoint "$gateway_endpoint" \
             sandbox list >/dev/null 2>&1; then
+            if [ "$readiness_announced" = "Y" ]; then
+                print_success "OpenShell gateway is ready."
+            fi
             return 0
+        fi
+        if [ "$readiness_announced" != "Y" ]; then
+            print_step "Waiting for OpenShell gateway to become ready"
+            readiness_announced="Y"
         fi
         sleep 1
         attempt=$((attempt + 1))
     done
 
-    print_error "OpenShell worker service did not become ready at ${gateway_endpoint}."
+    print_error "OpenShell worker service did not become ready at ${gateway_endpoint} after ${max_attempts} seconds."
     print_error "Next: docker logs openshell-cluster-openshell"
     return 1
 }
