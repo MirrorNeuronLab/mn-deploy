@@ -1109,7 +1109,7 @@ function mn_remove_dockerfile_frontend_directive() {
 }
 
 function mn_stop_runtime_containers_for_reinstall() {
-    local container_ids
+    local container_ids container_id kind resource_kind runtime_ids=""
 
     if ! command -v docker >/dev/null 2>&1; then
         return 0
@@ -1120,12 +1120,81 @@ function mn_stop_runtime_containers_for_reinstall() {
         return 0
     fi
 
+    while IFS= read -r container_id; do
+        [ -n "$container_id" ] || continue
+        kind="$(docker inspect -f '{{ index .Config.Labels "mirror-neuron.kind" }}' "$container_id" 2>/dev/null || true)"
+        resource_kind="$(docker inspect -f '{{ index .Config.Labels "mirror-neuron.resource-kind" }}' "$container_id" 2>/dev/null || true)"
+        if [ "$kind" = "docker_worker" ] || [ "$resource_kind" = "docker-worker" ]; then
+            print_detail "Preserving job-owned DockerWorker container ${container_id} during reinstall."
+            continue
+        fi
+        runtime_ids="${runtime_ids} ${container_id}"
+    done <<< "$container_ids"
+
+    if [ -z "${runtime_ids//[[:space:]]/}" ]; then
+        return 0
+    fi
+
     print_step "Stopping existing MirrorNeuron runtime"
-    if ! docker rm -f $container_ids >/dev/null 2>&1; then
+    if ! docker rm -f $runtime_ids >/dev/null 2>&1; then
         print_error "Could not stop existing MirrorNeuron runtime containers."
-        print_error "Stop them with: docker rm -f $container_ids"
+        print_error "Stop them with: docker rm -f $runtime_ids"
         exit 1
     fi
+}
+
+MN_REINSTALL_STATE_BACKUP=""
+
+function mn_reconcile_native_resources_before_reinstall() {
+    local cleanup_cli=""
+
+    if [ -x "$BIN_DIR/mn" ]; then
+        cleanup_cli="$BIN_DIR/mn"
+    elif [ -x "$VENV_DIR/bin/mn" ]; then
+        cleanup_cli="$VENV_DIR/bin/mn"
+    fi
+    [ -n "$cleanup_cli" ] || return 0
+
+    print_step "Reconciling confirmed native-resource orphans"
+    if ! "$cleanup_cli" runtime cleanup --yes >/dev/null 2>&1; then
+        print_warning "Native-resource reconciliation was unavailable or inconclusive; preserving resources and cleanup evidence."
+    fi
+}
+
+function mn_preserve_runtime_state_for_reinstall() {
+    local name backup_root
+    [ -d "$INSTALL_DIR" ] || return 0
+
+    backup_root="$(mktemp -d "${TMPDIR:-/tmp}/mn-reinstall-state.XXXXXX")"
+    for name in \
+        native-resources.json docker-workers.json docker-compose.workers.yml \
+        docker-compose-projects docker-compose.env docker-compose.cluster.yml \
+        openshell-state job-data runs shared blobs blueprint_installs federation \
+        models model-remotes.json syncthing syncthing.api-key cluster-join-claim.json \
+        network.token erlang.cookie grpc_admin.token grpc_auth.token redis.password; do
+        if [ -e "$INSTALL_DIR/$name" ] || [ -L "$INSTALL_DIR/$name" ]; then
+            if ! cp -a "$INSTALL_DIR/$name" "$backup_root/$name"; then
+                print_error "Could not preserve MirrorNeuron runtime state before reinstall: $name"
+                exit 1
+            fi
+        fi
+    done
+    MN_REINSTALL_STATE_BACKUP="$backup_root"
+}
+
+function mn_restore_runtime_state_after_reinstall() {
+    local name
+    [ -n "$MN_REINSTALL_STATE_BACKUP" ] || return 0
+    [ -d "$MN_REINSTALL_STATE_BACKUP" ] || return 0
+
+    mkdir -p "$INSTALL_DIR"
+    for name in "$MN_REINSTALL_STATE_BACKUP"/*; do
+        [ -e "$name" ] || continue
+        cp -a "$name" "$INSTALL_DIR/"
+    done
+    rm -rf "$MN_REINSTALL_STATE_BACKUP"
+    MN_REINSTALL_STATE_BACKUP=""
+    print_detail "Restored durable jobs, native-resource registry, and OpenShell state."
 }
 
 function mn_remove_path_or_exit() {
@@ -1154,6 +1223,8 @@ function mn_remove_path_or_exit() {
 }
 
 function mn_remove_existing_install_paths() {
+    mn_reconcile_native_resources_before_reinstall
+    mn_preserve_runtime_state_for_reinstall
     mn_stop_runtime_containers_for_reinstall
     mn_remove_path_or_exit "$INSTALL_DIR" "MirrorNeuron state directory"
     mn_remove_path_or_exit "$VENV_DIR" "MirrorNeuron Python virtual environment"
@@ -2656,6 +2727,12 @@ MN_NATIVE_SDK_GRPC_PORT=${MN_NATIVE_SDK_GRPC_PORT:-55052}
 MN_NATIVE_SDK_GRPC_ADVERTISE_HOST=${MN_NATIVE_SDK_GRPC_ADVERTISE_HOST:-${MN_NETWORK_ADVERTISE_HOST:-}}
 MN_NATIVE_SDK_GRPC_ADVERTISE_PORT=${MN_NATIVE_SDK_GRPC_ADVERTISE_PORT:-${MN_NATIVE_SDK_GRPC_PORT:-55052}}
 MN_NATIVE_SDK_GRPC_TARGET=${MN_NATIVE_SDK_GRPC_TARGET:-mn-native-sdk-grpc:55052}
+MN_RESOURCE_GC_ENABLED=${MN_RESOURCE_GC_ENABLED:-true}
+MN_RESOURCE_GC_INTERVAL_SECONDS=${MN_RESOURCE_GC_INTERVAL_SECONDS:-1800}
+MN_RESOURCE_GC_ORPHAN_GRACE_SECONDS=${MN_RESOURCE_GC_ORPHAN_GRACE_SECONDS:-3600}
+MN_RESOURCE_GC_BATCH_SIZE=${MN_RESOURCE_GC_BATCH_SIZE:-100}
+MN_DOCKER_WORKER_IMAGE_CACHE_TTL_SECONDS=${MN_DOCKER_WORKER_IMAGE_CACHE_TTL_SECONDS:-604800}
+MN_DOCKER_WORKER_IMAGE_CACHE_MAX_BYTES=${MN_DOCKER_WORKER_IMAGE_CACHE_MAX_BYTES:-21474836480}
 MN_NATIVE_SDK_GRPC_PROXY_PORT=${MN_NATIVE_SDK_GRPC_PROXY_PORT:-${MN_NATIVE_SDK_GRPC_PORT:-55052}}
 MN_NATIVE_SDK_GRPC_PROXY_TARGET_HOST=${MN_NATIVE_SDK_GRPC_PROXY_TARGET_HOST:-host.docker.internal}
 MN_NATIVE_SDK_GRPC_PROXY_TARGET_PORT=${MN_NATIVE_SDK_GRPC_PROXY_TARGET_PORT:-${MN_NATIVE_SDK_GRPC_PORT:-55052}}
@@ -2928,6 +3005,7 @@ print_step "Installing MirrorNeuron Core (Docker)"
 
 (
     github_clone "$(core_git_url)" "$INSTALL_DIR" >/dev/null 2>&1
+    mn_restore_runtime_state_after_reinstall
     cd "$INSTALL_DIR"
     
     if [ ! -f "Dockerfile" ]; then
@@ -4560,6 +4638,12 @@ MN_NATIVE_SDK_GRPC_PORT=${MN_NATIVE_SDK_GRPC_PORT:-55052}
 MN_NATIVE_SDK_GRPC_ADVERTISE_HOST=${MN_NATIVE_SDK_GRPC_ADVERTISE_HOST:-${MN_NETWORK_ADVERTISE_HOST:-}}
 MN_NATIVE_SDK_GRPC_ADVERTISE_PORT=${MN_NATIVE_SDK_GRPC_ADVERTISE_PORT:-${MN_NATIVE_SDK_GRPC_PORT:-55052}}
 MN_NATIVE_SDK_GRPC_TARGET=${MN_NATIVE_SDK_GRPC_TARGET:-mn-native-sdk-grpc:55052}
+MN_RESOURCE_GC_ENABLED=${MN_RESOURCE_GC_ENABLED:-true}
+MN_RESOURCE_GC_INTERVAL_SECONDS=${MN_RESOURCE_GC_INTERVAL_SECONDS:-1800}
+MN_RESOURCE_GC_ORPHAN_GRACE_SECONDS=${MN_RESOURCE_GC_ORPHAN_GRACE_SECONDS:-3600}
+MN_RESOURCE_GC_BATCH_SIZE=${MN_RESOURCE_GC_BATCH_SIZE:-100}
+MN_DOCKER_WORKER_IMAGE_CACHE_TTL_SECONDS=${MN_DOCKER_WORKER_IMAGE_CACHE_TTL_SECONDS:-604800}
+MN_DOCKER_WORKER_IMAGE_CACHE_MAX_BYTES=${MN_DOCKER_WORKER_IMAGE_CACHE_MAX_BYTES:-21474836480}
 MN_NATIVE_SDK_GRPC_PROXY_PORT=${MN_NATIVE_SDK_GRPC_PROXY_PORT:-${MN_NATIVE_SDK_GRPC_PORT:-55052}}
 MN_NATIVE_SDK_GRPC_PROXY_TARGET_HOST=${MN_NATIVE_SDK_GRPC_PROXY_TARGET_HOST:-host.docker.internal}
 MN_NATIVE_SDK_GRPC_PROXY_TARGET_PORT=${MN_NATIVE_SDK_GRPC_PROXY_TARGET_PORT:-${MN_NATIVE_SDK_GRPC_PORT:-55052}}
@@ -6761,6 +6845,12 @@ MN_NATIVE_SDK_GRPC_PORT=${MN_NATIVE_SDK_GRPC_PORT:-55052}
 MN_NATIVE_SDK_GRPC_ADVERTISE_HOST=${MN_NATIVE_SDK_GRPC_ADVERTISE_HOST:-${MN_NETWORK_ADVERTISE_HOST:-}}
 MN_NATIVE_SDK_GRPC_ADVERTISE_PORT=${MN_NATIVE_SDK_GRPC_ADVERTISE_PORT:-${MN_NATIVE_SDK_GRPC_PORT:-55052}}
 MN_NATIVE_SDK_GRPC_TARGET=${MN_NATIVE_SDK_GRPC_TARGET:-mn-native-sdk-grpc:55052}
+MN_RESOURCE_GC_ENABLED=${MN_RESOURCE_GC_ENABLED:-true}
+MN_RESOURCE_GC_INTERVAL_SECONDS=${MN_RESOURCE_GC_INTERVAL_SECONDS:-1800}
+MN_RESOURCE_GC_ORPHAN_GRACE_SECONDS=${MN_RESOURCE_GC_ORPHAN_GRACE_SECONDS:-3600}
+MN_RESOURCE_GC_BATCH_SIZE=${MN_RESOURCE_GC_BATCH_SIZE:-100}
+MN_DOCKER_WORKER_IMAGE_CACHE_TTL_SECONDS=${MN_DOCKER_WORKER_IMAGE_CACHE_TTL_SECONDS:-604800}
+MN_DOCKER_WORKER_IMAGE_CACHE_MAX_BYTES=${MN_DOCKER_WORKER_IMAGE_CACHE_MAX_BYTES:-21474836480}
 MN_NATIVE_SDK_GRPC_PROXY_PORT=${MN_NATIVE_SDK_GRPC_PROXY_PORT:-${MN_NATIVE_SDK_GRPC_PORT:-55052}}
 MN_NATIVE_SDK_GRPC_PROXY_TARGET_HOST=${MN_NATIVE_SDK_GRPC_PROXY_TARGET_HOST:-host.docker.internal}
 MN_NATIVE_SDK_GRPC_PROXY_TARGET_PORT=${MN_NATIVE_SDK_GRPC_PROXY_TARGET_PORT:-${MN_NATIVE_SDK_GRPC_PORT:-55052}}
@@ -7119,6 +7209,7 @@ fi
 print_step "Installing product"
 ( install_core_from_release ) &
 spinner $! "Installing core runtime"
+mn_restore_runtime_state_after_reinstall
 write_runtime_compose_files
 
 if should_install_python_packages; then
