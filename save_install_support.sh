@@ -4,18 +4,20 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VERSION=""
+WEB_UI_VERSION=""
 FORCE="N"
 
 usage() {
     cat <<EOF
-Usage: ./save_install_support.sh --version v1.2.24 [--force]
+Usage: ./save_install_support.sh --version v1.2.24 [--web-ui-version v1.2.24] [--force]
 
 Copy installer support files from this mn-deploy checkout into
 install_support/<version>/.
 
 Options:
-  --version TAG   Release tag to snapshot, for example v1.2.24.
-  --force         Overwrite an existing snapshot.
+  --version TAG          Installer release tag to snapshot, for example v1.2.24.
+  --web-ui-version TAG   Web UI package tag in the Compose template. Defaults to --version.
+  --force                Overwrite an existing snapshot.
   -h, --help      Show this help.
 EOF
 }
@@ -34,7 +36,7 @@ validate_version() {
 validate_support_files() {
     local compose_file="$1"
     local package_index="$2"
-    local expected_version="$3"
+    local expected_web_ui_version="$3"
 
     if [[ ! -f "$compose_file" ]]; then
         echo "Docker Compose template was not found: $compose_file" >&2
@@ -45,9 +47,9 @@ validate_support_files() {
         exit 1
     fi
     if ! grep -Fq \
-        "MN_WEB_UI_PACKAGE_VERSION: \${MN_WEB_UI_PACKAGE_VERSION:-${expected_version}}" \
+        "MN_WEB_UI_PACKAGE_VERSION: \${MN_WEB_UI_PACKAGE_VERSION:-${expected_web_ui_version}}" \
         "$compose_file"; then
-        echo "Docker Compose Web UI version does not match ${expected_version}: $compose_file" >&2
+        echo "Docker Compose Web UI version does not match ${expected_web_ui_version}: $compose_file" >&2
         exit 1
     fi
 
@@ -72,6 +74,14 @@ while [[ "$#" -gt 0 ]]; do
         --version=*)
             VERSION="${1#*=}"
             ;;
+        --web-ui-version)
+            shift
+            [[ "$#" -gt 0 ]] || { echo "--web-ui-version requires a value." >&2; usage >&2; exit 1; }
+            WEB_UI_VERSION="$1"
+            ;;
+        --web-ui-version=*)
+            WEB_UI_VERSION="${1#*=}"
+            ;;
         --force)
             FORCE="Y"
             ;;
@@ -95,7 +105,12 @@ if [[ -z "$VERSION" ]]; then
 fi
 
 validate_version "$VERSION"
-EXPECTED_VERSION="${VERSION#v}"
+if [[ -n "$WEB_UI_VERSION" ]]; then
+    validate_version "$WEB_UI_VERSION"
+else
+    WEB_UI_VERSION="$VERSION"
+fi
+EXPECTED_WEB_UI_VERSION="${WEB_UI_VERSION#v}"
 
 compose_source="${SCRIPT_DIR}/docker-compose.yml"
 package_index_source="${SCRIPT_DIR}/package-index/python-packages.toml"
@@ -103,7 +118,7 @@ support_dir="${SCRIPT_DIR}/install_support/${VERSION}"
 compose_target="${support_dir}/docker-compose.yml"
 package_index_target="${support_dir}/package-index/python-packages.toml"
 
-validate_support_files "$compose_source" "$package_index_source" "$EXPECTED_VERSION"
+validate_support_files "$compose_source" "$package_index_source" "$EXPECTED_WEB_UI_VERSION"
 
 if [[ -d "$support_dir" && "$FORCE" != "Y" ]]; then
     if find "$support_dir" -mindepth 1 -print -quit | grep -q .; then
@@ -117,6 +132,6 @@ mkdir -p "${support_dir}/package-index"
 cp "$compose_source" "$compose_target"
 cp "$package_index_source" "$package_index_target"
 
-validate_support_files "$compose_target" "$package_index_target" "$EXPECTED_VERSION"
+validate_support_files "$compose_target" "$package_index_target" "$EXPECTED_WEB_UI_VERSION"
 
 echo "Saved install support snapshot: $support_dir"
