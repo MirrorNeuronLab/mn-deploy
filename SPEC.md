@@ -92,6 +92,9 @@ replaces it. Failures identify the failed component and a recovery action.
   exact `mn node add` command to the invoking operator. Non-interactive
   installer filtering may forward only that final readiness block, not
   unrelated command output.
+- The default gRPC port (`55051`) is implicit in the displayed add-node
+  command. A non-default advertised port is included with `--grpc-port` so the
+  displayed command remains exact.
 - Downloaded artifacts and metadata are validated where checksums/signatures or
   version checks are part of the release flow.
 - Federation joins remain opt-in and visibly reported. LiteLLM must be

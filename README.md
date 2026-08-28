@@ -22,6 +22,8 @@ When the installer starts the runtime, it forwards the final
 advertised endpoint, the active federation join token, and the exact
 `mn node add` command for connecting another independently installed Core.
 Treat the token and captured installer output as credentials.
+For the default gRPC port (`55051`), that command omits `--grpc-port`; it is
+shown only when the advertised endpoint uses a non-default port.
 
 Install a specific release:
 
