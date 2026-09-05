@@ -138,7 +138,10 @@ Run its isolated Git regression test with:
   versioned Membrane GAR image before use. A blueprint that requires context
   memory only starts that prepared image; it never builds Membrane source.
 - OpenShell sandbox JWT keys are bootstrapped by the pinned gateway container;
-  installing OpenSSL on the host is not required.
+  installing OpenSSL on the host is not required. Keys are generated in the
+  container filesystem and copied out, so reset-time Docker Desktop host-mount
+  caching cannot break bootstrap. The temporary container is removed on success
+  and failure, and the signing key is installed with mode 0600.
 - The OpenShell host endpoint follows its published Compose bind address:
   Docker Desktop uses loopback, while native Linux uses the runtime bridge
   gateway so both the host CLI and sandbox containers can reach the service.

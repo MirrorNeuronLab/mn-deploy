@@ -1262,6 +1262,57 @@ function mn_ensure_python_package_index_file() {
     fi
 }
 
+# Shared by all install modes. Generate inside the container, then copy out:
+# Docker Desktop may still hold an obsolete host mount after MN_HOME is reset.
+function generate_openshell_jwt_keys() (
+    set -euo pipefail
+    local jwt_dir="$1"
+    local gateway_image="${OPENSHELL_GATEWAY_IMAGE:-$MN_DEFAULT_OPENSHELL_GATEWAY_IMAGE}"
+    local bootstrap_dir="" container_id="" name
+
+    cleanup_openshell_jwt_bootstrap() {
+        if [ -n "$container_id" ]; then
+            docker rm -f "$container_id" >/dev/null 2>&1 || true
+        fi
+        if [ -n "$bootstrap_dir" ]; then
+            rm -rf "$bootstrap_dir"
+        fi
+    }
+    trap cleanup_openshell_jwt_bootstrap EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+
+    bootstrap_dir="$(mktemp -d "${jwt_dir}/.jwt-bootstrap.XXXXXX")"
+    if ! container_id="$(docker create \
+        --user "$OPENSHELL_GATEWAY_USER" \
+        --env HOME=/tmp/openshell-bootstrap \
+        "$gateway_image" generate-certs \
+        --output-dir /tmp/openshell-bootstrap/output \
+        --server-san host.openshell.internal)"; then
+        print_error "Failed to create OpenShell certificate bootstrap container with ${gateway_image}."
+        return 1
+    fi
+    if ! docker start --attach "$container_id" >/dev/null; then
+        print_error "Failed to generate OpenShell sandbox JWT keys with ${gateway_image}."
+        return 1
+    fi
+    if ! docker cp "${container_id}:/tmp/openshell-bootstrap/output/jwt/." "$bootstrap_dir"; then
+        print_error "Failed to copy OpenShell sandbox JWT keys from the bootstrap container."
+        return 1
+    fi
+    for name in signing.pem public.pem kid; do
+        if [ ! -s "${bootstrap_dir}/${name}" ]; then
+            print_error "OpenShell certificate bootstrap did not create jwt/${name}."
+            return 1
+        fi
+    done
+    chmod 600 "${bootstrap_dir}/signing.pem"
+    chmod 644 "${bootstrap_dir}/public.pem" "${bootstrap_dir}/kid"
+    for name in signing.pem public.pem kid; do
+        mv "${bootstrap_dir}/${name}" "${jwt_dir}/${name}"
+    done
+)
+
 run_install_github() {
 #!/usr/bin/env bash
 
@@ -2195,43 +2246,6 @@ function compose_profiles() {
     fi
     local IFS=,
     printf '%s' "${profiles[*]}"
-}
-
-function generate_openshell_jwt_keys() {
-    local jwt_dir="$1"
-    local gateway_image="${OPENSHELL_GATEWAY_IMAGE:-$MN_DEFAULT_OPENSHELL_GATEWAY_IMAGE}"
-    local bootstrap_dir name
-
-    bootstrap_dir="$(mktemp -d "${MN_HOST_OPENSHELL_STATE_DIR}/.jwt-bootstrap.XXXXXX")"
-    if ! docker run --rm \
-        --user "$OPENSHELL_GATEWAY_USER" \
-        --env HOME=/tmp/openshell-bootstrap \
-        --volume "${bootstrap_dir}:/bootstrap" \
-        "$gateway_image" \
-        generate-certs \
-        --output-dir /bootstrap/output \
-        --server-san host.openshell.internal >/dev/null; then
-        print_error "Failed to create OpenShell sandbox JWT keys with ${gateway_image}."
-        print_error "Check that Docker is running and can pull the OpenShell gateway image, then retry."
-        rm -rf "$bootstrap_dir"
-        exit 1
-    fi
-
-    for name in signing.pem public.pem kid; do
-        if [ ! -s "${bootstrap_dir}/output/jwt/${name}" ]; then
-            print_error "OpenShell certificate bootstrap did not create jwt/${name}."
-            print_error "Check that ${gateway_image} supports the generate-certs command, then retry."
-            rm -rf "$bootstrap_dir"
-            exit 1
-        fi
-    done
-
-    mv "${bootstrap_dir}/output/jwt/signing.pem" "${jwt_dir}/signing.pem"
-    mv "${bootstrap_dir}/output/jwt/public.pem" "${jwt_dir}/public.pem"
-    mv "${bootstrap_dir}/output/jwt/kid" "${jwt_dir}/kid"
-    rm -rf "$bootstrap_dir"
-    chmod 600 "${jwt_dir}/signing.pem" 2>/dev/null || true
-    chmod 644 "${jwt_dir}/public.pem" "${jwt_dir}/kid" 2>/dev/null || true
 }
 
 function write_openshell_compose_config() {
@@ -3918,43 +3932,6 @@ function replace_symlink() {
         rm -rf "$target"
     fi
     ln -s "$source" "$target"
-}
-
-function generate_openshell_jwt_keys() {
-    local jwt_dir="$1"
-    local gateway_image="${OPENSHELL_GATEWAY_IMAGE:-$MN_DEFAULT_OPENSHELL_GATEWAY_IMAGE}"
-    local bootstrap_dir name
-
-    bootstrap_dir="$(mktemp -d "${MN_HOST_OPENSHELL_STATE_DIR}/.jwt-bootstrap.XXXXXX")"
-    if ! docker run --rm \
-        --user "$OPENSHELL_GATEWAY_USER" \
-        --env HOME=/tmp/openshell-bootstrap \
-        --volume "${bootstrap_dir}:/bootstrap" \
-        "$gateway_image" \
-        generate-certs \
-        --output-dir /bootstrap/output \
-        --server-san host.openshell.internal >/dev/null; then
-        print_error "Failed to create OpenShell sandbox JWT keys with ${gateway_image}."
-        print_error "Check that Docker is running and can pull the OpenShell gateway image, then retry."
-        rm -rf "$bootstrap_dir"
-        exit 1
-    fi
-
-    for name in signing.pem public.pem kid; do
-        if [ ! -s "${bootstrap_dir}/output/jwt/${name}" ]; then
-            print_error "OpenShell certificate bootstrap did not create jwt/${name}."
-            print_error "Check that ${gateway_image} supports the generate-certs command, then retry."
-            rm -rf "$bootstrap_dir"
-            exit 1
-        fi
-    done
-
-    mv "${bootstrap_dir}/output/jwt/signing.pem" "${jwt_dir}/signing.pem"
-    mv "${bootstrap_dir}/output/jwt/public.pem" "${jwt_dir}/public.pem"
-    mv "${bootstrap_dir}/output/jwt/kid" "${jwt_dir}/kid"
-    rm -rf "$bootstrap_dir"
-    chmod 600 "${jwt_dir}/signing.pem" 2>/dev/null || true
-    chmod 644 "${jwt_dir}/public.pem" "${jwt_dir}/kid" 2>/dev/null || true
 }
 
 function write_local_install_metadata() {
@@ -6328,43 +6305,6 @@ function compose_profiles() {
     fi
     local IFS=,
     printf '%s' "${profiles[*]}"
-}
-
-function generate_openshell_jwt_keys() {
-    local jwt_dir="$1"
-    local gateway_image="${OPENSHELL_GATEWAY_IMAGE:-$MN_DEFAULT_OPENSHELL_GATEWAY_IMAGE}"
-    local bootstrap_dir name
-
-    bootstrap_dir="$(mktemp -d "${MN_HOST_OPENSHELL_STATE_DIR}/.jwt-bootstrap.XXXXXX")"
-    if ! docker run --rm \
-        --user "$OPENSHELL_GATEWAY_USER" \
-        --env HOME=/tmp/openshell-bootstrap \
-        --volume "${bootstrap_dir}:/bootstrap" \
-        "$gateway_image" \
-        generate-certs \
-        --output-dir /bootstrap/output \
-        --server-san host.openshell.internal >/dev/null; then
-        print_error "Failed to create OpenShell sandbox JWT keys with ${gateway_image}."
-        print_error "Check that Docker is running and can pull the OpenShell gateway image, then retry."
-        rm -rf "$bootstrap_dir"
-        exit 1
-    fi
-
-    for name in signing.pem public.pem kid; do
-        if [ ! -s "${bootstrap_dir}/output/jwt/${name}" ]; then
-            print_error "OpenShell certificate bootstrap did not create jwt/${name}."
-            print_error "Check that ${gateway_image} supports the generate-certs command, then retry."
-            rm -rf "$bootstrap_dir"
-            exit 1
-        fi
-    done
-
-    mv "${bootstrap_dir}/output/jwt/signing.pem" "${jwt_dir}/signing.pem"
-    mv "${bootstrap_dir}/output/jwt/public.pem" "${jwt_dir}/public.pem"
-    mv "${bootstrap_dir}/output/jwt/kid" "${jwt_dir}/kid"
-    rm -rf "$bootstrap_dir"
-    chmod 600 "${jwt_dir}/signing.pem" 2>/dev/null || true
-    chmod 644 "${jwt_dir}/public.pem" "${jwt_dir}/kid" 2>/dev/null || true
 }
 
 function write_openshell_compose_config() {
