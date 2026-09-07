@@ -77,6 +77,9 @@ MN_INSTALL_MODE_EXPLICIT="N"
 MN_INSTALL_HELP_REQUESTED="N"
 MN_INSTALL_VERBOSE="${MN_INSTALL_VERBOSE:-N}"
 MN_INSTALL_RESET="N"
+MN_BUILD_MEMBRANE="N"
+MN_BUILD_MEMBRANE_DIR=""
+MN_MEMBRANE_BUILD_PREPARED="N"
 # The installer release has its own tag. It selects the versioned support
 # snapshot while the component pins above select each published artifact.
 MN_DEFAULT_INSTALL_VERSION="${MN_DEFAULT_INSTALL_VERSION:-v1.3.31}"
@@ -107,6 +110,9 @@ Common options:
   --redis / --no-redis          Enable or skip Redis Docker setup.
   --context-engine / --no-context-engine
                                 Enable or skip Membrane context engine setup.
+  --build-membrane              Local mode: build Membrane source instead of pulling GAR.
+                                Ignored in github/binary modes. Source: MN_MEMBRANE_DIR
+                                or the sibling Membrane checkout.
   --openshell / --no-openshell  Enable or skip OpenShell gateway setup.
   --syncthing / --no-syncthing  Enable or skip Syncthing shared-storage replication.
   --start / --no-start          Start or skip starting MirrorNeuron after install.
@@ -646,6 +652,9 @@ while [ "$#" -gt 0 ]; do
         -v|--verbose)
             MN_INSTALL_VERBOSE="Y"
             ;;
+        --build-membrane)
+            MN_BUILD_MEMBRANE="Y"
+            ;;
         --reset)
             MN_INSTALL_RESET="Y"
             ;;
@@ -664,6 +673,11 @@ case "$MN_INSTALL_MODE" in
         exit 1
         ;;
 esac
+
+# Source builds are a local-development option. Other modes ignore the flag.
+if [ "$MN_INSTALL_MODE" != "local" ]; then
+    MN_BUILD_MEMBRANE="N"
+fi
 
 if [ -n "$MN_INSTALL_VERSION" ]; then
     mn_validate_version_tag_or_exit "$MN_INSTALL_VERSION"
@@ -701,6 +715,60 @@ function mn_script_dir() {
             cd "$(dirname "$source_path")" && pwd
             ;;
     esac
+}
+
+# Building Membrane is installation-only and requires the explicit CLI flag.
+# Non-local modes clear the flag before reaching this shared preparation path.
+function mn_validate_membrane_build() {
+    [ "$MN_BUILD_MEMBRANE" = "Y" ] || return 0
+    local argument source_dir
+    for argument in ${MN_INSTALL_ARGS[@]+"${MN_INSTALL_ARGS[@]}"}; do
+        if [ "$argument" = "--no-context-engine" ]; then
+            printf 'error: --build-membrane conflicts with --no-context-engine.\n' >&3
+            return 1
+        fi
+    done
+    source_dir="${MN_MEMBRANE_DIR:-$(mn_script_dir)/../Membrane}"
+    if [ ! -f "$source_dir/Dockerfile" ] || [ ! -f "$source_dir/mn-context-engine/Cargo.toml" ]; then
+        printf 'error: --build-membrane requires a local Membrane checkout containing Dockerfile and mn-context-engine/Cargo.toml: %s\n' "$source_dir" >&3
+        printf 'Set MN_MEMBRANE_DIR to the local source directory.\n' >&3
+        return 1
+    fi
+    MN_BUILD_MEMBRANE_DIR="$(cd "$source_dir" && pwd)"
+}
+
+function mn_selected_membrane_image() {
+    if [ "$MN_BUILD_MEMBRANE" = "Y" ]; then
+        printf '%s' 'mirror-neuron-memory-engine:local'
+    else
+        printf '%s' "$1"
+    fi
+}
+
+function mn_selected_membrane_source_mode() {
+    if [ "$MN_BUILD_MEMBRANE" = "Y" ]; then
+        printf '%s' source
+    else
+        printf '%s' image
+    fi
+}
+
+function mn_prepare_membrane_image() {
+    if [ "$MN_BUILD_MEMBRANE" != "Y" ]; then
+        pull_context_engine_image
+        return
+    fi
+    [ "$MN_MEMBRANE_BUILD_PREPARED" != "Y" ] || return 0
+    # Recheck before Docker is invoked; no fallback to an older image on failure.
+    mn_validate_membrane_build || return 1
+    print_step "Building Membrane Docker image from local source"
+    if ! docker build --target runtime \
+        --file "$MN_BUILD_MEMBRANE_DIR/Dockerfile" \
+        --tag "$(mn_selected_membrane_image '')" "$MN_BUILD_MEMBRANE_DIR"; then
+        print_error "Membrane image build failed. The GAR image was not used as a fallback."
+        return 1
+    fi
+    MN_MEMBRANE_BUILD_PREPARED="Y"
 }
 
 function mn_reset_error() {
@@ -1860,6 +1928,9 @@ Options:
   --redis / --no-redis          Enable or skip Redis Docker setup.
   --context-engine / --no-context-engine
                                 Enable or skip Membrane context engine setup.
+  --build-membrane              Local mode: build Membrane source instead of pulling GAR.
+                                Ignored in github/binary modes. Source: MN_MEMBRANE_DIR
+                                or the sibling Membrane checkout.
   --openshell / --no-openshell  Enable or skip OpenShell gateway setup.
   --syncthing / --no-syncthing  Enable or skip Syncthing shared-storage replication.
   --start / --no-start          Start or skip starting MirrorNeuron after install.
@@ -2207,7 +2278,7 @@ function context_engine_source_dir() {
 function setup_context_engine() {
     remove_stale_runtime_containers_for_services context-engine-model membrane-context-engine
     ensure_docker_model_runner
-    pull_context_engine_image
+    mn_prepare_membrane_image
     runtime_compose up -d --no-build membrane-context-engine >/dev/null
 }
 
@@ -2694,6 +2765,8 @@ function write_runtime_compose_files() {
         membrane_engine_tag="v${membrane_engine_tag}"
     fi
     membrane_engine_image="${MN_MEMBRANE_ENGINE_IMAGE:-${MN_CONTEXT_ENGINE_IMAGE:-${MN_DEFAULT_MEMBRANE_GAR_IMAGE}:${membrane_engine_tag}}}"
+    membrane_engine_image="$(mn_selected_membrane_image "$membrane_engine_image")"
+    if [ "$MN_BUILD_MEMBRANE" = "Y" ]; then membrane_engine_tag=""; fi
     context_memory_enabled="${MN_CONTEXT_MEMORY_ENABLED:-1}"
     otterdesk_context_memory_enabled="${OTTERDESK_CONTEXT_MEMORY_ENABLED:-$context_memory_enabled}"
     if [ -n "${PACKAGE_INDEX_FILE:-}" ] && [ -f "$PACKAGE_INDEX_FILE" ]; then
@@ -2731,7 +2804,7 @@ MN_SYNCTHING_RESCAN_INTERVAL_SECONDS=${MN_SYNCTHING_RESCAN_INTERVAL_SECONDS}
 MN_BLUEPRINT_PYTHON_ENVS_DIR=${MN_BLUEPRINT_PYTHON_ENVS_DIR}
 MN_HOST_OPENSHELL_CONFIG_DIR=${MN_HOST_OPENSHELL_CONFIG_DIR}
 MN_HOST_OPENSHELL_STATE_DIR=${MN_HOST_OPENSHELL_STATE_DIR}
-MN_MEMBRANE_SOURCE_MODE=${MN_MEMBRANE_SOURCE_MODE:-image}
+MN_MEMBRANE_SOURCE_MODE=$(mn_selected_membrane_source_mode)
 ENGINE_IMAGE=${membrane_engine_image}
 MN_MEMBRANE_ENGINE_IMAGE=${membrane_engine_image}
 MN_MEMBRANE_ENGINE_IMAGE_TAG=${membrane_engine_tag}
@@ -2951,7 +3024,7 @@ function prepare_runtime_compose_sidecars() {
         remove_stale_runtime_containers_for_services context-engine-model "${RUNTIME_COMPOSE_SIDECARS[@]}"
         ensure_docker_model_runner
         if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
-            pull_context_engine_image
+            mn_prepare_membrane_image
         fi
     fi
 }
@@ -2992,7 +3065,9 @@ fi
 if [ "$NON_INTERACTIVE" != "Y" ]; then
     INSTALL_WEB_UI=$(ask "Do you want to install the Web UI?" "$INSTALL_WEB_UI")
     INSTALL_REDIS=$(ask "Do you want to install Redis via Docker?" "$INSTALL_REDIS")
-    INSTALL_CONTEXT_ENGINE=$(ask "Do you want to install/start the Membrane context engine?" "$INSTALL_CONTEXT_ENGINE")
+    if [ "$MN_BUILD_MEMBRANE" != "Y" ]; then
+        INSTALL_CONTEXT_ENGINE=$(ask "Do you want to install/start the Membrane context engine?" "$INSTALL_CONTEXT_ENGINE")
+    fi
     INSTALL_OPENSHELL=$(ask "Do you want to install/start the OpenShell gateway for sandbox workers?" "$INSTALL_OPENSHELL")
     START_NOW=$(ask "Do you want to start the MirrorNeuron server automatically after install?" "$START_NOW")
 fi
@@ -3653,6 +3728,8 @@ Options:
   --no-redis            Skip Redis Docker setup.
   --context-engine      Install/start Membrane context engine.
   --no-context-engine   Skip Membrane context engine setup.
+  --build-membrane      Build local Membrane source instead of pulling GAR.
+                        Override source location with MN_MEMBRANE_DIR.
   --openshell           Install/start OpenShell gateway for sandbox workers.
   --no-openshell        Skip OpenShell gateway setup.
   --syncthing / --no-syncthing
@@ -4281,7 +4358,7 @@ function restart_core_container() {
 function setup_context_engine() {
     remove_stale_runtime_containers_for_services context-engine-model membrane-context-engine
     ensure_docker_model_runner
-    pull_context_engine_image
+    mn_prepare_membrane_image
     runtime_compose up -d --no-build membrane-context-engine >/dev/null
 }
 
@@ -4561,6 +4638,8 @@ function write_runtime_compose_files() {
         membrane_engine_tag="v${membrane_engine_tag}"
     fi
     membrane_engine_image="${MN_MEMBRANE_ENGINE_IMAGE:-${MN_CONTEXT_ENGINE_IMAGE:-${MN_DEFAULT_MEMBRANE_GAR_IMAGE}:${membrane_engine_tag}}}"
+    membrane_engine_image="$(mn_selected_membrane_image "$membrane_engine_image")"
+    if [ "$MN_BUILD_MEMBRANE" = "Y" ]; then membrane_engine_tag=""; fi
     context_memory_enabled="${MN_CONTEXT_MEMORY_ENABLED:-1}"
     otterdesk_context_memory_enabled="${OTTERDESK_CONTEXT_MEMORY_ENABLED:-$context_memory_enabled}"
     if [ -n "${PACKAGE_INDEX_FILE:-}" ] && [ -f "$PACKAGE_INDEX_FILE" ]; then
@@ -4604,7 +4683,7 @@ MN_SYNCTHING_RESCAN_INTERVAL_SECONDS=${MN_SYNCTHING_RESCAN_INTERVAL_SECONDS}
 MN_BLUEPRINT_PYTHON_ENVS_DIR=${MN_BLUEPRINT_PYTHON_ENVS_DIR}
 MN_HOST_OPENSHELL_CONFIG_DIR=${MN_HOST_OPENSHELL_CONFIG_DIR}
 MN_HOST_OPENSHELL_STATE_DIR=${MN_HOST_OPENSHELL_STATE_DIR}
-MN_MEMBRANE_SOURCE_MODE=${MN_MEMBRANE_SOURCE_MODE:-image}
+MN_MEMBRANE_SOURCE_MODE=$(mn_selected_membrane_source_mode)
 ENGINE_IMAGE=${membrane_engine_image}
 MN_MEMBRANE_ENGINE_IMAGE=${membrane_engine_image}
 MN_MEMBRANE_ENGINE_IMAGE_TAG=${membrane_engine_tag}
@@ -4824,7 +4903,7 @@ function prepare_runtime_compose_sidecars() {
         remove_stale_runtime_containers_for_services context-engine-model "${RUNTIME_COMPOSE_SIDECARS[@]}"
         ensure_docker_model_runner
         if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
-            pull_context_engine_image
+            mn_prepare_membrane_image
         fi
     fi
 }
@@ -4958,7 +5037,9 @@ fi
 if [ "$NON_INTERACTIVE" != "Y" ]; then
     INSTALL_WEB_UI=$(ask "Install/build local Web UI?" "$INSTALL_WEB_UI")
     INSTALL_REDIS=$(ask "Install/start Redis via Docker?" "$INSTALL_REDIS")
-    INSTALL_CONTEXT_ENGINE=$(ask "Install/start Membrane context engine?" "$INSTALL_CONTEXT_ENGINE")
+    if [ "$MN_BUILD_MEMBRANE" != "Y" ]; then
+        INSTALL_CONTEXT_ENGINE=$(ask "Install/start Membrane context engine?" "$INSTALL_CONTEXT_ENGINE")
+    fi
     INSTALL_SKILLS=$(ask "Install local mn-skills packages in editable mode?" "$INSTALL_SKILLS")
     INSTALL_OPENSHELL=$(ask "Install/start OpenShell gateway for sandbox workers?" "$INSTALL_OPENSHELL")
     START_NOW=$(ask "Start MirrorNeuron server automatically after install?" "$START_NOW")
@@ -5323,6 +5404,9 @@ Options:
   --redis / --no-redis          Enable or skip Redis Docker setup.
   --context-engine / --no-context-engine
                                 Enable or skip Membrane context engine setup.
+  --build-membrane              Local mode: build Membrane source instead of pulling GAR.
+                                Ignored in github/binary modes. Source: MN_MEMBRANE_DIR
+                                or the sibling Membrane checkout.
   --openshell / --no-openshell  Enable or skip OpenShell gateway setup.
   --syncthing / --no-syncthing  Enable or skip Syncthing shared-storage replication.
   --start / --no-start          Start or skip starting MirrorNeuron after install.
@@ -6249,7 +6333,7 @@ function install_python_packages() {
 function setup_context_engine() {
     remove_stale_runtime_containers_for_services context-engine-model membrane-context-engine
     ensure_docker_model_runner
-    pull_context_engine_image
+    mn_prepare_membrane_image
     runtime_compose up -d --no-build membrane-context-engine >/dev/null
 }
 
@@ -6726,6 +6810,8 @@ function write_runtime_compose_files() {
         membrane_engine_tag="v${membrane_engine_tag}"
     fi
     membrane_engine_image="${MN_MEMBRANE_ENGINE_IMAGE:-${MN_CONTEXT_ENGINE_IMAGE:-${MN_DEFAULT_MEMBRANE_GAR_IMAGE}:${membrane_engine_tag}}}"
+    membrane_engine_image="$(mn_selected_membrane_image "$membrane_engine_image")"
+    if [ "$MN_BUILD_MEMBRANE" = "Y" ]; then membrane_engine_tag=""; fi
     context_memory_enabled="${MN_CONTEXT_MEMORY_ENABLED:-1}"
     otterdesk_context_memory_enabled="${OTTERDESK_CONTEXT_MEMORY_ENABLED:-$context_memory_enabled}"
     if [ -n "${PACKAGE_INDEX_FILE:-}" ] && [ -f "$PACKAGE_INDEX_FILE" ]; then
@@ -6763,7 +6849,7 @@ MN_SYNCTHING_RESCAN_INTERVAL_SECONDS=${MN_SYNCTHING_RESCAN_INTERVAL_SECONDS}
 MN_BLUEPRINT_PYTHON_ENVS_DIR=${MN_BLUEPRINT_PYTHON_ENVS_DIR}
 MN_HOST_OPENSHELL_CONFIG_DIR=${MN_HOST_OPENSHELL_CONFIG_DIR}
 MN_HOST_OPENSHELL_STATE_DIR=${MN_HOST_OPENSHELL_STATE_DIR}
-MN_MEMBRANE_SOURCE_MODE=${MN_MEMBRANE_SOURCE_MODE:-image}
+MN_MEMBRANE_SOURCE_MODE=$(mn_selected_membrane_source_mode)
 ENGINE_IMAGE=${membrane_engine_image}
 MN_MEMBRANE_ENGINE_IMAGE=${membrane_engine_image}
 MN_MEMBRANE_ENGINE_IMAGE_TAG=${membrane_engine_tag}
@@ -6983,7 +7069,7 @@ function prepare_runtime_compose_sidecars() {
         remove_stale_runtime_containers_for_services context-engine-model "${RUNTIME_COMPOSE_SIDECARS[@]}"
         ensure_docker_model_runner
         if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
-            pull_context_engine_image
+            mn_prepare_membrane_image
         fi
     fi
 }
@@ -7098,7 +7184,9 @@ print_header
 if [ "$NON_INTERACTIVE" != "Y" ]; then
     INSTALL_WEB_UI=$(ask "Do you want to enable the Web UI Compose service?" "$INSTALL_WEB_UI")
     INSTALL_REDIS=$(ask "Do you want to install Redis via Docker?" "$INSTALL_REDIS")
-    INSTALL_CONTEXT_ENGINE=$(ask "Do you want to install/start the Membrane context engine?" "$INSTALL_CONTEXT_ENGINE")
+    if [ "$MN_BUILD_MEMBRANE" != "Y" ]; then
+        INSTALL_CONTEXT_ENGINE=$(ask "Do you want to install/start the Membrane context engine?" "$INSTALL_CONTEXT_ENGINE")
+    fi
     INSTALL_OPENSHELL=$(ask "Do you want to install/start the OpenShell gateway for sandbox workers?" "$INSTALL_OPENSHELL")
     INSTALL_PYTHON_SDK=$(ask "Do you want to install the Python SDK from the configured pip index?" "$INSTALL_PYTHON_SDK")
     INSTALL_AGENTS=$(ask "Do you want to install indexed agent packages from the configured pip index?" "$INSTALL_AGENTS")
@@ -7222,6 +7310,10 @@ if [ "$INSTALL_CLI" = "Y" ]; then
 fi
 mn_print_cli_verification_prompt
 }
+
+if [ "$MN_INSTALL_HELP_REQUESTED" != "Y" ]; then
+    mn_validate_membrane_build
+fi
 
 if [ "$MN_INSTALL_RESET" = "Y" ] && [ "$MN_INSTALL_HELP_REQUESTED" != "Y" ]; then
     mn_reset_install_state

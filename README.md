@@ -288,3 +288,14 @@ uses the configured serving window and calls Membrane's `CompilePrompt` RPC
 when necessary; deploy the SDK and Membrane image together. Model compression
 remains optional, and no workflow timeout behavior changes. Historical release
 support snapshots remain unchanged.
+
+Use `./install.sh --mode local --build-membrane` to build the Membrane runtime
+image from the sibling `Membrane` checkout. Set `MN_MEMBRANE_DIR` to use a
+specific local checkout. Binary and GitHub install modes ignore this flag and
+continue using their normal GAR images. The flag overrides the released engine image with
+`mirror-neuron-memory-engine:local`, records source mode, and builds the Dockerfile
+`runtime` target once per installer invocation using the normal Docker cache.
+Without the flag, all modes retain their normal GAR image selection and pull.
+Subsequent runtime/blueprint startup does not build images. Missing source and
+`--build-membrane --no-context-engine` fail before installation; a failed build
+stops the installer without pulling GAR as a fallback. No image is published.
