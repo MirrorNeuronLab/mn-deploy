@@ -141,3 +141,11 @@ the SDK. Native response services prepare their own optional host components
 when needed. A new release must publish the indexed packages and refresh its
 version pins and install-support snapshot together; historical snapshots remain
 immutable. Source and wheel tests do not require a live runtime installation.
+
+
+The default Compose runtime starts Membrane alongside LiteLLM for automatic
+request context compression. No blueprint profile is needed. The SDK gateway
+uses the configured serving window and calls Membrane's `CompilePrompt` RPC
+when necessary; deploy the SDK and Membrane image together. Model compression
+remains optional, and no workflow timeout behavior changes. Historical release
+support snapshots remain unchanged.
