@@ -1262,6 +1262,28 @@ function mn_ensure_python_package_index_file() {
     fi
 }
 
+# Component rows are shared by local and GitHub source installs. Binary mode
+# uses the same sdk installer group for versioned wheel requirements.
+function mn_sdk_component_rows() {
+    local PACKAGE_INDEX_FILE="${MN_PACKAGE_INDEX_FILE:-${PACKAGE_INDEX_FILE:-$(mn_script_dir)/package-index/python-packages.toml}}"
+    mn_ensure_python_package_index_file
+    "$MN_PYTHON_BIN" - "$PACKAGE_INDEX_FILE" <<'PYCODE'
+import sys, tomllib
+from pathlib import Path
+packages = tomllib.loads(Path(sys.argv[1]).read_text())["packages"]
+for package in packages:
+    name = package["name"]
+    if not name.startswith("mn-python-sdk-") or "sdk" not in package.get("installer_groups", []):
+        continue
+    path = package["path"]
+    if not path.startswith("mn-python-sdk/packages/") or ".." in Path(path).parts:
+        raise SystemExit(f"Invalid SDK component source path: {path}")
+    extras = package.get("default_extras") or []
+    suffix = "[" + ",".join(extras) + "]" if extras else ""
+    print(f"{name}\t{path}\t{suffix}")
+PYCODE
+}
+
 # Shared by all install modes. Generate inside the container, then copy out:
 # Docker Desktop may still hold an obsolete host mount after MN_HOME is reset.
 function generate_openshell_jwt_keys() (
@@ -1391,7 +1413,7 @@ function find_source_workspace() {
     for candidate in "${candidates[@]}"; do
         [ -n "$candidate" ] || continue
         if [ -d "$candidate/mn-python-sdk" ] &&
-           [ -d "$candidate/mn-skills/blueprint_support_skill" ] &&
+           [ -d "$candidate/mn-python-sdk/packages/common" ] &&
            [ -d "$candidate/mn-cli" ] &&
            [ -d "$candidate/mn-api" ]; then
             (cd "$candidate" && pwd)
@@ -1809,7 +1831,6 @@ START_NOW="Y"
 REINSTALL="Y"
 NON_INTERACTIVE="Y"
 INSTALL_PYTHON_SDK="Y"
-INSTALL_BLUEPRINT_SUPPORT_SKILL="Y"
 INSTALL_CLI="Y"
 INSTALL_API="Y"
 INSTALL_VERSION="${MN_INSTALL_VERSION:-}"
@@ -1842,10 +1863,9 @@ Options:
   --openshell / --no-openshell  Enable or skip OpenShell gateway setup.
   --syncthing / --no-syncthing  Enable or skip Syncthing shared-storage replication.
   --start / --no-start          Start or skip starting MirrorNeuron after install.
-  --python-components LIST      Install only these components: sdk,skill,cli,api.
+  --python-components LIST      Install only these components: sdk,cli,api.
                                 Use all or none as shortcuts.
   --python-sdk / --no-python-sdk
-  --skill / --no-skill          Blueprint support skill from GitHub.
   --cli / --no-cli
   --api / --no-api
   --skills-repo OWNER/REPO      Same as MN_SKILLS_REPO. Default: MirrorNeuronLab/mn-skills.
@@ -1875,7 +1895,6 @@ function set_python_components() {
     local -a components
 
     INSTALL_PYTHON_SDK="N"
-    INSTALL_BLUEPRINT_SUPPORT_SKILL="N"
     INSTALL_CLI="N"
     INSTALL_API="N"
 
@@ -1885,7 +1904,6 @@ function set_python_components() {
         case "$component" in
             all)
                 INSTALL_PYTHON_SDK="Y"
-                INSTALL_BLUEPRINT_SUPPORT_SKILL="Y"
                 INSTALL_CLI="Y"
                 INSTALL_API="Y"
                 ;;
@@ -1893,9 +1911,6 @@ function set_python_components() {
                 ;;
             sdk|python-sdk)
                 INSTALL_PYTHON_SDK="Y"
-                ;;
-            skill|skills|blueprint-support|blueprint-support-skill)
-                INSTALL_BLUEPRINT_SUPPORT_SKILL="Y"
                 ;;
             cli)
                 INSTALL_CLI="Y"
@@ -1933,8 +1948,6 @@ while [ "$#" -gt 0 ]; do
         --no-start) START_NOW="N" ;;
         --python-sdk) INSTALL_PYTHON_SDK="Y" ;;
         --no-python-sdk) INSTALL_PYTHON_SDK="N" ;;
-        --skill|--skills) INSTALL_BLUEPRINT_SUPPORT_SKILL="Y" ;;
-        --no-skill|--no-skills) INSTALL_BLUEPRINT_SUPPORT_SKILL="N" ;;
         --cli) INSTALL_CLI="Y" ;;
         --no-cli) INSTALL_CLI="N" ;;
         --api) INSTALL_API="Y" ;;
@@ -2058,7 +2071,6 @@ function github_checkout_existing() {
 
 function should_install_python_packages() {
     [ "$INSTALL_PYTHON_SDK" = "Y" ] || \
-    [ "$INSTALL_BLUEPRINT_SUPPORT_SKILL" = "Y" ] || \
     [ "$INSTALL_CLI" = "Y" ] || \
     [ "$INSTALL_API" = "Y" ] || \
     [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]
@@ -2085,14 +2097,6 @@ function context_engine_git_url() {
 
 function core_git_url() {
     printf 'https://github.com/%s.git' "$CORE_REPO"
-}
-
-function blueprint_support_skill_git_url() {
-    if [ -n "$MN_SKILLS_GIT_URL" ]; then
-        printf '%s' "$MN_SKILLS_GIT_URL"
-    else
-        printf 'https://github.com/%s.git' "$SKILLS_REPO"
-    fi
 }
 
 function agents_git_url() {
@@ -3072,10 +3076,14 @@ if should_install_python_packages; then
         "$MN_PYTHON_BIN" -m venv "$VENV_DIR" >/dev/null 2>&1
         run_quiet "pip-upgrade" "$VENV_DIR/bin/pip" install --upgrade pip
         if [ "$INSTALL_PYTHON_SDK" = "Y" ]; then
-            run_quiet "install-mn-python-sdk-github" "$VENV_DIR/bin/pip" install "git+https://github.com/MirrorNeuronLab/mn-python-sdk.git$(github_ref_suffix)"
-        fi
-        if [ "$INSTALL_BLUEPRINT_SUPPORT_SKILL" = "Y" ]; then
-            run_quiet "install-blueprint-support-skill-github" "$VENV_DIR/bin/pip" install "mirrorneuron-blueprint-support-skill[webui] @ git+$(blueprint_support_skill_git_url)$(github_ref_suffix)#subdirectory=blueprint_support_skill"
+            local -a sdk_requirements=("mirrorneuron-python-sdk @ git+https://github.com/MirrorNeuronLab/mn-python-sdk.git$(github_ref_suffix)")
+            local package_name package_path package_extras component_rows
+            component_rows="$(mn_sdk_component_rows)" || return 1
+            while IFS=$'\t' read -r package_name package_path package_extras; do
+                [ -n "$package_name" ] || continue
+                sdk_requirements+=("${package_name}${package_extras} @ git+https://github.com/MirrorNeuronLab/mn-python-sdk.git$(github_ref_suffix)#subdirectory=${package_path#mn-python-sdk/}")
+            done <<< "$component_rows"
+            run_quiet "install-mn-python-sdk-github" "$VENV_DIR/bin/pip" install "${sdk_requirements[@]}"
         fi
         if [ "$INSTALL_CLI" = "Y" ]; then
             run_quiet "install-mn-cli-github" "$VENV_DIR/bin/pip" install "git+https://github.com/MirrorNeuronLab/mn-cli.git$(github_ref_suffix)"
@@ -3340,11 +3348,6 @@ MN_WEB_UI_SOURCE_MOUNT="${MN_WEB_UI_SOURCE_MOUNT:-${WEB_UI_DIR}}"
 MN_WEB_UI_PACKAGE_VERSION="${MN_WEB_UI_PACKAGE_VERSION:-${MN_DEFAULT_WEB_UI_VERSION#v}}"
 SKILLS_DIR="${WORKSPACE_DIR}/mn-skills"
 AGENTS_DIR="${WORKSPACE_DIR}/mn-agents"
-BLUEPRINT_SUPPORT_SKILL_DIR="${SKILLS_DIR}/blueprint_support_skill"
-JOB_RESPONSE_SKILL_DIR="${SKILLS_DIR}/job_response_skill"
-MCP_CLIENT_SKILL_DIR="${SKILLS_DIR}/mcp_client_skill"
-RAG_SKILL_DIR="${SKILLS_DIR}/rag_skill"
-WEB_UI_SKILL_DIR="${SKILLS_DIR}/web_ui_skill"
 BLUEPRINTS_DIR="${WORKSPACE_DIR}/mn-blueprints"
 DOCS_DIR="${WORKSPACE_DIR}/mn-docs"
 SYSTEM_TESTS_DIR="${WORKSPACE_DIR}/mn-system-tests"
@@ -4937,14 +4940,9 @@ require_mix_project_file "$CORE_DIR/mix.exs"
 require_dir "$CLI_DIR" "mn-cli"
 require_dir "$API_DIR" "mn-api"
 require_dir "$PY_SDK_DIR" "mn-python-sdk"
-require_file \
-    "$JOB_RESPONSE_SKILL_DIR/pyproject.toml" \
-    "mn-skills Job response skill project"
-require_file \
-    "$MCP_CLIENT_SKILL_DIR/pyproject.toml" \
-    "mn-skills MCP client skill project"
-require_file "$RAG_SKILL_DIR/pyproject.toml" "mn-skills RAG skill project"
-require_file "$WEB_UI_SKILL_DIR/pyproject.toml" "mn-skills Web UI skill project"
+for component_project in "$PY_SDK_DIR"/packages/*/pyproject.toml; do
+    require_file "$component_project" "SDK component project"
+done
 
 if [ "$INSTALL_WEB_UI" = "Y" ]; then require_dir "$WEB_UI_DIR" "mn-web-ui"; fi
 if [ "$INSTALL_SKILLS" = "Y" ]; then require_dir "$SKILLS_DIR" "mn-skills"; fi
@@ -5031,40 +5029,25 @@ function require_local_cli_target_executables() {
 }
 
 function install_local_editable_python_packages() {
-    local -a editable_requirements=(
-        -e "$PY_SDK_DIR"
-    )
-    local skill_dir
-    local skill_pyproject
-
-    if [ -f "$BLUEPRINT_SUPPORT_SKILL_DIR/pyproject.toml" ]; then
-        editable_requirements+=(-e "$BLUEPRINT_SUPPORT_SKILL_DIR")
-    fi
-    editable_requirements+=(
-        -e "$JOB_RESPONSE_SKILL_DIR"
-        -e "$MCP_CLIENT_SKILL_DIR"
-        -e "$RAG_SKILL_DIR"
-        -e "$WEB_UI_SKILL_DIR"
-        -e "$CLI_DIR"
-        -e "$API_DIR"
-    )
+    local -a editable_requirements=(-e "${PY_SDK_DIR}")
+    local package_name package_path package_extras component_rows skill_pyproject
+    component_rows="$(mn_sdk_component_rows)" || return 1
+    while IFS=$'\t' read -r package_name package_path package_extras; do
+        [ -n "$package_name" ] || continue
+        require_file "$WORKSPACE_DIR/$package_path/pyproject.toml" "$package_name project"
+        editable_requirements+=(-e "$WORKSPACE_DIR/$package_path$package_extras")
+    done <<< "$component_rows"
+    editable_requirements+=(-e "$CLI_DIR" -e "$API_DIR")
     if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
         editable_requirements+=(-e "$MEMBRANE_DIR/mn-context-engine-python-sdk")
     fi
-
     if [ "$INSTALL_SKILLS" = "Y" ]; then
-        shopt -s nullglob
         for skill_pyproject in "$SKILLS_DIR"/*/pyproject.toml; do
-            skill_dir="$(dirname "$skill_pyproject")"
-            case "$skill_dir" in
-                "$BLUEPRINT_SUPPORT_SKILL_DIR"|"$JOB_RESPONSE_SKILL_DIR"|"$MCP_CLIENT_SKILL_DIR"|"$RAG_SKILL_DIR"|"$WEB_UI_SKILL_DIR") continue ;;
-            esac
-            editable_requirements+=(-e "$skill_dir")
+            [ -f "$skill_pyproject" ] || continue
+            editable_requirements+=(-e "$(dirname "$skill_pyproject")")
         done
     fi
-
-    # Resolve all selected workspace projects together so dependencies between
-    # unreleased MirrorNeuron packages use their sibling editable checkouts.
+    # One resolution transaction selects local components over registry versions.
     "$VENV_DIR/bin/pip" install "${editable_requirements[@]}" >/dev/null
 }
 
@@ -6215,7 +6198,11 @@ function install_indexed_group() {
         fi
         label="$(printf '%s' "$pinned_requirement" | tr -c 'A-Za-z0-9_.-' '_')"
         if bundled_wheel="$(bundled_wheel_for_requirement "$pinned_requirement")"; then
-            run_quiet "install-${label}" "$VENV_DIR/bin/pip" install --upgrade "$bundled_wheel"
+            local wheel_extras=""
+            case "$pinned_requirement" in
+                *\[*\]*) wheel_extras="[${pinned_requirement#*[}"; wheel_extras="${wheel_extras%%]*}]" ;;
+            esac
+            run_quiet "install-${label}" "$VENV_DIR/bin/pip" install "${PIP_INDEX_ARGS[@]}" --find-links "$(dirname "$bundled_wheel")" --upgrade "${bundled_wheel}${wheel_extras}"
         else
             run_quiet "install-${label}" "$VENV_DIR/bin/pip" install "${PIP_INDEX_ARGS[@]}" --upgrade "$pinned_requirement"
         fi

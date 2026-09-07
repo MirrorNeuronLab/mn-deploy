@@ -126,3 +126,18 @@ All shell files must pass `bash -n`. Behavioral changes require the installer
 contract suite in `mn-system-tests/installer` and, where practical, an isolated
 mode-specific smoke test. Publishing, live uninstall, and host-level mutation
 are never implicit test steps.
+
+## Optional Python SDK components
+
+The Python package index includes independently built SDK component projects
+under `mn-python-sdk/packages/`. Local and GitHub source installation resolve the SDK, common component, and
+web UI component in one pip transaction. Local source installation also includes
+the CLI/API projects in that transaction. Binary installation selects versioned wheels from the same
+inventory and preserves extras when using a bundled wheelhouse.
+
+RAG, models, MCP, collaboration, and Job response engines are not installer
+defaults. Blueprints declare their component dependencies for preparation by
+the SDK. Native response services prepare their own optional host components
+when needed. A new release must publish the indexed packages and refresh its
+version pins and install-support snapshot together; historical snapshots remain
+immutable. Source and wheel tests do not require a live runtime installation.

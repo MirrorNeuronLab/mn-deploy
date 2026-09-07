@@ -2,6 +2,62 @@
 # Paths are relative to the mirror-neuron-set workspace root.
 
 [[packages]]
+name = "mn-python-sdk-common"
+path = "mn-python-sdk/packages/common"
+publish_group = "runtime"
+version = "0.1.0"
+installer_groups = ["sdk"]
+binary_default = true
+
+[[packages]]
+name = "mn-python-sdk-web-ui"
+path = "mn-python-sdk/packages/web-ui"
+publish_group = "runtime"
+version = "0.1.0"
+installer_groups = ["sdk"]
+binary_default = true
+
+[[packages]]
+name = "mn-python-sdk-models"
+path = "mn-python-sdk/packages/models"
+publish_group = "runtime"
+version = "0.1.0"
+installer_groups = []
+binary_default = false
+
+[[packages]]
+name = "mn-python-sdk-mcp"
+path = "mn-python-sdk/packages/mcp"
+publish_group = "runtime"
+version = "0.1.0"
+installer_groups = []
+binary_default = false
+
+[[packages]]
+name = "mn-python-sdk-collaboration"
+path = "mn-python-sdk/packages/collaboration"
+publish_group = "runtime"
+version = "0.1.0"
+installer_groups = []
+binary_default = false
+
+[[packages]]
+name = "mn-python-sdk-rag"
+path = "mn-python-sdk/packages/rag"
+publish_group = "runtime"
+version = "0.1.0"
+installer_groups = []
+binary_default = false
+
+[[packages]]
+name = "mn-python-sdk-job-response"
+path = "mn-python-sdk/packages/job-response"
+publish_group = "runtime"
+version = "0.1.0"
+installer_groups = []
+binary_default = false
+
+[[packages]]
 name = "mirrorneuron-python-sdk"
 path = "mn-python-sdk"
 publish_group = "runtime"
@@ -67,15 +123,6 @@ installer_groups = ["skill"]
 binary_default = false
 
 [[packages]]
-name = "mirrorneuron-blueprint-support-skill"
-path = "mn-skills/blueprint_support_skill"
-publish_group = "skill"
-version = "1.3.22"
-installer_groups = ["skill", "blueprint-support"]
-default_extras = ["webui"]
-binary_default = true
-
-[[packages]]
 name = "mirrorneuron-client-report-skill"
 path = "mn-skills/client_report_skill"
 publish_group = "skill"
@@ -86,14 +133,6 @@ binary_default = false
 [[packages]]
 name = "mirrorneuron-code-generation-skill"
 path = "mn-skills/code_generation_skill"
-publish_group = "skill"
-version = "1.3.22"
-installer_groups = ["skill"]
-binary_default = false
-
-[[packages]]
-name = "mirrorneuron-use-generic-model-skill"
-path = "mn-skills/use_generic_model_skill"
 publish_group = "skill"
 version = "1.3.22"
 installer_groups = ["skill"]
@@ -140,35 +179,11 @@ installer_groups = ["skill"]
 binary_default = false
 
 [[packages]]
-name = "mirrorneuron-external-rate-limit-skill"
-path = "mn-skills/external_rate_limit_skill"
-publish_group = "skill"
-version = "1.3.22"
-installer_groups = ["skill"]
-binary_default = false
-
-[[packages]]
 name = "mirrorneuron-first-draft-slides-skill"
 path = "mn-skills/first_draft_slides_skill"
 publish_group = "skill"
 version = "1.3.22"
 installer_groups = ["skill"]
-binary_default = false
-
-[[packages]]
-name = "mirrorneuron-goal-work-packet-skill"
-path = "mn-skills/goal_work_packet_skill"
-publish_group = "skill"
-version = "1.3.22"
-installer_groups = ["skill"]
-binary_default = false
-
-[[packages]]
-name = "mirrorneuron-job-response-skill"
-path = "mn-skills/job_response_skill"
-publish_group = "skill"
-version = "1.3.22"
-installer_groups = ["skill", "sdk"]
 binary_default = false
 
 [[packages]]
@@ -220,22 +235,6 @@ installer_groups = ["skill"]
 binary_default = false
 
 [[packages]]
-name = "mirrorneuron-mcp-client-skill"
-path = "mn-skills/mcp_client_skill"
-publish_group = "skill"
-version = "1.3.22"
-installer_groups = ["skill"]
-binary_default = false
-
-[[packages]]
-name = "mirrorneuron-mcp-server-skill"
-path = "mn-skills/mcp_server_skill"
-publish_group = "skill"
-version = "1.3.22"
-installer_groups = ["skill"]
-binary_default = false
-
-[[packages]]
 name = "mirrorneuron-meeting-summary-skill"
 path = "mn-skills/meeting_summary_skill"
 publish_group = "skill"
@@ -262,14 +261,6 @@ binary_default = false
 [[packages]]
 name = "mirrorneuron-public-research-orchestrator-skill"
 path = "mn-skills/public_research_orchestrator_skill"
-publish_group = "skill"
-version = "1.3.22"
-installer_groups = ["skill"]
-binary_default = false
-
-[[packages]]
-name = "mirrorneuron-rag-skill"
-path = "mn-skills/rag_skill"
 publish_group = "skill"
 version = "1.3.22"
 installer_groups = ["skill"]
@@ -324,23 +315,6 @@ version = "1.3.22"
 installer_groups = ["skill"]
 binary_default = false
 
-[[packages]]
-name = "mirrorneuron-web-ui-skill"
-path = "mn-skills/web_ui_skill"
-publish_group = "skill"
-version = "1.3.22"
-installer_groups = ["skill"]
-binary_default = false
-
-[[packages]]
-name = "mirrorneuron-websocket-stream-skill"
-path = "mn-skills/websocket_stream_skill"
-publish_group = "skill"
-version = "1.3.22"
-installer_groups = ["skill"]
-binary_default = false
-
-# Packaged agent definitions and reusable handler factories.
 [[packages]]
 name = "mn-worker-python-host-agent"
 path = "mn-agents/worker_python_host_agent"
