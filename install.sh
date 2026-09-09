@@ -27,7 +27,7 @@ MN_DEFAULT_API_VERSION="${MN_DEFAULT_API_VERSION:-v1.3.21}"
 # Web UI is an npm package (the installer strips the leading `v`).
 MN_DEFAULT_WEB_UI_VERSION="${MN_DEFAULT_WEB_UI_VERSION:-v1.3.4}"
 # Additional pip packages are selected from the versioned package index.
-MN_DEFAULT_AGENT_PACKAGE_INDEX_VERSION="${MN_DEFAULT_AGENT_PACKAGE_INDEX_VERSION:-v1.3.31}"
+MN_DEFAULT_AGENT_PACKAGE_INDEX_VERSION="${MN_DEFAULT_AGENT_PACKAGE_INDEX_VERSION:-v1.3.32}"
 # Membrane context engine is a GAR Docker image.
 MN_DEFAULT_MEMBRANE_CONTEXT_ENGINE_VERSION="${MN_DEFAULT_MEMBRANE_CONTEXT_ENGINE_VERSION:-v1.3.19}"
 
@@ -82,7 +82,7 @@ MN_BUILD_MEMBRANE_DIR=""
 MN_MEMBRANE_BUILD_PREPARED="N"
 # The installer release has its own tag. It selects the versioned support
 # snapshot while the component pins above select each published artifact.
-MN_DEFAULT_INSTALL_VERSION="${MN_DEFAULT_INSTALL_VERSION:-v1.3.31}"
+MN_DEFAULT_INSTALL_VERSION="${MN_DEFAULT_INSTALL_VERSION:-v1.3.32}"
 MN_INSTALL_VERSION="${MN_INSTALL_VERSION:-}"
 MN_INSTALL_SCRIPT_NAME="$(basename "$0")"
 MN_INSTALL_ARGS=()
