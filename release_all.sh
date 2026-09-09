@@ -22,7 +22,6 @@ REPOSITORIES=(
   mn-python-sdk
   mn-docs
   mn-agents
-  otterdesk-blueprints
   mn-skills
   MirrorNeuron
   Membrane
