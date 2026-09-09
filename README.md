@@ -157,9 +157,11 @@ Run its isolated Git regression test with:
 - Use `./install.sh` or `./install.sh --mode binary` for release/package installs,
   `./install.sh --mode github` for repository installs, or `./install.sh --mode local`
   from a monorepo checkout for editable local installs.
-- Local mode resolves the selected SDK, CLI, API, and skill projects together
-  from sibling repositories. This allows local installs to use newly created
-  MirrorNeuron packages before they are published to the package registry.
+- Local mode resolves the SDK, every SDK component under
+  `mn-python-sdk/packages/`, the CLI, API, and selected skill projects together
+  from sibling repositories. This prevents internal dependencies from falling
+  back to GAR and allows local installs to use newly created MirrorNeuron
+  packages before they are published to the package registry.
   `--no-skills` skips optional skill packages but keeps local skills required by
   runtime services, including the definition-scoped Job response engine and its
   local dependency closure.
@@ -269,17 +271,19 @@ Run its isolated Git regression test with:
 ## Optional Python SDK components
 
 The Python package index includes independently built SDK component projects
-under `mn-python-sdk/packages/`. Local and GitHub source installation resolve the SDK, common component, and
-web UI component in one pip transaction. Local source installation also includes
-the CLI/API projects in that transaction. Binary installation selects versioned wheels from the same
-inventory and preserves extras when using a bundled wheelhouse.
+under `mn-python-sdk/packages/`. Local source installation resolves every SDK
+component plus the SDK, CLI, and API projects in one editable transaction, so
+no internal SDK dependency falls back to GAR. GitHub source installation uses
+the SDK installer group, and binary installation selects versioned wheels from
+the same inventory and preserves extras when using a bundled wheelhouse.
 
-RAG, models, MCP, collaboration, and Job response engines are not installer
-defaults. Blueprints declare their component dependencies for preparation by
-the SDK. Native response services prepare their own optional host components
-when needed. A new release must publish the indexed packages and refresh its
-version pins and install-support snapshot together; historical snapshots remain
-immutable. Source and wheel tests do not require a live runtime installation.
+RAG, models, MCP, collaboration, and Job response engines are not binary or
+GitHub installer defaults. Local development installs bind their distributions
+to sibling source checkouts, while blueprints and native response services
+still decide which capabilities to enable or prepare at runtime. A new release
+must publish the indexed packages and refresh its version pins and
+install-support snapshot together; historical snapshots remain immutable.
+Source and wheel tests do not require a live runtime installation.
 
 
 The default Compose runtime starts Membrane alongside LiteLLM for automatic

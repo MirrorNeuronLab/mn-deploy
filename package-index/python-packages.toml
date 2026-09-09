@@ -29,7 +29,7 @@ binary_default = false
 name = "mn-python-sdk-mcp"
 path = "mn-python-sdk/packages/mcp"
 publish_group = "runtime"
-version = "0.1.0"
+version = "0.1.1"
 installer_groups = []
 binary_default = false
 

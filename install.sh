@@ -5111,13 +5111,14 @@ function require_local_cli_target_executables() {
 
 function install_local_editable_python_packages() {
     local -a editable_requirements=(-e "${PY_SDK_DIR}")
-    local package_name package_path package_extras component_rows skill_pyproject
-    component_rows="$(mn_sdk_component_rows)" || return 1
-    while IFS=$'\t' read -r package_name package_path package_extras; do
-        [ -n "$package_name" ] || continue
-        require_file "$WORKSPACE_DIR/$package_path/pyproject.toml" "$package_name project"
-        editable_requirements+=(-e "$WORKSPACE_DIR/$package_path$package_extras")
-    done <<< "$component_rows"
+    local component_pyproject skill_pyproject
+    # Local mode must keep the complete SDK component family on source paths.
+    # Otherwise pip can resolve a CLI/API dependency (for example MCP) from GAR
+    # even though its sibling checkout is present, or fail when it is unpublished.
+    for component_pyproject in "$PY_SDK_DIR"/packages/*/pyproject.toml; do
+        [ -f "$component_pyproject" ] || continue
+        editable_requirements+=(-e "$(dirname "$component_pyproject")")
+    done
     editable_requirements+=(-e "$CLI_DIR" -e "$API_DIR")
     if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
         editable_requirements+=(-e "$MEMBRANE_DIR/mn-context-engine-python-sdk")

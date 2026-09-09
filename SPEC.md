@@ -37,10 +37,11 @@ component.
 All modes use the single `mn runtime start` contract. There is no worker-only
 runtime, and worker-only installer flags are rejected.
 
-Local-mode Python resolution presents all selected sibling projects to pip in
-one editable install transaction. Dependencies between MirrorNeuron packages
-must resolve from those workspace checkouts, including packages that have not
-yet been published. `--no-skills` excludes optional blueprint capabilities but
+Local-mode Python resolution presents the SDK, every sibling SDK component,
+the CLI, the API, and all other selected sibling projects to pip in one
+editable install transaction. Dependencies between MirrorNeuron packages must
+resolve from those workspace checkouts, including packages that have not yet
+been published. `--no-skills` excludes optional blueprint capabilities but
 retains skills imported by installed runtime services, including the Job
 response engine and its local dependency closure. Package-index resolution
 remains a binary-mode concern.
@@ -130,17 +131,19 @@ are never implicit test steps.
 ## Optional Python SDK components
 
 The Python package index includes independently built SDK component projects
-under `mn-python-sdk/packages/`. Local and GitHub source installation resolve the SDK, common component, and
-web UI component in one pip transaction. Local source installation also includes
-the CLI/API projects in that transaction. Binary installation selects versioned wheels from the same
-inventory and preserves extras when using a bundled wheelhouse.
+under `mn-python-sdk/packages/`. Local source installation resolves every SDK
+component plus the SDK, CLI, and API projects in one editable transaction, so
+no internal SDK dependency falls back to GAR. GitHub source installation uses
+the SDK installer group, and binary installation selects versioned wheels from
+the same inventory and preserves extras when using a bundled wheelhouse.
 
-RAG, models, MCP, collaboration, and Job response engines are not installer
-defaults. Blueprints declare their component dependencies for preparation by
-the SDK. Native response services prepare their own optional host components
-when needed. A new release must publish the indexed packages and refresh its
-version pins and install-support snapshot together; historical snapshots remain
-immutable. Source and wheel tests do not require a live runtime installation.
+RAG, models, MCP, collaboration, and Job response engines are not binary or
+GitHub installer defaults. Local development installs bind their distributions
+to sibling source checkouts, while blueprints and native response services
+still decide which capabilities to enable or prepare at runtime. A new release
+must publish the indexed packages and refresh its version pins and
+install-support snapshot together; historical snapshots remain immutable.
+Source and wheel tests do not require a live runtime installation.
 
 
 The default Compose runtime starts Membrane alongside LiteLLM for automatic
