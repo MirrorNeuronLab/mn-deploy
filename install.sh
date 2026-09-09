@@ -5109,6 +5109,26 @@ function require_local_cli_target_executables() {
     fi
 }
 
+function validate_local_python_component_imports() {
+    local log_dir="${TMPDIR:-/tmp}/mirror_neuron_install"
+    local log_file="${log_dir}/validate-local-python-imports.$$.log"
+    mkdir -p "$log_dir"
+
+    if "$VENV_DIR/bin/python" -c \
+        'import mn_sdk; import mn_cli.main; import mn_api.main' \
+        >"$log_file" 2>&1; then
+        return 0
+    fi
+
+    print_error "Local SDK, CLI, and API source checkouts are not import-compatible."
+    print_error "Update all sibling repositories to matching revisions, then rerun install.sh."
+    print_error "Details: $log_file"
+    if [ "$MN_INSTALL_VERBOSE" = "Y" ]; then
+        tail -n 20 "$log_file" >&3 2>/dev/null || true
+    fi
+    return 1
+}
+
 function install_local_editable_python_packages() {
     local -a editable_requirements=(-e "${PY_SDK_DIR}")
     local component_pyproject skill_pyproject
@@ -5165,6 +5185,7 @@ print_step "Installing Python components from local source"
 ) &
 spinner $! "Installed local editable Python packages"
 require_local_cli_target_executables
+validate_local_python_component_imports
 VENV_INSTALL_OK="Y"
 if [ -n "$VENV_BACKUP_DIR" ]; then
     rm -rf "$VENV_BACKUP_DIR"

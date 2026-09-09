@@ -45,6 +45,10 @@ been published. `--no-skills` excludes optional blueprint capabilities but
 retains skills imported by installed runtime services, including the Job
 response engine and its local dependency closure. Package-index resolution
 remains a binary-mode concern.
+Before accepting the replacement virtual environment or starting services,
+the local installer imports the SDK, CLI, and API entry modules together. An
+import incompatibility between sibling source revisions fails installation and
+restores the previous virtual environment.
 
 ## Installed State
 

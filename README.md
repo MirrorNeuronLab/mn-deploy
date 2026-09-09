@@ -275,7 +275,11 @@ under `mn-python-sdk/packages/`. Local source installation resolves every SDK
 component plus the SDK, CLI, and API projects in one editable transaction, so
 no internal SDK dependency falls back to GAR. GitHub source installation uses
 the SDK installer group, and binary installation selects versioned wheels from
-the same inventory and preserves extras when using a bundled wheelhouse.
+the same inventory and preserves extras when using a bundled wheelhouse. Local
+installation also imports the SDK, CLI, and API together before accepting the
+new virtual environment. If sibling checkouts are revision-incompatible,
+installation stops before service startup and restores the previous virtual
+environment.
 
 RAG, models, MCP, collaboration, and Job response engines are not binary or
 GitHub installer defaults. Local development installs bind their distributions
