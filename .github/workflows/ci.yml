@@ -85,6 +85,7 @@ jobs:
         shell: bash
         env:
           MN_GITHUB_TOKEN: ${{ secrets.MN_GITHUB_TOKEN || secrets.GH_TOKEN || github.token }}
+          MN_PYTHON_INDEX_URL: https://us-central1-python.pkg.dev/mirrorneuron-public-packages/agent-skills/simple/
         run: |
           set -euo pipefail
 
@@ -96,29 +97,32 @@ jobs:
             git config --global url."https://x-access-token:${token}@github.com/".insteadOf "https://github.com/"
           fi
 
+          python_index_url="${MN_PYTHON_INDEX_URL:-https://pypi.org/simple/}"
+          python_extra_index_url="${MN_PYTHON_EXTRA_INDEX_URL:-https://pypi.org/simple}"
+          pip_install_with_indexes=(python -m pip install --index-url "$python_index_url" --extra-index-url "$python_extra_index_url")
+
           if [[ "$GITHUB_REPOSITORY" == "MirrorNeuronLab/mn-api" || "$GITHUB_REPOSITORY" == "MirrorNeuronLab/mn-cli" ]]; then
-            sdk_commit="$(git ls-remote https://github.com/MirrorNeuronLab/mn-python-sdk.git HEAD | cut -f1)"
-            python -m pip install \
-              "mn-python-sdk-common @ git+https://github.com/MirrorNeuronLab/mn-python-sdk.git@${sdk_commit}#subdirectory=packages/common" \
-              "mn-python-sdk-web-ui @ git+https://github.com/MirrorNeuronLab/mn-python-sdk.git@${sdk_commit}#subdirectory=packages/web-ui" \
-              "mirrorneuron-python-sdk @ git+https://github.com/MirrorNeuronLab/mn-python-sdk.git@${sdk_commit}"
+            "${pip_install_with_indexes[@]}" \
+              mn-python-sdk-common \
+              mn-python-sdk-web-ui \
+              mn-python-sdk-mcp \
+              mirrorneuron-python-sdk
           fi
 
           if [[ "$GITHUB_REPOSITORY" == "MirrorNeuronLab/mn-blueprints" ]]; then
-            sdk_commit="$(git ls-remote https://github.com/MirrorNeuronLab/mn-python-sdk.git HEAD | cut -f1)"
-            python -m pip install \
-              "mn-python-sdk-common @ git+https://github.com/MirrorNeuronLab/mn-python-sdk.git@${sdk_commit}#subdirectory=packages/common" \
-              "mn-python-sdk-web-ui @ git+https://github.com/MirrorNeuronLab/mn-python-sdk.git@${sdk_commit}#subdirectory=packages/web-ui" \
-              "mirrorneuron-python-sdk @ git+https://github.com/MirrorNeuronLab/mn-python-sdk.git@${sdk_commit}"
+            "${pip_install_with_indexes[@]}" \
+              mn-python-sdk-common \
+              mn-python-sdk-web-ui \
+              mirrorneuron-python-sdk
           fi
 
           if [[ "$GITHUB_REPOSITORY" == "MirrorNeuronLab/mn-system-tests" ]]; then
             python -m pip install pytest pytest-cov requests
-            sdk_commit="$(git ls-remote https://github.com/MirrorNeuronLab/mn-python-sdk.git HEAD | cut -f1)"
-            python -m pip install \
-              "mn-python-sdk-common @ git+https://github.com/MirrorNeuronLab/mn-python-sdk.git@${sdk_commit}#subdirectory=packages/common" \
-              "mn-python-sdk-web-ui @ git+https://github.com/MirrorNeuronLab/mn-python-sdk.git@${sdk_commit}#subdirectory=packages/web-ui" \
-              "mirrorneuron-python-sdk @ git+https://github.com/MirrorNeuronLab/mn-python-sdk.git@${sdk_commit}"
+            "${pip_install_with_indexes[@]}" \
+              mn-python-sdk-common \
+              mn-python-sdk-web-ui \
+              mn-python-sdk-mcp \
+              mirrorneuron-python-sdk
             python -m pip install "mirrorneuron-cli @ git+https://github.com/MirrorNeuronLab/mn-cli.git"
           elif [[ -f requirements.txt && "${{ steps.detect.outputs.has_python_package }}" != "true" ]]; then
             python -m pip install -r requirements.txt
