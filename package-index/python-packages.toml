@@ -195,6 +195,14 @@ installer_groups = ["skill"]
 binary_default = false
 
 [[packages]]
+name = "mirrorneuron-graph-analysis-skill"
+path = "mn-skills/graph_analysis_skill"
+publish_group = "skill"
+version = "1.3.35"
+installer_groups = ["skill"]
+binary_default = false
+
+[[packages]]
 name = "mirrorneuron-implementation-plan-skill"
 path = "mn-skills/implementation_plan_skill"
 publish_group = "skill"

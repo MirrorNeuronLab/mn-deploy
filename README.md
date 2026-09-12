@@ -286,7 +286,11 @@ GitHub installer defaults. Local development installs bind their distributions
 to sibling source checkouts, while blueprints and native response services
 still decide which capabilities to enable or prepare at runtime. A new release
 must publish the indexed packages and refresh its version pins and
-install-support snapshot together; historical snapshots remain immutable.
+install-support snapshot together. Release preparation derives static project
+versions from each project's pyproject.toml, applies the requested release
+version only to dynamically versioned projects, and fails when an SDK component
+project is missing from the package index; historical snapshots remain
+immutable.
 Source and wheel tests do not require a live runtime installation.
 
 

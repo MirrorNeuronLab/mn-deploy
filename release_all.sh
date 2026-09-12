@@ -80,6 +80,17 @@ restore_version_text() {
   perl -0pi -e "s/\\Q${old_version}\\E/${new_version}/g" "$file"
 }
 
+set_static_project_version() {
+  local file="$1"
+  local version="$2"
+
+  MN_RELEASE_VERSION="$version" perl -0pi -e \
+    's~(\[project\](?:(?!\n\[).)*?\nversion\s*=\s*")[^"]+(")~$1$ENV{MN_RELEASE_VERSION}$2~s' \
+    "$file"
+  grep -Fq "version = \"${version}\"" "$file" ||
+    die "Could not set the Python project version in ${file}."
+}
+
 set_compose_web_ui_version() {
   local file="$1"
   local version="$2"
@@ -129,18 +140,22 @@ prepare_release_metadata() {
   local index_file="${SCRIPT_DIR}/package-index/python-packages.toml"
   local pyproject
 
-  PREVIOUS_VERSION="$(awk -F'"' '/^version =/ {print $2; exit}' "$index_file")"
-  [[ -n "${PREVIOUS_VERSION}" ]] || die "Could not determine the current package-index version."
-
-  restore_version_text "$index_file" "$PREVIOUS_VERSION" "$VERSION"
   set_compose_web_ui_version "${SCRIPT_DIR}/docker-compose.yml" "$VERSION"
 
   for pyproject in \
     "${WORKSPACE_ROOT}/Membrane/mn-context-engine-python-sdk/pyproject.toml" \
     "${WORKSPACE_ROOT}/Membrane/mn-context-auto-optimizer/pyproject.toml" \
     "${WORKSPACE_ROOT}/Membrane/mn-context-auto-optimizer-benchmark/pyproject.toml"; do
-    restore_version_text "$pyproject" "$PREVIOUS_VERSION" "$VERSION"
+    set_static_project_version "$pyproject" "$VERSION"
   done
+
+  # Static projects (including mn-python-sdk/packages/*) retain the version in
+  # their pyproject.toml. Projects versioned by Git tags use this release's
+  # version. Keeping those two cases distinct prevents the package index from
+  # claiming a 1.x SDK component while the build actually produces 0.1.x.
+  PREVIOUS_VERSION="$(python3 \
+    "${SCRIPT_DIR}/scripts/prepare-python-package-index.py" \
+    "$index_file" "$WORKSPACE_ROOT" "$VERSION")"
 
   "${SCRIPT_DIR}/save_install_support.sh" --version "$TAG"
 
@@ -316,7 +331,7 @@ done
 validate_version "$VERSION"
 TAG="v${VERSION}"
 
-for command in git gh gcloud docker npm curl perl; do
+for command in git gh gcloud docker npm curl perl python3; do
   require_command "$command"
 done
 docker info >/dev/null 2>&1 ||
