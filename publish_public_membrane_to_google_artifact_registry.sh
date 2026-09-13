@@ -16,6 +16,9 @@ BINARY_PACKAGE="${MN_MEMBRANE_GAR_BINARY_PACKAGE:-membrane}"
 DOCKER_REPOSITORY="${MN_MEMBRANE_GAR_DOCKER_REPOSITORY:-mirrorneuron-runtime}"
 DOCKER_IMAGE_NAME="${MN_MEMBRANE_DOCKER_IMAGE_NAME:-membrane-context-engine}"
 DOCKER_PLATFORMS="${MN_MEMBRANE_DOCKER_PLATFORMS:-linux/amd64,linux/arm64}"
+QEMU_MODE="${MN_MEMBRANE_QEMU_MODE:-auto}"
+QEMU_IMAGE="${MN_MEMBRANE_QEMU_IMAGE:-tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0}"
+HOST_ARCH="${MN_MEMBRANE_HOST_ARCH:-$(uname -m)}"
 GCLOUD_BIN="${MN_GCLOUD_BIN:-gcloud}"
 DOCKER_BIN="${MN_DOCKER_BIN:-docker}"
 CARGO_BIN="${MN_CARGO_BIN:-cargo}"
@@ -24,6 +27,7 @@ PUBLISH_BINARY="Y"
 PUBLISH_DOCKER="Y"
 TAG_LATEST="Y"
 PREPARED_BINARY_ARTIFACT_DIR=""
+EMULATE_AMD64="N"
 
 usage() {
     cat <<EOF
@@ -64,6 +68,9 @@ Options:
   --docker-platforms LIST         Docker buildx platforms.
                                    Env: MN_MEMBRANE_DOCKER_PLATFORMS.
                                    Default: linux/amd64,linux/arm64.
+  --qemu MODE                     amd64 emulator setup: auto, always, or never.
+                                   Default: auto (enable on an ARM64 host).
+                                   Env: MN_MEMBRANE_QEMU_MODE.
   --skip-binary                   Do not publish generic Rust binary archives.
   --skip-docker                   Do not publish the Docker runtime image.
   --no-latest                     Do not tag the Docker image as latest.
@@ -181,6 +188,12 @@ while [ "$#" -gt 0 ]; do
             DOCKER_PLATFORMS="$1"
             ;;
         --docker-platforms=*) DOCKER_PLATFORMS="${1#*=}" ;;
+        --qemu)
+            shift
+            [ "$#" -gt 0 ] || die "--qemu requires a value."
+            QEMU_MODE="$1"
+            ;;
+        --qemu=*) QEMU_MODE="${1#*=}" ;;
         --skip-binary) PUBLISH_BINARY="N" ;;
         --skip-docker) PUBLISH_DOCKER="N" ;;
         --no-latest) TAG_LATEST="N" ;;
@@ -225,6 +238,44 @@ normalize_version_tag() {
         v*) printf '%s' "$value" ;;
         *) printf 'v%s' "$value" ;;
     esac
+}
+
+validate_qemu_mode() {
+    case "$QEMU_MODE" in
+        auto|always|never) ;;
+        *) die "QEMU mode must be auto, always, or never; got '$QEMU_MODE'." ;;
+    esac
+}
+
+platform_requested() {
+    local platforms="${DOCKER_PLATFORMS//[[:space:]]/}"
+    case ",${platforms}," in
+        *,"$1",*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+configure_amd64_emulation() {
+    platform_requested linux/amd64 || return
+
+    case "$QEMU_MODE" in
+        always)
+            EMULATE_AMD64="Y"
+            ;;
+        auto)
+            case "$HOST_ARCH" in
+                arm64|aarch64) EMULATE_AMD64="Y" ;;
+            esac
+            ;;
+        never)
+            return
+            ;;
+    esac
+
+    if [ "$EMULATE_AMD64" = "Y" ]; then
+        log "Configuring amd64 QEMU emulation for Membrane release build on ${HOST_ARCH}."
+        run_or_echo "$DOCKER_BIN" run --privileged --rm "$QEMU_IMAGE" --install amd64
+    fi
 }
 
 infer_version() {
@@ -439,6 +490,8 @@ publish_docker_image() {
         run_or_echo "$GCLOUD_BIN" auth configure-docker "$registry" --quiet
     fi
 
+    configure_amd64_emulation
+
     build_cmd=(
         "$DOCKER_BIN" buildx build
         --target runtime
@@ -457,6 +510,7 @@ publish_docker_image() {
 
 VERSION_TAG="$(infer_version)"
 VERSION_NUMBER="${VERSION_TAG#v}"
+validate_qemu_mode
 
 if [ -z "$PROJECT" ]; then
     die "GAR project is required."

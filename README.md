@@ -278,6 +278,10 @@ Run its isolated Git regression test with:
     --version v1.2.8
   ```
 
+  On ARM64 hosts this automatically registers the pinned QEMU binfmt handler
+  before building the amd64 image. Use `--qemu never` only when the host already
+  provides amd64 emulation.
+
 - Public Otterdesk desktop app package GAR apply:
 
   ```bash
