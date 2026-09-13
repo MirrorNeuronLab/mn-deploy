@@ -356,3 +356,39 @@ Without the flag, all modes retain their normal GAR image selection and pull.
 Subsequent runtime/blueprint startup does not build images. Missing source and
 `--build-membrane --no-context-engine` fail before installation; a failed build
 stops the installer without pulling GAR as a fallback. No image is published.
+
+## Delete GAR package versions
+
+```bash
+./CLEARN_GAR.sh -v 1.3.48             # Delete versions strictly below 1.3.48.
+./CLEARN_GAR.sh -a                   # Delete all stored package versions.
+./CLEARN_GAR.sh -v 1.3.48 --dry-run   # Preview only.
+```
+
+The script inventories every repository location in
+`mirrorneuron-public-packages`. Set `MN_GAR_PROJECT` or pass `--project` to
+select another project. It prints each selected version and its tags, then
+requires the exact uppercase answer `YES`. There is no confirmation bypass.
+Repository definitions and IAM are retained; virtual repositories have no
+stored artifacts and are skipped. An inventory failure prevents deletion.
+A changed deletion plan after confirmation requires a fresh run and confirmation.
+
+Cutoff comparisons are numeric, so `1.3.9` is older than `1.3.48`, while
+`1.3.100` is newer. Common prereleases are older than their final release.
+Docker versions are selected by release tags; a digest with any comparable tag
+at or above the cutoff is retained. Untagged images and unrecognized version
+names are reported and skipped in cutoff mode, but included by `-a`.
+Deleting a selected version removes its associated tags, including aliases.
+This uses Google's [Artifact Registry version deletion command](https://docs.cloud.google.com/sdk/gcloud/reference/artifacts/versions/delete).
+
+**Deletion is permanent.** The cutoff applies to each package's own version,
+including independently versioned packages still required by a newer release.
+Old installer snapshots, blueprints, and deployed applications can therefore
+lose required artifacts. The script does not rewrite their dependency pins.
+
+Requires authenticated `gcloud` with Artifact Registry deletion permission and
+Python 3.10+. Run offline regression tests with:
+
+```bash
+../mn-python-sdk/.venv/bin/python -m pytest scripts/test_clean_gar.py -q
+```

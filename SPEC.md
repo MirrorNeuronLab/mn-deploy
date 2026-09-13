@@ -183,3 +183,22 @@ Without the flag, all modes retain their normal GAR image selection and pull.
 Subsequent runtime/blueprint startup does not build images. Missing source and
 `--build-membrane --no-context-engine` fail before installation; a failed build
 stops the installer without pulling GAR as a fallback. No image is published.
+
+## Explicit GAR cleanup
+
+`CLEARN_GAR.sh -v MAJOR.MINOR.PATCH` deletes stored versions strictly below the
+numeric cutoff across every repository location in the selected GAR project.
+`-a` selects all stored versions. These modes are mutually exclusive. Neither
+mode deletes repositories or IAM, and neither is invoked by release automation.
+A complete deletion preview and the exact response `YES` are required before
+any mutation; `--dry-run` only inventories. No `--yes` bypass is provided.
+The default project is `mirrorneuron-public-packages`, overridden explicitly
+by `--project` or `MN_GAR_PROJECT`.
+
+Docker digests are compared using their version tags and retained if any
+comparable tag is at or above the cutoff. Cutoff mode reports unversioned or
+unrecognized versions without deleting them; `-a` includes them. Deleted
+versions lose all their tags. Failures during inventory abort before deletion;
+failures during deletion stop and report completed deletions and the failed
+resource. An updated deletion plan during confirmation aborts for fresh review.
+Tests use a fake gcloud executable and must never clean the live registry.
