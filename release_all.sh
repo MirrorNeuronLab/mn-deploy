@@ -288,10 +288,9 @@ prepare_release_metadata() {
     set_static_project_version "$pyproject" "$VERSION"
   done
 
-  # Static projects (including mn-python-sdk/packages/*) retain the version in
-  # their pyproject.toml. Projects versioned by Git tags use this release's
-  # version. Keeping those two cases distinct prevents the package index from
-  # claiming a 1.x SDK component while the build actually produces 0.1.x.
+  # All SDK component projects are versioned by the shared Git release tag.
+  # The package-index preparation step rejects a static component version so a
+  # release cannot publish the SDK and its component wheels at different versions.
   PREVIOUS_VERSION="$(python3 \
     "${SCRIPT_DIR}/scripts/prepare-python-package-index.py" \
     "$index_file" "$WORKSPACE_ROOT" "$VERSION")"

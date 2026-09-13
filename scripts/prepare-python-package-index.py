@@ -9,17 +9,22 @@ import tomllib
 from pathlib import Path
 
 
-PACKAGE_BLOCK = re.compile(
-    r"(?ms)^\[\[packages\]\]\n.*?(?=^\[\[packages\]\]\n|\Z)"
-)
+PACKAGE_BLOCK = re.compile(r"(?ms)^\[\[packages\]\]\n.*?(?=^\[\[packages\]\]\n|\Z)")
 VERSION_LINE = re.compile(r'(?m)^version = "[^"]+"$')
 
 
-def project_release_version(pyproject: Path, release_version: str) -> str:
+def project_release_version(
+    pyproject: Path, release_version: str, *, require_dynamic: bool = False
+) -> str:
     data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
     project = data.get("project") or {}
     static_version = project.get("version")
     if isinstance(static_version, str) and static_version:
+        if require_dynamic:
+            raise SystemExit(
+                f"SDK component must use the shared release version via "
+                f"project.dynamic: {pyproject}"
+            )
         return static_version
     if "version" in (project.get("dynamic") or []):
         return release_version
@@ -66,7 +71,11 @@ def synchronize(index_file: Path, workspace_root: Path, release_version: str) ->
         pyproject = workspace_root / str(package["path"]) / "pyproject.toml"
         if not pyproject.is_file():
             raise SystemExit(f"Indexed package is missing pyproject.toml: {pyproject}")
-        version = project_release_version(pyproject, release_version)
+        version = project_release_version(
+            pyproject,
+            release_version,
+            require_dynamic=sdk_packages_root in pyproject.parents,
+        )
         updated, count = VERSION_LINE.subn(f'version = "{version}"', block)
         if count != 1:
             raise SystemExit(
