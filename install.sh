@@ -297,11 +297,8 @@ function mn_prepare_docker_model_runner_cli() {
         if docker model status >/dev/null 2>&1; then
             return 0
         fi
-        print_step "Enabling Docker Model Runner in Docker Desktop"
-        if ! docker desktop enable model-runner >/dev/null 2>&1; then
-            print_warning "Docker Desktop did not enable Model Runner automatically."
-        fi
-        return 0
+        print_error "Enable Model Runner in Docker Desktop Settings, then rerun install.sh."
+        return 1
     fi
 
     if mn_is_ubuntu_linux_host && ! docker model --help >/dev/null 2>&1; then
@@ -477,77 +474,27 @@ function mn_run_docker_build() {
     return "$status"
 }
 
-function mn_print_docker_desktop_permission_notice() {
-    [ "$(uname -s)" = "Darwin" ] || return 0
-
-    printf '==> Preparing Docker Desktop access\n' >&3
-    printf 'Docker Desktop may ask Terminal to access data from other apps. Select Allow so the installer can configure Docker services and Model Runner.\n' >&3
-}
-
-function mn_preferred_shell_profile() {
-    local shell_path="${SHELL:-}"
-    local shell_name="${shell_path##*/}"
-
-    case "$shell_name" in
-        zsh)
-            printf '%s/.zshrc\n' "$HOME"
-            ;;
-        bash)
-            if [ "$(uname -s)" = "Darwin" ]; then
-                printf '%s/.bash_profile\n' "$HOME"
-            else
-                printf '%s/.bashrc\n' "$HOME"
-            fi
-            ;;
-        sh)
-            printf '%s/.profile\n' "$HOME"
-            ;;
-        *)
-            if [ "$(uname -s)" = "Darwin" ]; then
-                printf '%s/.zshrc\n' "$HOME"
-            else
-                printf '%s/.profile\n' "$HOME"
-            fi
-            ;;
-    esac
-}
-
-function mn_deduplicate_profile_line() {
-    local profile="$1"
-    local target_line="$2"
-    local line_count
-    local temporary_profile
-
-    [ -f "$profile" ] || return 0
-    line_count="$(grep -Fxc -- "$target_line" "$profile" 2>/dev/null || true)"
-    [ "${line_count:-0}" -gt 1 ] || return 0
-
-    temporary_profile="$(mktemp "${profile}.mn.XXXXXX")"
-    if ! MN_PROFILE_TARGET_LINE="$target_line" awk '
-        $0 == ENVIRON["MN_PROFILE_TARGET_LINE"] {
-            if (found) next
-            found = 1
-        }
-        { print }
-    ' "$profile" > "$temporary_profile"; then
-        rm -f "$temporary_profile"
-        return 1
+function mn_prepare_installer_paths() {
+    MN_EXISTING_INSTALL="N"
+    if [ -d "$INSTALL_DIR" ] || [ -f "$BIN_DIR/mn" ]; then
+        MN_EXISTING_INSTALL="Y"
     fi
-    if ! cat "$temporary_profile" > "$profile"; then
-        rm -f "$temporary_profile"
-        return 1
-    fi
-    rm -f "$temporary_profile"
+    # Keep downloads, logs and package caches away from macOS protected folders.
+    mkdir -p "$INSTALL_DIR/tmp" "$INSTALL_DIR/cache"
+    export TMPDIR="$INSTALL_DIR/tmp"
+    export PIP_CACHE_DIR="$INSTALL_DIR/cache/pip"
+    export UV_PYTHON_BIN_DIR="$INSTALL_DIR/bin"
 }
 
-function mn_deduplicate_generated_profile_exports() {
-    local profile="$1"
-    local path_line="$2"
-    local home_line="$3"
-
-    mn_deduplicate_profile_line "$profile" "# MN and OTTERDESK"
-    mn_deduplicate_profile_line "$profile" "$path_line"
-    mn_deduplicate_profile_line "$profile" "$home_line"
+function mn_write_shell_environment() {
+    local env_file="$INSTALL_DIR/env"
+    mkdir -p "$INSTALL_DIR"
+    printf 'export MN_HOME=%q\n' "$INSTALL_DIR" > "$env_file"
+    printf 'export PATH="$MN_HOME/bin:$PATH"\n' >> "$env_file"
+    export PATH="$BIN_DIR:$PATH"
+    MN_SHELL_PROFILE_RELOAD_REQUIRED="Y"
+    MN_SHELL_PROFILE_PATH="$env_file"
+    print_warning "Load the commands with: source $(shell_escape_value "$env_file")"
 }
 
 function mn_print_next_shell_command() {
@@ -563,7 +510,7 @@ function mn_print_next_shell_command() {
 function mn_print_cli_verification_prompt() {
     [ "${INSTALL_CLI:-N}" = "Y" ] || return 0
 
-    printf 'Next: Open a new terminal session, then run mn --help to confirm the CLI is available.\n' >&3
+    mn_print_next_shell_command "mn --help"
 }
 
 function mn_run_runtime_compose() {
@@ -1223,8 +1170,6 @@ function mn_stop_runtime_containers_for_reinstall() {
     fi
 }
 
-MN_REINSTALL_STATE_BACKUP=""
-
 function mn_reconcile_native_resources_before_reinstall() {
     local cleanup_cli=""
 
@@ -1239,42 +1184,6 @@ function mn_reconcile_native_resources_before_reinstall() {
     if ! "$cleanup_cli" runtime cleanup --yes >/dev/null 2>&1; then
         print_warning "Native-resource reconciliation was unavailable or inconclusive; preserving resources and cleanup evidence."
     fi
-}
-
-function mn_preserve_runtime_state_for_reinstall() {
-    local name backup_root
-    [ -d "$INSTALL_DIR" ] || return 0
-
-    backup_root="$(mktemp -d "${TMPDIR:-/tmp}/mn-reinstall-state.XXXXXX")"
-    for name in \
-        native-resources.json docker-workers.json docker-compose.workers.yml \
-        docker-compose-projects docker-compose.env docker-compose.cluster.yml \
-        openshell-state job-data runs shared blobs blueprint_installs federation \
-        models model-remotes.json syncthing syncthing.api-key cluster-join-claim.json \
-        network.token erlang.cookie grpc_admin.token grpc_auth.token redis.password; do
-        if [ -e "$INSTALL_DIR/$name" ] || [ -L "$INSTALL_DIR/$name" ]; then
-            if ! cp -a "$INSTALL_DIR/$name" "$backup_root/$name"; then
-                print_error "Could not preserve MirrorNeuron runtime state before reinstall: $name"
-                exit 1
-            fi
-        fi
-    done
-    MN_REINSTALL_STATE_BACKUP="$backup_root"
-}
-
-function mn_restore_runtime_state_after_reinstall() {
-    local name
-    [ -n "$MN_REINSTALL_STATE_BACKUP" ] || return 0
-    [ -d "$MN_REINSTALL_STATE_BACKUP" ] || return 0
-
-    mkdir -p "$INSTALL_DIR"
-    for name in "$MN_REINSTALL_STATE_BACKUP"/*; do
-        [ -e "$name" ] || continue
-        cp -a "$name" "$INSTALL_DIR/"
-    done
-    rm -rf "$MN_REINSTALL_STATE_BACKUP"
-    MN_REINSTALL_STATE_BACKUP=""
-    print_detail "Restored durable jobs, native-resource registry, and OpenShell state."
 }
 
 function mn_remove_path_or_exit() {
@@ -1304,9 +1213,8 @@ function mn_remove_path_or_exit() {
 
 function mn_remove_existing_install_paths() {
     mn_reconcile_native_resources_before_reinstall
-    mn_preserve_runtime_state_for_reinstall
     mn_stop_runtime_containers_for_reinstall
-    mn_remove_path_or_exit "$INSTALL_DIR" "MirrorNeuron state directory"
+    # Durable state stays in place, including Docker-owned/read-only directories.
     mn_remove_path_or_exit "$VENV_DIR" "MirrorNeuron Python virtual environment"
     mn_remove_path_or_exit "$BIN_DIR/mn" "MirrorNeuron CLI executable"
     mn_remove_path_or_exit "$BIN_DIR/mn-api" "MirrorNeuron API executable"
@@ -1452,8 +1360,8 @@ fi
 
 MN_MANAGED_PYTHON="${MN_MANAGED_PYTHON:-1}"
 MN_MANAGED_PYTHON_VERSION="${MN_MANAGED_PYTHON_VERSION:-$MN_DEFAULT_MANAGED_PYTHON_VERSION}"
-MN_MANAGED_PYTHON_ROOT="${MN_MANAGED_PYTHON_DIR:-${HOME}/.local/share/mn_python}"
-MN_UV_ROOT="${MN_UV_DIR:-${HOME}/.local/share/mn_uv}"
+MN_MANAGED_PYTHON_ROOT="${MN_MANAGED_PYTHON_DIR:-${MN_HOME:-${HOME}/.mn}/python}"
+MN_UV_ROOT="${MN_UV_DIR:-${MN_HOME:-${HOME}/.mn}/uv}"
 MN_UV_BIN=""
 MN_GITHUB_TOKEN_LOOKED_UP="N"
 MN_GITHUB_TOKEN_VALUE=""
@@ -1859,8 +1767,8 @@ function resolve_python_runtime() {
 }
 
 INSTALL_DIR="${MN_HOME:-${HOME}/.mn}"
-BIN_DIR="${HOME}/.local/bin"
-VENV_DIR="${HOME}/.local/share/mn_venv"
+BIN_DIR="${INSTALL_DIR}/bin"
+VENV_DIR="${INSTALL_DIR}/venv"
 MN_PYTHON_BIN=""
 SOURCE_WORKSPACE=""
 SCRIPT_DIR="$(mn_script_dir)"
@@ -1888,10 +1796,9 @@ MN_SYNCTHING_GUI_PORT="${MN_SYNCTHING_GUI_PORT:-58384}"
 MN_SYNCTHING_SYNC_PORT="${MN_SYNCTHING_SYNC_PORT:-22000}"
 MN_SYNCTHING_RESCAN_INTERVAL_SECONDS="${MN_SYNCTHING_RESCAN_INTERVAL_SECONDS:-3600}"
 MN_BLUEPRINT_PYTHON_ENVS_DIR="${MN_BLUEPRINT_PYTHON_ENVS_DIR:-}"
-MN_HOST_OPENSHELL_CONFIG_DIR="${OPENSHELL_CONTAINER_CONFIG_DIR:-${HOME}/.config/openshell-mirror-neuron}"
+MN_HOST_OPENSHELL_CONFIG_DIR="${OPENSHELL_CONTAINER_CONFIG_DIR:-${INSTALL_DIR}/.config/openshell-mirror-neuron}"
 MN_HOST_OPENSHELL_STATE_DIR="${MN_HOST_OPENSHELL_STATE_DIR:-${INSTALL_DIR}/openshell-state}"
 OPENSHELL_GATEWAY_USER="${OPENSHELL_GATEWAY_USER:-$(id -u):$(id -g)}"
-mn_print_docker_desktop_permission_notice
 DOCKER_HOST_SOCKET="${DOCKER_HOST_SOCKET:-$(mn_resolve_docker_host_socket)}"
 if [ -z "${OPENSHELL_GATEWAY_DOCKER_GROUP:-}" ] && [ "$(uname -s)" = "Darwin" ]; then
     OPENSHELL_GATEWAY_DOCKER_GROUP="0"
@@ -2112,6 +2019,7 @@ function finalize_github_install_version() {
 
 finalize_github_install_version
 
+mn_prepare_installer_paths
 print_header
 
 function github_ref_suffix() {
@@ -2381,16 +2289,6 @@ sandbox_namespace = "mirror-neuron"
 grpc_endpoint = "http://openshell:${OPENSHELL_GATEWAY_PORT:-58080}"
 network_name = "${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
 EOF
-}
-
-function install_openshell_cli() {
-    if command -v openshell >/dev/null 2>&1; then
-        return 0
-    fi
-    local installer="${TMPDIR:-/tmp}/mirror_neuron_openshell_install.sh"
-    curl_github -fLsS https://raw.githubusercontent.com/NVIDIA/OpenShell/main/install.sh -o "$installer"
-    OPENSHELL_VERSION="${OPENSHELL_VERSION:-$MN_DEFAULT_OPENSHELL_VERSION}" sh "$installer" >/dev/null
-    rm -f "$installer"
 }
 
 function generate_mn_secret() {
@@ -3058,7 +2956,7 @@ print_step "Checking Python runtime"
 resolve_python_runtime
 
 EXISTING_INSTALL="N"
-if [ -d "$INSTALL_DIR" ] || [ -f "$BIN_DIR/mn" ]; then
+if [ "$MN_EXISTING_INSTALL" = "Y" ]; then
     if [ "$MN_INSTALL_RESET" != "Y" ]; then
         print_warning "MirrorNeuron appears to be already installed."
     fi
@@ -3113,9 +3011,9 @@ fi
 print_step "Installing MirrorNeuron Core (Docker)"
 
 (
-    github_clone "$(core_git_url)" "$INSTALL_DIR" >/dev/null 2>&1
-    mn_restore_runtime_state_after_reinstall
-    cd "$INSTALL_DIR"
+    mn_remove_path_or_exit "$INSTALL_DIR/core-source" "MirrorNeuron Core source"
+    github_clone "$(core_git_url)" "$INSTALL_DIR/core-source" >/dev/null 2>&1
+    cd "$INSTALL_DIR/core-source"
     
     if [ ! -f "Dockerfile" ]; then
         cat << 'EOF' > Dockerfile
@@ -3226,9 +3124,6 @@ if [ "$INSTALL_WEB_UI" = "Y" ]; then
 fi
 
 if [ "$INSTALL_REDIS" = "Y" ] || [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] || [ "$INSTALL_OPENSHELL" = "Y" ] || [ "$INSTALL_WEB_UI" = "Y" ]; then
-    if [ "$INSTALL_OPENSHELL" = "Y" ]; then
-        install_openshell_cli
-    fi
     if [ "$START_NOW" = "Y" ]; then
         prepare_runtime_compose_sidecars
         print_detail "Docker services are prepared; automatic startup is deferred to mn runtime start."
@@ -3273,91 +3168,8 @@ function shell_escape_value() {
     printf '%q' "$1"
 }
 
-function profile_has_bin_path() {
-    local profile="$1"
-    [ -f "$profile" ] || return 1
-    local line
-    while IFS= read -r line; do
-        [[ "$line" =~ ^[[:space:]]*# ]] && continue
-        if [[ "$line" == *'PATH'* && "$line" == *'$MN_HOME/bin'* ]]; then
-            return 0
-        fi
-    done < "$profile"
-    return 1
-}
-
-function profile_has_runtime_home() {
-    local profile="$1"
-    [ -f "$profile" ] || return 1
-    local line
-    while IFS= read -r line; do
-        [[ "$line" =~ ^[[:space:]]*# ]] && continue
-        if [[ "$line" =~ ^[[:space:]]*(export[[:space:]]+)?MN_HOME= ]]; then
-            return 0
-        fi
-    done < "$profile"
-    return 1
-}
-
 function ensure_shell_profile_exports() {
-    local needs_path="N"
-    local needs_runtime_home="Y"
-    local default_home="${HOME}/.mn"
-    local shell_profile
-    local profile_updated="N"
-
-    [[ ":$PATH:" != *":$BIN_DIR:"* ]] && needs_path="Y"
-
-    if [ "$needs_path" = "N" ] && [ "$needs_runtime_home" = "N" ]; then
-        return
-    fi
-
-    if [ "$needs_path" = "Y" ]; then
-        print_warning "${BIN_DIR} is not in your PATH."
-    fi
-    if [ "$needs_runtime_home" = "Y" ]; then
-        print_detail "Persisting MN_HOME=${INSTALL_DIR} for future terminal sessions."
-    fi
-
-    shell_profile="$(mn_preferred_shell_profile)"
-    local detected_profiles=("$shell_profile")
-
-    local profile path_line home_line wrote_header wrote_profile
-    if [ "$INSTALL_DIR" = "$default_home" ]; then
-        home_line='export MN_HOME="$HOME/.mn"'
-    else
-        home_line="export MN_HOME=$(shell_escape_value "$INSTALL_DIR")"
-    fi
-    path_line='export PATH="$MN_HOME/bin:$PATH"'
-
-    for profile in "${detected_profiles[@]}"; do
-        wrote_header="N"
-        wrote_profile="N"
-        mn_deduplicate_generated_profile_exports "$profile" "$path_line" "$home_line"
-        if [ "$needs_runtime_home" = "Y" ] && ! profile_has_runtime_home "$profile"; then
-            [ "$wrote_header" = "N" ] && echo -e "\n# MN and OTTERDESK" >> "$profile" && wrote_header="Y"
-            echo "$home_line" >> "$profile"
-            wrote_profile="Y"
-        fi
-        if [ "$needs_path" = "Y" ] && ! profile_has_bin_path "$profile"; then
-            [ "$wrote_header" = "N" ] && echo -e "\n# MN and OTTERDESK" >> "$profile" && wrote_header="Y"
-            echo "$path_line" >> "$profile"
-            wrote_profile="Y"
-        fi
-        if [ "$wrote_profile" = "Y" ]; then
-            print_detail "Updated shell exports: ${profile}"
-            profile_updated="Y"
-        fi
-    done
-
-    if [ "$needs_path" = "Y" ]; then
-        export PATH="${BIN_DIR}:${PATH}"
-    fi
-    if [ "$needs_path" = "Y" ] || [ "$profile_updated" = "Y" ]; then
-        MN_SHELL_PROFILE_RELOAD_REQUIRED="Y"
-        MN_SHELL_PROFILE_PATH="$shell_profile"
-        print_warning "Open a new terminal, or run: source $(shell_escape_value "$shell_profile")"
-    fi
+    mn_write_shell_environment
 }
 
 ensure_shell_profile_exports
@@ -3420,8 +3232,8 @@ SCRIPT_DIR="$(mn_script_dir)"
 WORKSPACE_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 INSTALL_DIR="${MN_HOME:-${HOME}/.mn}"
-BIN_DIR="${HOME}/.local/bin"
-VENV_DIR="${HOME}/.local/share/mn_venv"
+BIN_DIR="${INSTALL_DIR}/bin"
+VENV_DIR="${INSTALL_DIR}/venv"
 UI_LINK_DIR="${INSTALL_DIR}/webui"
 RUNTIME_COMPOSE_TEMPLATE="${SCRIPT_DIR}/docker-compose.yml"
 RUNTIME_COMPOSE_FILE="${INSTALL_DIR}/docker-compose.yml"
@@ -3453,10 +3265,9 @@ MN_SYNCTHING_GUI_PORT="${MN_SYNCTHING_GUI_PORT:-58384}"
 MN_SYNCTHING_SYNC_PORT="${MN_SYNCTHING_SYNC_PORT:-22000}"
 MN_SYNCTHING_RESCAN_INTERVAL_SECONDS="${MN_SYNCTHING_RESCAN_INTERVAL_SECONDS:-3600}"
 MN_BLUEPRINT_PYTHON_ENVS_DIR="${MN_BLUEPRINT_PYTHON_ENVS_DIR:-}"
-MN_HOST_OPENSHELL_CONFIG_DIR="${OPENSHELL_CONTAINER_CONFIG_DIR:-${HOME}/.config/openshell-mirror-neuron}"
+MN_HOST_OPENSHELL_CONFIG_DIR="${OPENSHELL_CONTAINER_CONFIG_DIR:-${INSTALL_DIR}/.config/openshell-mirror-neuron}"
 MN_HOST_OPENSHELL_STATE_DIR="${MN_HOST_OPENSHELL_STATE_DIR:-${INSTALL_DIR}/openshell-state}"
 OPENSHELL_GATEWAY_USER="${OPENSHELL_GATEWAY_USER:-$(id -u):$(id -g)}"
-mn_print_docker_desktop_permission_notice
 DOCKER_HOST_SOCKET="${DOCKER_HOST_SOCKET:-$(mn_resolve_docker_host_socket)}"
 if [ -z "${OPENSHELL_GATEWAY_DOCKER_GROUP:-}" ] && [ "$(uname -s)" = "Darwin" ]; then
     OPENSHELL_GATEWAY_DOCKER_GROUP="0"
@@ -3469,8 +3280,8 @@ MN_DYNAMIC_REDIS_PORT_END="${MN_DYNAMIC_REDIS_PORT_END:-56478}"
 MN_PYTHON_BIN=""
 MN_MANAGED_PYTHON="${MN_MANAGED_PYTHON:-1}"
 MN_MANAGED_PYTHON_VERSION="${MN_MANAGED_PYTHON_VERSION:-$MN_DEFAULT_MANAGED_PYTHON_VERSION}"
-MN_MANAGED_PYTHON_ROOT="${MN_MANAGED_PYTHON_DIR:-${HOME}/.local/share/mn_python}"
-MN_UV_ROOT="${MN_UV_DIR:-${HOME}/.local/share/mn_uv}"
+MN_MANAGED_PYTHON_ROOT="${MN_MANAGED_PYTHON_DIR:-${MN_HOME:-${HOME}/.mn}/python}"
+MN_UV_ROOT="${MN_UV_DIR:-${MN_HOME:-${HOME}/.mn}/uv}"
 MN_UV_BIN=""
 
 INSTALL_WEB_UI="Y"
@@ -4298,7 +4109,7 @@ function resolve_redis_port() {
 function start_core_container() {
     local cmd=("docker" "run" "-d" "--name" "mirror-neuron-core")
     local openshell_config_dir="$HOME/.config/openshell"
-    local openshell_container_config_dir="${OPENSHELL_CONTAINER_CONFIG_DIR:-$HOME/.config/openshell-mirror-neuron}"
+    local openshell_container_config_dir="${OPENSHELL_CONTAINER_CONFIG_DIR:-${INSTALL_DIR}/.config/openshell-mirror-neuron}"
     local openshell_mount_dir="$openshell_config_dir"
     local core_host="${MN_CORE_HOST:-localhost}"
     local redis_host="${MN_REDIS_HOST:-localhost}"
@@ -4465,16 +4276,6 @@ sandbox_namespace = "mirror-neuron"
 grpc_endpoint = "http://openshell:${OPENSHELL_GATEWAY_PORT:-58080}"
 network_name = "${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
 EOF
-}
-
-function install_openshell_cli() {
-    if command -v openshell >/dev/null 2>&1; then
-        return 0
-    fi
-    local installer="${TMPDIR:-/tmp}/mirror_neuron_openshell_install.sh"
-    curl_github -fLsS https://raw.githubusercontent.com/NVIDIA/OpenShell/main/install.sh -o "$installer"
-    OPENSHELL_VERSION="${OPENSHELL_VERSION:-$MN_DEFAULT_OPENSHELL_VERSION}" sh "$installer" >/dev/null
-    rm -f "$installer"
 }
 
 function resolve_docker_network_external() {
@@ -4941,93 +4742,11 @@ function shell_escape_value() {
     printf '%q' "$1"
 }
 
-function profile_has_bin_path() {
-    local profile="$1"
-    [ -f "$profile" ] || return 1
-    local line
-    while IFS= read -r line; do
-        [[ "$line" =~ ^[[:space:]]*# ]] && continue
-        if [[ "$line" == *'PATH'* && "$line" == *'$MN_HOME/bin'* ]]; then
-            return 0
-        fi
-    done < "$profile"
-    return 1
-}
-
-function profile_has_runtime_home() {
-    local profile="$1"
-    [ -f "$profile" ] || return 1
-    local line
-    while IFS= read -r line; do
-        [[ "$line" =~ ^[[:space:]]*# ]] && continue
-        if [[ "$line" =~ ^[[:space:]]*(export[[:space:]]+)?MN_HOME= ]]; then
-            return 0
-        fi
-    done < "$profile"
-    return 1
-}
-
 function ensure_shell_profile_exports() {
-    local needs_path="N"
-    local needs_runtime_home="Y"
-    local default_home="${HOME}/.mn"
-    local shell_profile
-    local profile_updated="N"
-
-    [[ ":$PATH:" != *":$BIN_DIR:"* ]] && needs_path="Y"
-
-    if [ "$needs_path" = "N" ] && [ "$needs_runtime_home" = "N" ]; then
-        return
-    fi
-
-    if [ "$needs_path" = "Y" ]; then
-        print_warning "${BIN_DIR} is not in your PATH."
-    fi
-    if [ "$needs_runtime_home" = "Y" ]; then
-        print_detail "Persisting MN_HOME=${INSTALL_DIR} for future terminal sessions."
-    fi
-
-    shell_profile="$(mn_preferred_shell_profile)"
-    local detected_profiles=("$shell_profile")
-
-    local profile path_line home_line wrote_header wrote_profile
-    if [ "$INSTALL_DIR" = "$default_home" ]; then
-        home_line='export MN_HOME="$HOME/.mn"'
-    else
-        home_line="export MN_HOME=$(shell_escape_value "$INSTALL_DIR")"
-    fi
-    path_line='export PATH="$MN_HOME/bin:$PATH"'
-
-    for profile in "${detected_profiles[@]}"; do
-        wrote_header="N"
-        wrote_profile="N"
-        mn_deduplicate_generated_profile_exports "$profile" "$path_line" "$home_line"
-        if [ "$needs_runtime_home" = "Y" ] && ! profile_has_runtime_home "$profile"; then
-            [ "$wrote_header" = "N" ] && echo "" >> "$profile" && echo "# MN and OTTERDESK" >> "$profile" && wrote_header="Y"
-            echo "$home_line" >> "$profile"
-            wrote_profile="Y"
-        fi
-        if [ "$needs_path" = "Y" ] && ! profile_has_bin_path "$profile"; then
-            [ "$wrote_header" = "N" ] && echo "" >> "$profile" && echo "# MN and OTTERDESK" >> "$profile" && wrote_header="Y"
-            echo "$path_line" >> "$profile"
-            wrote_profile="Y"
-        fi
-        if [ "$wrote_profile" = "Y" ]; then
-            print_detail "Updated shell exports: ${profile}"
-            profile_updated="Y"
-        fi
-    done
-
-    if [ "$needs_path" = "Y" ]; then
-        export PATH="${BIN_DIR}:${PATH}"
-    fi
-    if [ "$needs_path" = "Y" ] || [ "$profile_updated" = "Y" ]; then
-        MN_SHELL_PROFILE_RELOAD_REQUIRED="Y"
-        MN_SHELL_PROFILE_PATH="$shell_profile"
-        print_warning "Open a new terminal, or run: source $(shell_escape_value "$shell_profile")"
-    fi
+    mn_write_shell_environment
 }
 
+mn_prepare_installer_paths
 print_header
 
 require_install_dir_not_source
@@ -5220,9 +4939,6 @@ if [ "$INSTALL_WEB_UI" = "Y" ]; then
 fi
 
 if [ "$INSTALL_REDIS" = "Y" ] || [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] || [ "$INSTALL_OPENSHELL" = "Y" ] || [ "$INSTALL_WEB_UI" = "Y" ]; then
-    if [ "$INSTALL_OPENSHELL" = "Y" ]; then
-        install_openshell_cli
-    fi
     if [ "$START_NOW" = "Y" ]; then
         prepare_runtime_compose_sidecars
         print_detail "Docker services are prepared; automatic startup is deferred to mn runtime start."
@@ -5328,7 +5044,7 @@ fi
 SCRIPT_DIR="$(mn_script_dir)"
 INSTALL_DIR="${MN_HOME:-${HOME}/.mn}"
 BIN_DIR="${INSTALL_DIR}/bin"
-VENV_DIR="${HOME}/.local/share/mn_venv"
+VENV_DIR="${INSTALL_DIR}/venv"
 MN_WEB_UI_SOURCE_MODE="${MN_WEB_UI_SOURCE_MODE:-package}"
 MN_WEB_UI_SOURCE_MOUNT="${MN_WEB_UI_SOURCE_MOUNT:-${INSTALL_DIR}/web-ui-source}"
 MN_WEB_UI_PACKAGE_VERSION="${MN_WEB_UI_PACKAGE_VERSION:-}"
@@ -5377,10 +5093,9 @@ MN_SYNCTHING_GUI_PORT="${MN_SYNCTHING_GUI_PORT:-58384}"
 MN_SYNCTHING_SYNC_PORT="${MN_SYNCTHING_SYNC_PORT:-22000}"
 MN_SYNCTHING_RESCAN_INTERVAL_SECONDS="${MN_SYNCTHING_RESCAN_INTERVAL_SECONDS:-3600}"
 MN_BLUEPRINT_PYTHON_ENVS_DIR="${MN_BLUEPRINT_PYTHON_ENVS_DIR:-}"
-MN_HOST_OPENSHELL_CONFIG_DIR="${OPENSHELL_CONTAINER_CONFIG_DIR:-${HOME}/.config/openshell-mirror-neuron}"
+MN_HOST_OPENSHELL_CONFIG_DIR="${OPENSHELL_CONTAINER_CONFIG_DIR:-${INSTALL_DIR}/.config/openshell-mirror-neuron}"
 MN_HOST_OPENSHELL_STATE_DIR="${MN_HOST_OPENSHELL_STATE_DIR:-${INSTALL_DIR}/openshell-state}"
 OPENSHELL_GATEWAY_USER="${OPENSHELL_GATEWAY_USER:-$(id -u):$(id -g)}"
-mn_print_docker_desktop_permission_notice
 DOCKER_HOST_SOCKET="${DOCKER_HOST_SOCKET:-$(mn_resolve_docker_host_socket)}"
 if [ -z "${OPENSHELL_GATEWAY_DOCKER_GROUP:-}" ] && [ "$(uname -s)" = "Darwin" ]; then
     OPENSHELL_GATEWAY_DOCKER_GROUP="0"
@@ -5393,8 +5108,8 @@ MN_DYNAMIC_REDIS_PORT_END="${MN_DYNAMIC_REDIS_PORT_END:-56478}"
 INSTALL_METADATA_FILE="${INSTALL_DIR}/install_metadata.json"
 MN_MANAGED_PYTHON="${MN_MANAGED_PYTHON:-1}"
 MN_MANAGED_PYTHON_VERSION="${MN_MANAGED_PYTHON_VERSION:-$MN_DEFAULT_MANAGED_PYTHON_VERSION}"
-MN_MANAGED_PYTHON_ROOT="${MN_MANAGED_PYTHON_DIR:-${HOME}/.local/share/mn_python}"
-MN_UV_ROOT="${MN_UV_DIR:-${HOME}/.local/share/mn_uv}"
+MN_MANAGED_PYTHON_ROOT="${MN_MANAGED_PYTHON_DIR:-${MN_HOME:-${HOME}/.mn}/python}"
+MN_UV_ROOT="${MN_UV_DIR:-${MN_HOME:-${HOME}/.mn}/uv}"
 MN_UV_BIN=""
 MN_PYTHON_BIN=""
 
@@ -6184,7 +5899,6 @@ function install_core_from_gar() {
     fi
 
     docker image tag "$image" mirror-neuron-core:latest
-    mn_remove_path_or_exit "$INSTALL_DIR" "MirrorNeuron state directory"
     mkdir -p "$INSTALL_DIR"
     cat > "$INSTALL_METADATA_FILE" <<EOF
 {
@@ -7152,96 +6866,11 @@ function shell_escape_value() {
     printf '%q' "$1"
 }
 
-function profile_has_bin_path() {
-    local profile="$1"
-    [ -f "$profile" ] || return 1
-    local line
-    while IFS= read -r line; do
-        [[ "$line" =~ ^[[:space:]]*# ]] && continue
-        if [[ "$line" == *'PATH'* && "$line" == *'$MN_HOME/bin'* ]]; then
-            return 0
-        fi
-    done < "$profile"
-    return 1
-}
-
-function profile_has_runtime_home() {
-    local profile="$1"
-    [ -f "$profile" ] || return 1
-    local line
-    while IFS= read -r line; do
-        [[ "$line" =~ ^[[:space:]]*# ]] && continue
-        if [[ "$line" =~ ^[[:space:]]*(export[[:space:]]+)?MN_HOME= ]]; then
-            return 0
-        fi
-    done < "$profile"
-    return 1
-}
-
 function add_shell_profile_exports() {
-    local include_path="${1:-Y}"
-    local needs_path="N"
-    local needs_runtime_home="Y"
-    local default_home="${HOME}/.mn"
-    local shell_profile
-    local profile_updated="N"
-
-    if [ "$include_path" = "Y" ]; then
-        [[ ":$PATH:" != *":$BIN_DIR:"* ]] && needs_path="Y"
-    fi
-
-    if [ "$needs_path" = "N" ] && [ "$needs_runtime_home" = "N" ]; then
-        return
-    fi
-
-    if [ "$needs_path" = "Y" ]; then
-        print_warning "${BIN_DIR} is not in your PATH."
-    fi
-    if [ "$needs_runtime_home" = "Y" ]; then
-        print_detail "Persisting MN_HOME=${INSTALL_DIR} for future terminal sessions."
-    fi
-
-    shell_profile="$(mn_preferred_shell_profile)"
-    local detected_profiles=("$shell_profile")
-
-    local profile path_line home_line wrote_header wrote_profile
-    if [ "$INSTALL_DIR" = "$default_home" ]; then
-        home_line='export MN_HOME="$HOME/.mn"'
-    else
-        home_line="export MN_HOME=$(shell_escape_value "$INSTALL_DIR")"
-    fi
-    path_line='export PATH="$MN_HOME/bin:$PATH"'
-
-    for profile in "${detected_profiles[@]}"; do
-        wrote_header="N"
-        wrote_profile="N"
-        mn_deduplicate_generated_profile_exports "$profile" "$path_line" "$home_line"
-        if [ "$needs_runtime_home" = "Y" ] && ! profile_has_runtime_home "$profile"; then
-            [ "$wrote_header" = "N" ] && echo -e "\n# MN and OTTERDESK" >> "$profile" && wrote_header="Y"
-            echo "$home_line" >> "$profile"
-            wrote_profile="Y"
-        fi
-        if [ "$needs_path" = "Y" ] && ! profile_has_bin_path "$profile"; then
-            [ "$wrote_header" = "N" ] && echo -e "\n# MN and OTTERDESK" >> "$profile" && wrote_header="Y"
-            echo "$path_line" >> "$profile"
-            wrote_profile="Y"
-        fi
-        if [ "$wrote_profile" = "Y" ]; then
-            print_detail "Updated shell exports: ${profile}"
-            profile_updated="Y"
-        fi
-    done
-
-    if [ "$needs_path" = "Y" ]; then
-        export PATH="${BIN_DIR}:${PATH}"
-    fi
-    if [ "$needs_path" = "Y" ] || [ "$profile_updated" = "Y" ]; then
-        MN_SHELL_PROFILE_RELOAD_REQUIRED="Y"
-        MN_SHELL_PROFILE_PATH="$shell_profile"
-        print_warning "Open a new terminal, or run: source $(shell_escape_value "$shell_profile")"
-    fi
+    mn_write_shell_environment
 }
 
+mn_prepare_installer_paths
 print_header
 
 if [ "$NON_INTERACTIVE" != "Y" ]; then
@@ -7276,7 +6905,7 @@ fi
 
 print_success "System ready."
 
-if [ -d "$INSTALL_DIR" ] || [ -f "$BIN_DIR/mn" ]; then
+if [ "$MN_EXISTING_INSTALL" = "Y" ]; then
     if [ "$MN_INSTALL_RESET" = "Y" ]; then
         REINSTALL="Y"
     else
@@ -7294,7 +6923,6 @@ fi
 print_step "Installing product"
 ( install_core_from_release ) &
 spinner $! "Installing core runtime"
-mn_restore_runtime_state_after_reinstall
 write_runtime_compose_files
 
 if should_install_python_packages; then

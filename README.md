@@ -10,6 +10,34 @@ reset with no remaining options, empty Python component selections, and optional
 wheel-search arguments. The optional Ubuntu privilege prefix is also safe when
 running as root. All three install modes retain argument boundaries and defaults.
 
+## Reinstall and macOS paths (unreleased)
+
+Release this installer together with the CLI change that resolves sidecars from
+`MN_HOME/venv`; older CLI wheels still look under `~/.local/share/mn_venv`.
+
+Normal reinstall preserves runtime data in place, including read-only directories,
+symlinks, native-resource records, and OpenShell state. It never copies job data
+into the macOS temporary directory or removes the runtime home. A failed install
+can be retried with the same command; `--reset` remains explicitly destructive.
+
+Installer-managed tools and files now default to `~/.mn`: `bin`, `venv`, `python`,
+`uv`, `tmp`, `cache`, and `.config/openshell-mirror-neuron`. `MN_HOME` relocates
+this tree. Existing tools under `~/.local` are left untouched; installation
+creates the new environment instead of moving a virtual environment with stale
+absolute paths. Explicit tool-directory overrides remain supported.
+
+The installer writes shell setup to `~/.mn/env` without editing shell profiles.
+Run `source ~/.mn/env` to use the commands in your current terminal. You can add
+that command to your shell profile yourself for future terminals.
+
+OpenShell runs through the managed containers in every install mode; the
+installer does not run the upstream host package installer.
+
+Docker must already be running. The installer does not change Docker Desktop
+settings or request access to other apps' data. If Model Runner is disabled,
+enable it in Docker Desktop Settings and retry. Docker manages its own images,
+volumes, and platform permissions outside `MN_HOME`.
+
 ## Quick Start
 
 Inspect installer options:
@@ -59,7 +87,7 @@ Reset all existing runtime data and perform a fresh install:
 Reset is destructive and always asks you to type the exact uppercase text
 `YES`, even when `--yes` is also passed. It deletes and recreates `MN_HOME`
 (default `~/.mn`), removes the managed Python virtual environment at
-`~/.local/share/mn_venv`, clears Redis, and removes the MirrorNeuron Docker
+`~/.mn/venv`, clears Redis, and removes the MirrorNeuron Docker
 Compose containers and persistent volumes before the selected install mode
 runs.
 
@@ -116,8 +144,7 @@ Run its isolated Git regression test with:
 ## Notes
 
 - Default runtime state is stored under `~/.mn`. The installer also keeps a shell
-  profile export for both MirrorNeuron and OtterDesk:
-  `export MN_HOME="$HOME/.mn"`.
+  environment file for both MirrorNeuron and OtterDesk at `~/.mn/env`.
 - Generated Compose settings are stored in `~/.mn/docker-compose.env`. Binary and
   GitHub installs default to `MN_ENV=prod` and `MN_USE_LOCAL_SKILLS=0`; local
   source installs enable local skills explicitly. User-provided values override
@@ -138,8 +165,7 @@ Run its isolated Git regression test with:
   upgrade checks, and crash reporting are disabled; configured LAN or VPN peer
   addresses continue to work.
 - In binary mode, the `mn` and `mn-api` commands are linked under `~/.mn/bin`.
-  The installer adds that directory to the active zsh or bash startup file; open a new terminal
-  after the first install, or run the reload command printed by the installer.
+  Run `source ~/.mn/env` to add that directory to your current shell.
 - Redis defaults to the Docker Official Image `redis:8`, which includes Redis
   Query Engine support for vector search. Set `MN_REDIS_IMAGE` before install
   or in `~/.mn/docker-compose.env` to pin a specific Redis 8+ tag or digest.

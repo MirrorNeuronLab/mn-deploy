@@ -110,7 +110,7 @@ INSTALL_DIR="${MN_HOME:-${HOME}/.mn}"
 UI_DIR="${INSTALL_DIR}/webui"
 BIN_DIR="${HOME}/.local/bin"
 RUNTIME_BIN_DIR="${INSTALL_DIR}/bin"
-VENV_DIR="${HOME}/.local/share/mn_venv"
+VENV_DIR="${INSTALL_DIR}/venv"
 
 RUNTIME_COMPOSE_FILE="${INSTALL_DIR}/docker-compose.yml"
 RUNTIME_COMPOSE_ENV="${INSTALL_DIR}/docker-compose.env"

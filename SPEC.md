@@ -53,8 +53,10 @@ restores the previous virtual environment.
 ## Installed State
 
 Runtime state and generated configuration live below the configured
-`MN_HOME` (documented default `~/.mn`) and established executable/install
-locations. Generated Compose environment belongs in installed state, not in
+`MN_HOME` (documented default `~/.mn`), including private Python tools,
+commands, downloads, caches, and generated OpenShell configuration. Shell setup
+is written to `MN_HOME/env`; the installer does not edit shell profiles. Ordinary
+reinstall preserves durable state in place rather than copying and deleting it. Generated Compose environment belongs in installed state, not in
 this checkout. Binary and GitHub installs default `MN_ENV` to `prod` and
 disable local skill sources; local source installs enable them explicitly. An
 explicit `MN_ENV` or `MN_USE_LOCAL_SKILLS` value remains authoritative. Redis
