@@ -161,6 +161,37 @@ check_workspace() {
   return 0
 }
 
+resolve_previous_version() {
+  local detected_version="$1"
+  local preparation_commit historical_index
+
+  if [[ "$detected_version" != "$VERSION" ]]; then
+    printf '%s\n' "$detected_version"
+    return
+  fi
+
+  preparation_commit="$(git -C "$SCRIPT_DIR" log -1 \
+    -S "version = \"${VERSION}\"" \
+    --format=%H -- package-index/python-packages.toml)"
+  [[ -n "$preparation_commit" ]] ||
+    die "Could not locate the package-index preparation commit for ${TAG}."
+
+  historical_index="$(mktemp "${TMPDIR:-/tmp}/mn-previous-package-index.XXXXXX")"
+  if ! git -C "$SCRIPT_DIR" show \
+    "${preparation_commit}^:package-index/python-packages.toml" > "$historical_index"; then
+    rm -f "$historical_index"
+    die "Could not read the package index preceding ${TAG}."
+  fi
+
+  detected_version="$(python3 \
+    "${SCRIPT_DIR}/scripts/prepare-python-package-index.py" \
+    "$historical_index" "$WORKSPACE_ROOT" "$VERSION")"
+  rm -f "$historical_index"
+  [[ "$detected_version" != "$VERSION" ]] ||
+    die "Could not recover the release version preceding ${TAG}."
+  printf '%s\n' "$detected_version"
+}
+
 prepare_release_metadata() {
   local index_file="${SCRIPT_DIR}/package-index/python-packages.toml"
   local pyproject
@@ -181,6 +212,7 @@ prepare_release_metadata() {
   PREVIOUS_VERSION="$(python3 \
     "${SCRIPT_DIR}/scripts/prepare-python-package-index.py" \
     "$index_file" "$WORKSPACE_ROOT" "$VERSION")"
+  PREVIOUS_VERSION="$(resolve_previous_version "$PREVIOUS_VERSION")"
 
   prepare_install_support_snapshot
 
