@@ -96,3 +96,12 @@ This patch prevents the runtime update check from treating an older release
 plan component as a downgrade offer. The default installer pins this CLI
 version and disables periodic update checks while it starts the newly installed
 runtime.
+
+## v1.3.47 -- 2026-09-13
+
+- GAR npm:  in mirrorneuron-npm.
+- GAR Python: all packages in package-index/python-packages.toml, including
+  mirrorneuron-api, mirrorneuron-cli, and mirrorneuron-python-sdk.
+- GAR Docker: mirror-neuron-core and membrane-context-engine each published
+  v1.3.47, 1.3.47, and latest (pointing to this release at confirmation).
+- GitHub tag: v1.3.47 across the release repositories.
