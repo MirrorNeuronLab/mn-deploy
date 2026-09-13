@@ -310,8 +310,10 @@ version only to dynamically versioned projects, and fails when an SDK component
 project is missing from the package index; historical snapshots remain
 immutable. The aggregate release builds and verifies the complete Python
 inventory and self-contained Web UI package directly from sibling worktrees in
-GAR before it pushes the prepared source tags. GitHub release workflows are
-neither awaited nor used as package sources.
+GAR before it pushes the prepared source tags. `release_all.sh` uses `uv` to
+create its dedicated Python publishing environment and install the required
+build, Twine, keyring, and GAR authentication packages automatically. GitHub release workflows are neither awaited nor used as
+package sources.
 Source and wheel tests do not require a live runtime installation.
 
 

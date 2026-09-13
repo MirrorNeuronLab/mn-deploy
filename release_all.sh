@@ -42,8 +42,8 @@ Create a complete multi-repository release:
      consuming or waiting for GitHub release workflow artifacts;
   5. update installer/blueprint pins and record the completed release.
 
-Prerequisites: authenticated git and gcloud, npm, Docker with Buildx, a Python
-build/Twine environment, and publishing authority for the configured GAR
+Prerequisites: authenticated git and gcloud, npm, Docker with Buildx, uv (or a
+prepared MN_PUBLISH_PYTHON), and publishing authority for the configured GAR
 Python, npm, and Docker repositories.
 EOF
 }
@@ -57,15 +57,32 @@ require_command() {
   command -v "$1" >/dev/null 2>&1 || die "Required command was not found: $1"
 }
 
-check_python_publish_environment() {
+prepare_python_publish_environment() {
   local publish_venv="${MN_GAR_PUBLISH_VENV:-${SCRIPT_DIR}/.venv-gar-publish}"
 
-  PUBLISH_PYTHON="${MN_PUBLISH_PYTHON:-${publish_venv}/bin/python}"
-  if ! command -v "$PUBLISH_PYTHON" >/dev/null 2>&1; then
-    die "Python publishing environment was not found: ${PUBLISH_PYTHON}. Run ${SCRIPT_DIR}/setup_google_artifact_registry.sh --project ${PROJECT} --location ${LOCATION} --repository ${PYTHON_REPOSITORY} --npm-repository ${NPM_REPOSITORY}, or set MN_PUBLISH_PYTHON to a prepared Python command."
+  if [[ -n "${MN_PUBLISH_PYTHON:-}" ]]; then
+    PUBLISH_PYTHON="$MN_PUBLISH_PYTHON"
+  else
+    require_command uv
+    PUBLISH_PYTHON="${publish_venv}/bin/python"
+    if [[ ! -x "$PUBLISH_PYTHON" ]]; then
+      printf 'Preparing Python publishing environment with uv: %s\n' "$publish_venv"
+      uv venv "$publish_venv"
+    fi
+    if ! "$PUBLISH_PYTHON" -c 'import build, packaging, twine' >/dev/null 2>&1; then
+      printf 'Installing Python publishing dependencies with uv.\n'
+      uv pip install --python "$PUBLISH_PYTHON" --upgrade \
+        build \
+        twine \
+        keyring \
+        keyrings.google-artifactregistry-auth
+    fi
   fi
+
+  command -v "$PUBLISH_PYTHON" >/dev/null 2>&1 ||
+    die "Python publishing command was not found: ${PUBLISH_PYTHON}."
   if ! "$PUBLISH_PYTHON" -c 'import build, packaging, twine' >/dev/null 2>&1; then
-    die "Python publishing environment is missing build, packaging, or twine: ${PUBLISH_PYTHON}. Run ${SCRIPT_DIR}/setup_google_artifact_registry.sh --project ${PROJECT} --location ${LOCATION} --repository ${PYTHON_REPOSITORY} --npm-repository ${NPM_REPOSITORY}."
+    die "Python publishing environment is missing build, packaging, or twine: ${PUBLISH_PYTHON}."
   fi
 }
 
@@ -359,7 +376,7 @@ TAG="v${VERSION}"
 for command in git gcloud docker npm perl python3 cmp; do
   require_command "$command"
 done
-check_python_publish_environment
+prepare_python_publish_environment
 docker info >/dev/null 2>&1 ||
   die "Docker is not running or the current user cannot access the Docker daemon."
 docker buildx version >/dev/null 2>&1 ||
