@@ -507,6 +507,32 @@ function mn_print_next_shell_command() {
     fi
 }
 
+# Presentation only: report the resolved selections after interactive prompts.
+function mn_print_install_summary() {
+    local components="Core"
+    [ "${INSTALL_PYTHON_SDK:-Y}" = "Y" ] && components="${components}, SDK"
+    [ "${INSTALL_CLI:-Y}" = "Y" ] && components="${components}, CLI"
+    [ "${INSTALL_API:-Y}" = "Y" ] && components="${components}, API"
+    [ "${INSTALL_WEB_UI:-N}" = "Y" ] && components="${components}, Web UI"
+    [ "${INSTALL_REDIS:-N}" = "Y" ] && components="${components}, Redis"
+    [ "${INSTALL_CONTEXT_ENGINE:-N}" = "Y" ] && components="${components}, Membrane"
+    [ "${INSTALL_OPENSHELL:-N}" = "Y" ] && components="${components}, OpenShell"
+    [ "${INSTALL_AGENTS:-N}" = "Y" ] && components="${components}, Agents"
+    [ "${INSTALL_SKILLS:-N}" = "Y" ] && components="${components}, Skills"
+    case "${MN_SYNCTHING_ENABLED:-0}" in
+        ''|0|[Ff][Aa][Ll][Ss][Ee]|[Nn][Oo]|[Nn]|[Oo][Ff][Ff]|[Dd][Ii][Ss][Aa][Bb][Ll][Ee][Dd]) ;;
+        *) components="${components}, Syncthing" ;;
+    esac
+    printf '\n  %sInstall%s  %s\n' "$DIM" "$RESET" "$components" >&3
+    printf '  %sHome%s     %s\n' "$DIM" "$RESET" "$INSTALL_DIR" >&3
+    if [ "$START_NOW" = "Y" ]; then
+        printf '  %sStartup%s  Automatic\n' "$DIM" "$RESET" >&3
+    else
+        printf '  %sStartup%s  Manual (selected Docker services may still start)\n' "$DIM" "$RESET" >&3
+    fi
+    printf '\n' >&3
+}
+
 function mn_print_cli_verification_prompt() {
     [ "${INSTALL_CLI:-N}" = "Y" ] || return 0
 
@@ -1369,16 +1395,16 @@ MN_GITHUB_GIT_AUTH_CONFIGURED="N"
 
 function print_header() {
     printf '\n%s%s%s\n' "${BLUE}${BOLD}" "MirrorNeuron Installer" "$RESET" >&3
-    printf '  Source: GitHub repositories\n' >&3
+    printf '  %sSource%s  GitHub repositories\n' "$DIM" "$RESET" >&3
 }
 
-function print_step() { printf '%s==>%s %s\n' "${CYAN}${BOLD}" "$RESET" "$1" >&3; }
-function print_success() { printf '%s✔%s %s\n' "${GREEN}${BOLD}" "$RESET" "$1" >&3; }
+function print_step() { printf '%s==> %s%s\n' "${CYAN}${BOLD}" "$1" "$RESET" >&3; }
+function print_success() { printf '%s✓%s %s\n' "${GREEN}${BOLD}" "$RESET" "$1" >&3; }
 function print_error() { printf '%serror:%s %s\n' "${RED}${BOLD}" "$RESET" "$1" >&3; }
 function print_warning() { printf '%swarning:%s %s\n' "${YELLOW}${BOLD}" "$RESET" "$1" >&3; }
 function print_detail() {
     if [ "$MN_INSTALL_VERBOSE" = "Y" ]; then
-        printf '    %s\n' "$1" >&3
+        printf '    %s%s%s\n' "$DIM" "$1" "$RESET" >&3
     fi
 }
 
@@ -1437,12 +1463,12 @@ function spinner() {
     local delay=0.1
     local frames=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
     local frame_index=0
+    local started=$SECONDS
     local interactive="N"
-    if [ -t 3 ]; then
+    if [ -t 3 ] && [ "${TERM:-dumb}" != "dumb" ]; then
         interactive="Y"
-        tput civis >&3 2>/dev/null || true
         while kill -0 "$pid" 2>/dev/null; do
-            printf '\r%s%s%s %s' "${MAGENTA}${BOLD}" "${frames[$frame_index]}" "$RESET" "$msg" >&3
+            printf '\r\033[2K%s%s%s %s %s(%ss)%s' "${MAGENTA}${BOLD}" "${frames[$frame_index]}" "$RESET" "$msg" "$DIM" "$((SECONDS - started))" "$RESET" >&3
             frame_index=$(((frame_index + 1) % ${#frames[@]}))
             sleep "$delay"
         done
@@ -1455,14 +1481,16 @@ function spinner() {
     set -e
     if [ "$exit_code" -eq 0 ]; then
         if [ "$interactive" = "Y" ]; then printf '\r\033[2K' >&3; fi
-        print_success "$msg"
+        if [ "$interactive" = "Y" ]; then
+            print_success "$msg ($((SECONDS - started))s)"
+        else
+            print_success "$msg"
+        fi
     else
         if [ "$interactive" = "Y" ]; then printf '\r\033[2K' >&3; fi
         print_error "$msg failed."
-        tput cnorm >&3 2>/dev/null || true
         exit $exit_code
     fi
-    tput cnorm >&3 2>/dev/null || true
 }
 
 function ask() {
@@ -2986,7 +3014,8 @@ fi
 validate_selections
 echo "" >&3
 
-print_step "Checking Dependencies"
+mn_print_install_summary
+print_step "Checking dependencies"
 
 require_cmd git
 require_cmd curl
@@ -3294,16 +3323,16 @@ NON_INTERACTIVE="Y"
 
 function print_header() {
     printf '\n%s%s%s\n' "${BLUE}${BOLD}" "MirrorNeuron Installer" "$RESET" >&3
-    printf '  Source: local workspace\n' >&3
+    printf '  %sSource%s  Local workspace\n' "$DIM" "$RESET" >&3
 }
 
-function print_step() { printf '%s==>%s %s\n' "${CYAN}${BOLD}" "$RESET" "$1" >&3; }
-function print_success() { printf '%s✔%s %s\n' "${GREEN}${BOLD}" "$RESET" "$1" >&3; }
+function print_step() { printf '%s==> %s%s\n' "${CYAN}${BOLD}" "$1" "$RESET" >&3; }
+function print_success() { printf '%s✓%s %s\n' "${GREEN}${BOLD}" "$RESET" "$1" >&3; }
 function print_error() { printf '%serror:%s %s\n' "${RED}${BOLD}" "$RESET" "$1" >&3; }
 function print_warning() { printf '%swarning:%s %s\n' "${YELLOW}${BOLD}" "$RESET" "$1" >&3; }
 function print_detail() {
     if [ "$MN_INSTALL_VERBOSE" = "Y" ]; then
-        printf '    %s\n' "$1" >&3
+        printf '    %s%s%s\n' "$DIM" "$1" "$RESET" >&3
     fi
 }
 
@@ -3617,12 +3646,12 @@ function spinner() {
     local delay=0.1
     local frames=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
     local frame_index=0
+    local started=$SECONDS
     local interactive="N"
-    if [ -t 3 ]; then
+    if [ -t 3 ] && [ "${TERM:-dumb}" != "dumb" ]; then
         interactive="Y"
-        tput civis >&3 2>/dev/null || true
         while kill -0 "$pid" 2>/dev/null; do
-            printf '\r%s%s%s %s' "${MAGENTA}${BOLD}" "${frames[$frame_index]}" "$RESET" "$msg" >&3
+            printf '\r\033[2K%s%s%s %s %s(%ss)%s' "${MAGENTA}${BOLD}" "${frames[$frame_index]}" "$RESET" "$msg" "$DIM" "$((SECONDS - started))" "$RESET" >&3
             frame_index=$(((frame_index + 1) % ${#frames[@]}))
             sleep "$delay"
         done
@@ -3635,14 +3664,16 @@ function spinner() {
     set -e
     if [ "$exit_code" -eq 0 ]; then
         if [ "$interactive" = "Y" ]; then printf '\r\033[2K' >&3; fi
-        print_success "$msg"
+        if [ "$interactive" = "Y" ]; then
+            print_success "$msg ($((SECONDS - started))s)"
+        else
+            print_success "$msg"
+        fi
     else
         if [ "$interactive" = "Y" ]; then printf '\r\033[2K' >&3; fi
         print_error "$msg failed."
-        tput cnorm >&3 2>/dev/null || true
         exit "$exit_code"
     fi
-    tput cnorm >&3 2>/dev/null || true
 }
 
 function ask() {
@@ -4783,6 +4814,7 @@ if [ "$NON_INTERACTIVE" != "Y" ]; then
 fi
 echo "" >&3
 
+mn_print_install_summary
 print_step "Checking dependencies"
 require_cmd docker
 resolve_python_runtime
@@ -5127,17 +5159,18 @@ NON_INTERACTIVE="Y"
 
 function print_header() {
     printf '\n%s%s%s\n' "${BLUE}${BOLD}" "MirrorNeuron Installer" "$RESET" >&3
-    printf '  Release: %s\n' "$CORE_INSTALL_VERSION" >&3
+    printf '  %sSource%s  Released packages (binary)\n' "$DIM" "$RESET" >&3
+    printf '  %sCore%s    %s\n' "$DIM" "$RESET" "$CORE_INSTALL_VERSION" >&3
     print_detail "SDK ${PYTHON_SDK_INSTALL_VERSION}; CLI ${CLI_INSTALL_VERSION}; API ${API_INSTALL_VERSION}; Web UI ${WEB_UI_INSTALL_VERSION}"
 }
 
-function print_step() { printf '%s==>%s %s\n' "${CYAN}${BOLD}" "$RESET" "$1" >&3; }
-function print_success() { printf '%s✔%s %s\n' "${GREEN}${BOLD}" "$RESET" "$1" >&3; }
+function print_step() { printf '%s==> %s%s\n' "${CYAN}${BOLD}" "$1" "$RESET" >&3; }
+function print_success() { printf '%s✓%s %s\n' "${GREEN}${BOLD}" "$RESET" "$1" >&3; }
 function print_error() { printf '%serror:%s %s\n' "${RED}${BOLD}" "$RESET" "$1" >&3; }
 function print_warning() { printf '%swarning:%s %s\n' "${YELLOW}${BOLD}" "$RESET" "$1" >&3; }
 function print_detail() {
     if [ "$MN_INSTALL_VERBOSE" = "Y" ]; then
-        printf '    %s\n' "$1" >&3
+        printf '    %s%s%s\n' "$DIM" "$1" "$RESET" >&3
     fi
 }
 
@@ -5532,12 +5565,12 @@ function spinner() {
     local delay=0.1
     local frames=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
     local frame_index=0
+    local started=$SECONDS
     local interactive="N"
-    if [ -t 3 ]; then
+    if [ -t 3 ] && [ "${TERM:-dumb}" != "dumb" ]; then
         interactive="Y"
-        tput civis >&3 2>/dev/null || true
         while kill -0 "$pid" 2>/dev/null; do
-            printf '\r%s%s%s %s' "${MAGENTA}${BOLD}" "${frames[$frame_index]}" "$RESET" "$msg" >&3
+            printf '\r\033[2K%s%s%s %s %s(%ss)%s' "${MAGENTA}${BOLD}" "${frames[$frame_index]}" "$RESET" "$msg" "$DIM" "$((SECONDS - started))" "$RESET" >&3
             frame_index=$(((frame_index + 1) % ${#frames[@]}))
             sleep "$delay"
         done
@@ -5550,14 +5583,16 @@ function spinner() {
     set -e
     if [ "$exit_code" -eq 0 ]; then
         if [ "$interactive" = "Y" ]; then printf '\r\033[2K' >&3; fi
-        print_success "$msg"
+        if [ "$interactive" = "Y" ]; then
+            print_success "$msg ($((SECONDS - started))s)"
+        else
+            print_success "$msg"
+        fi
     else
         if [ "$interactive" = "Y" ]; then printf '\r\033[2K' >&3; fi
         print_error "$msg failed."
-        tput cnorm >&3 2>/dev/null || true
         exit "$exit_code"
     fi
-    tput cnorm >&3 2>/dev/null || true
 }
 
 function ask() {
@@ -6890,6 +6925,7 @@ fi
 
 validate_selections
 
+mn_print_install_summary
 print_step "Checking system"
 require_cmd curl
 require_cmd docker
@@ -6920,13 +6956,14 @@ if [ "$MN_EXISTING_INSTALL" = "Y" ]; then
     mn_remove_existing_install_paths
 fi
 
-print_step "Installing product"
+print_step "Installing MirrorNeuron Core ${CORE_INSTALL_VERSION}"
 ( install_core_from_release ) &
-spinner $! "Installing core runtime"
+spinner $! "Installing Core runtime"
+print_step "Writing Docker Compose runtime configuration"
 write_runtime_compose_files
 
 if should_install_python_packages; then
-    print_step "Installing tools"
+    print_step "Installing selected Python packages and dependencies"
     ( install_python_packages ) &
     spinner $! "Installing Python packages"
 else
@@ -6949,7 +6986,7 @@ if [ "$INSTALL_REDIS" = "Y" ] || [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] || [ "$INST
     fi
 fi
 
-print_step "Finishing setup"
+print_step "Creating command links and shell environment"
 mkdir -p "$BIN_DIR" "$INSTALL_DIR"
 rm -f "$BIN_DIR/mn" "$BIN_DIR/mn-api" "$INSTALL_DIR/mn"
 if [ "$INSTALL_CLI" = "Y" ]; then
