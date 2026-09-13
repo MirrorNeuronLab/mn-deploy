@@ -12,14 +12,17 @@ ENTRY = Path(__file__).resolve().parents[1] / 'CLEARN_GAR.sh'
 PROJECT = 'mirrorneuron-public-packages'
 
 
-@pytest.fixture
-def registry(tmp_path):
+@pytest.fixture(params=['full', 'short'])
+def registry(tmp_path, request):
     data = {'repositories': [], 'packages': {}, 'versions': {}, 'tags': {}}
     for location, repository, fmt in [('us-central1', 'python', 'PYTHON'), ('europe-west1', 'npm', 'NPM'), ('us', 'runtime', 'DOCKER'), ('us', 'archives', 'GENERIC')]:
         root = f'projects/{PROJECT}/locations/{location}/repositories/{repository}'
-        package = root + '/packages/' + ('%40scope%2Fui' if fmt == 'NPM' else 'example')
+        package = root + '/packages/' + ('%40scope%2Fui' if fmt == 'NPM' else 'team%2Fexample' if fmt == 'DOCKER' else 'example')
         data['repositories'].append({'name': root, 'format': fmt, 'mode': 'STANDARD_REPOSITORY'})
-        data['packages'][repository] = [{'name': package}]
+        listed_name = package
+        if request.param == 'short':
+            listed_name = package.rsplit('/', 1)[1].replace('%2F', '/').replace('%2B', '+').replace('%5E', '^')
+        data['packages'][repository] = [{'name': listed_name}]
         ids = ['sha256:old', 'sha256:new', 'sha256:unknown', 'sha256:shared'] if fmt == 'DOCKER' else ['1.3.9', '1.3.47', '1.3.48', '1.3.100', '1.3.48-rc.1', 'unknown']
         data['versions'][repository] = [{'name': package + '/versions/' + version} for version in ids]
         aliases = {'v1.3.47': 'sha256:old', '1.3.47': 'sha256:old', 'v1.3.48': 'sha256:new', 'latest': 'sha256:new', 'v1.2.0': 'sha256:shared', 'v2.0.0': 'sha256:shared'} if fmt == 'DOCKER' else {}
@@ -45,6 +48,8 @@ if kind == 'repositories':
 else:
     repo = next(a.split('=', 1)[1] for a in args if a.startswith('--repository='))
     result = data[kind][repo]
+if os.environ.get('FOREIGN_PACKAGE') and kind == 'packages':
+    result = [{{'name': 'projects/another-project/locations/us/repositories/private/packages/example'}}]
 if os.environ.get('CHANGE_PLAN') and kind == 'tags':
     count = sum(1 for line in Path(os.environ['FAKE_LOG']).read_text().splitlines() if json.loads(line)[1] == 'repositories')
     if count > 1 and result:
@@ -125,3 +130,10 @@ def test_delete_failure_stops_and_reports_progress(registry):
     assert result.returncode != 0
     assert len(deleted) == 1
     assert '0/22 deletions completed' in result.stderr
+
+
+def test_foreign_full_package_resource_is_not_rebased(registry):
+    result, _, deleted = registry('-a', FOREIGN_PACKAGE='1')
+    assert result.returncode != 0
+    assert 'Unexpected GAR resource outside' in result.stderr
+    assert not deleted

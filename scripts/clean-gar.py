@@ -55,6 +55,27 @@ def resource_name(row: dict, prefix: str) -> str:
     return name
 
 
+def package_resource(row: dict, repository: str) -> tuple[str, str]:
+    """gcloud ListPackages strips the resource prefix and unescapes /, +, ^.
+
+    Version/tag commands retain full resource names. Reconstruct only a short
+    package ID under the repository we explicitly listed; never rebase a full
+    resource from another project or repository.
+    """
+    prefix = repository + '/packages/'
+    value = row.get('name')
+    if not isinstance(value, str) or not value or any(ord(c) < 32 for c in value):
+        raise ValueError(f'Invalid GAR package name under {repository}')
+    if value.startswith('projects/'):
+        full_name = resource_name(row, prefix)
+        encoded = full_name[len(prefix):]
+    else:
+        encoded = value.replace('/', '%2F').replace('+', '%2B').replace('^', '%5E')
+        full_name = prefix + encoded
+    package_id = encoded.replace('%2F', '/').replace('%2B', '+').replace('%5E', '^')
+    return full_name, package_id
+
+
 def inventory(binary: str, project: str, cutoff, delete_all: bool):
     plan = []
     skipped = []
@@ -71,8 +92,7 @@ def inventory(binary: str, project: str, cutoff, delete_all: bool):
         scope = [f'--project={project}', f'--location={location}', f'--repository={repository}']
         packages = run_gcloud(binary, 'packages', 'list', *scope)
         for package in packages:
-            package_name = resource_name(package, name + '/packages/')
-            package_id = unquote(package_name[len(name + '/packages/'):])
+            package_name, package_id = package_resource(package, name)
             package_scope = [*scope, f'--package={package_id}']
             versions = run_gcloud(binary, 'versions', 'list', *package_scope)
             # Tags are needed both for Docker version identity and for the exact
@@ -117,7 +137,7 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     if not re.fullmatch(r'[a-z][a-z0-9-]*[a-z0-9]|[0-9]+', args.project):
         parser.error('Invalid Google Cloud project ID or number')
-    if args.version and not re.fullmatch(r'v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)', args.version):
+    if args.version is not None and not re.fullmatch(r'v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)', args.version):
         parser.error('-v requires MAJOR.MINOR.PATCH, for example 1.3.48')
     cutoff = version_key(args.version) if args.version else None
     binary = os.environ.get('MN_GCLOUD_BIN', 'gcloud')
