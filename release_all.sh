@@ -15,6 +15,8 @@ LOCATION="us-central1"
 PYTHON_REPOSITORY="agent-skills"
 NPM_REPOSITORY="mirrorneuron-npm"
 PUBLISH_PYTHON=""
+RESUME_FROM=""
+CURRENT_PHASE=""
 
 REPOSITORIES=(
   mn-api
@@ -31,7 +33,7 @@ REPOSITORIES=(
 
 usage() {
   cat <<'EOF'
-Usage: release_all.sh -v MAJOR.MINOR.PATCH
+Usage: release_all.sh -v MAJOR.MINOR.PATCH [--resume-from PHASE]
 
 Create a complete multi-repository release:
   1. verify all release worktrees are clean and synchronized with main;
@@ -41,6 +43,9 @@ Create a complete multi-repository release:
   4. push the prepared tags only after GAR verification succeeds, without
      consuming or waiting for GitHub release workflow artifacts;
   5. update installer/blueprint pins and record the completed release.
+
+Resume phases: prepare, python, web-ui, membrane, core, tags, or finalize.
+After a failure, run the exact --resume-from command printed by this script.
 
 Prerequisites: authenticated git and gcloud, npm, Docker with Buildx, uv (or a
 prepared MN_PUBLISH_PYTHON), and publishing authority for the configured GAR
@@ -153,6 +158,32 @@ commit_and_push_if_changed() {
   fi
 }
 
+phase_rank() {
+  case "$1" in
+    prepare) printf '0' ;;
+    python) printf '1' ;;
+    web-ui) printf '2' ;;
+    membrane) printf '3' ;;
+    core) printf '4' ;;
+    tags) printf '5' ;;
+    finalize) printf '6' ;;
+    *) die "Unknown release phase: $1" ;;
+  esac
+}
+
+should_run_phase() {
+  [[ "$(phase_rank "$1")" -ge "$(phase_rank "$RESUME_FROM")" ]]
+}
+
+report_resume_command() {
+  local status=$?
+  if [[ "$status" -ne 0 && -n "$CURRENT_PHASE" ]]; then
+    printf 'Next: fix the error, then run: %s -v %s --resume-from %s\n' \
+      "$0" "$VERSION" "$CURRENT_PHASE" >&2
+  fi
+}
+trap report_resume_command EXIT
+
 check_workspace() {
   local repo path
 
@@ -176,6 +207,28 @@ check_workspace() {
   done
 
   return 0
+}
+
+check_resume_workspace() {
+  local repo path
+
+  for repo in "${REPOSITORIES[@]}"; do
+    path="${WORKSPACE_ROOT}/${repo}"
+    [[ -d "${path}/.git" ]] || die "Release checkout is missing: ${path}"
+    [[ -z "$(git -C "$path" status --porcelain)" ]] ||
+      die "Uncommitted changes in ${repo}."
+    [[ "$(git -C "$path" branch --show-current)" == "main" ]] ||
+      die "${repo} is not on main."
+    git -C "$path" fetch --quiet origin main --tags
+    [[ "$(git -C "$path" rev-parse main)" == "$(git -C "$path" rev-parse origin/main)" ]] ||
+      die "${repo}/main is not synchronized with origin/main."
+    git -C "$path" rev-parse --verify --quiet "refs/tags/${TAG}^{commit}" >/dev/null ||
+      die "${repo} is missing release tag ${TAG}; resume from prepare."
+    if [[ "$RESUME_FROM" == "python" ]]; then
+      [[ "$(git -C "$path" rev-list -n 1 "$TAG")" == "$(git -C "$path" rev-parse HEAD)" ]] ||
+        die "${repo} advanced after ${TAG}; Python publishing cannot safely resume from changed source. Resume from the first incomplete later phase instead."
+    fi
+  done
 }
 
 resolve_previous_version() {
@@ -266,54 +319,81 @@ push_release_tags() {
 
 publish_and_verify_gar() {
   local image tags_file core_image core_tags_file
+  local membrane_worktree_root membrane_dir
 
-  "${SCRIPT_DIR}/publish_python_packages_to_google_artifact_registry.sh" \
-    --python "$PUBLISH_PYTHON" \
-    --project "$PROJECT" \
-    --location "$LOCATION" \
-    --repository "$PYTHON_REPOSITORY" \
-    --apply \
-    --no-prune
-
-  "${SCRIPT_DIR}/publish_web_ui_to_google_artifact_registry.sh" \
-    --version "$VERSION" \
-    --project "$PROJECT" \
-    --location "$LOCATION" \
-    --repository "$NPM_REPOSITORY" \
-    --apply
-
-  image="${LOCATION}-docker.pkg.dev/${PROJECT}/mirrorneuron-runtime/membrane-context-engine"
-  tags_file="$(mktemp "${TMPDIR:-/tmp}/mn-membrane-tags.XXXXXX")"
-  trap 'rm -f "$tags_file"' RETURN
-  gcloud artifacts docker tags list "$image" --format='value(tag)' > "$tags_file"
-
-  if ! grep -qx "$VERSION" "$tags_file" || ! grep -qx "$TAG" "$tags_file" || ! grep -qx latest "$tags_file"; then
-    "${SCRIPT_DIR}/publish_public_membrane_to_google_artifact_registry.sh" \
+  if should_run_phase python; then
+    CURRENT_PHASE="python"
+    "${SCRIPT_DIR}/publish_python_packages_to_google_artifact_registry.sh" \
+      --python "$PUBLISH_PYTHON" \
+      --project "$PROJECT" \
+      --location "$LOCATION" \
+      --repository "$PYTHON_REPOSITORY" \
       --apply \
-      --version "$TAG" \
-      --skip-binary
-    gcloud artifacts docker tags list "$image" --format='value(tag)' > "$tags_file"
+      --no-prune
   fi
 
-  grep -qx "$VERSION" "$tags_file" || die "Membrane Docker tag ${VERSION} was not published."
-  grep -qx "${TAG}" "$tags_file" || die "Membrane Docker tag ${TAG} was not published."
-  grep -qx latest "$tags_file" || die "Membrane Docker latest tag was not published."
+  if should_run_phase web-ui; then
+    CURRENT_PHASE="web-ui"
+    "${SCRIPT_DIR}/publish_web_ui_to_google_artifact_registry.sh" \
+      --version "$VERSION" \
+      --project "$PROJECT" \
+      --location "$LOCATION" \
+      --repository "$NPM_REPOSITORY" \
+      --apply
+  fi
 
-  "${SCRIPT_DIR}/publish_public_core_to_google_artifact_registry.sh" \
-    --apply \
-    --version "$TAG" \
-    --project "$PROJECT" \
-    --location "$LOCATION"
+  if should_run_phase membrane; then
+    CURRENT_PHASE="membrane"
+    image="${LOCATION}-docker.pkg.dev/${PROJECT}/mirrorneuron-runtime/membrane-context-engine"
+    tags_file="$(mktemp "${TMPDIR:-/tmp}/mn-membrane-tags.XXXXXX")"
+    gcloud artifacts docker tags list "$image" --format='value(tag)' > "$tags_file"
 
-  core_image="${LOCATION}-docker.pkg.dev/${PROJECT}/mirrorneuron-runtime/mirror-neuron-core"
-  core_tags_file="$(mktemp "${TMPDIR:-/tmp}/mn-core-tags.XXXXXX")"
-  trap 'rm -f "$tags_file" "$core_tags_file"' RETURN
-  gcloud artifacts docker tags list "$core_image" --format='value(tag)' > "$core_tags_file"
+    if ! grep -qx "$VERSION" "$tags_file" ||
+       ! grep -qx "$TAG" "$tags_file" ||
+       ! grep -qx latest "$tags_file"; then
+      membrane_worktree_root="$(mktemp -d "${TMPDIR:-/tmp}/mn-membrane-release.XXXXXX")"
+      membrane_dir="${membrane_worktree_root}/source"
+      (
+        trap 'git -C "${WORKSPACE_ROOT}/Membrane" worktree remove --force "$membrane_dir" >/dev/null 2>&1 || true; rm -rf "$membrane_worktree_root"' EXIT
+        git -C "${WORKSPACE_ROOT}/Membrane" worktree add \
+          --detach "$membrane_dir" "refs/tags/${TAG}" >/dev/null
+        "${SCRIPT_DIR}/publish_public_membrane_to_google_artifact_registry.sh" \
+          --apply \
+          --version "$TAG" \
+          --membrane-dir "$membrane_dir" \
+          --skip-binary
+      )
+      gcloud artifacts docker tags list "$image" --format='value(tag)' > "$tags_file"
+    fi
 
-  grep -qx "$VERSION" "$core_tags_file" || die "Core Docker tag ${VERSION} was not published."
-  grep -qx "${TAG}" "$core_tags_file" || die "Core Docker tag ${TAG} was not published."
-  grep -qx latest "$core_tags_file" || die "Core Docker latest tag was not published."
+    grep -qx "$VERSION" "$tags_file" || die "Membrane Docker tag ${VERSION} was not published."
+    grep -qx "$TAG" "$tags_file" || die "Membrane Docker tag ${TAG} was not published."
+    grep -qx latest "$tags_file" || die "Membrane Docker latest tag was not published."
+    rm -f "$tags_file"
+  fi
 
+  if should_run_phase core; then
+    CURRENT_PHASE="core"
+    core_image="${LOCATION}-docker.pkg.dev/${PROJECT}/mirrorneuron-runtime/mirror-neuron-core"
+    core_tags_file="$(mktemp "${TMPDIR:-/tmp}/mn-core-tags.XXXXXX")"
+    gcloud artifacts docker tags list "$core_image" --format='value(tag)' > "$core_tags_file"
+
+    if ! grep -qx "$VERSION" "$core_tags_file" ||
+       ! grep -qx "$TAG" "$core_tags_file" ||
+       ! grep -qx latest "$core_tags_file"; then
+      "${SCRIPT_DIR}/publish_public_core_to_google_artifact_registry.sh" \
+        --apply \
+        --version "$TAG" \
+        --project "$PROJECT" \
+        --location "$LOCATION"
+      gcloud artifacts docker tags list "$core_image" --format='value(tag)' > "$core_tags_file"
+    fi
+
+    grep -qx "$VERSION" "$core_tags_file" || die "Core Docker tag ${VERSION} was not published."
+    grep -qx "$TAG" "$core_tags_file" || die "Core Docker tag ${TAG} was not published."
+    grep -qx latest "$core_tags_file" || die "Core Docker latest tag was not published."
+    rm -f "$core_tags_file"
+  fi
 }
 
 update_post_release_pins() {
@@ -326,9 +406,10 @@ update_post_release_pins() {
   done < <(find "${WORKSPACE_ROOT}/otterdesk-blueprints" -type f \( \
     -name manifest.json -o -name requirements.txt -o -name '*.json' \) -print0)
 
-  cat >> "${SCRIPT_DIR}/released.md" <<EOF
+  if ! grep -Fq "## ${TAG} " "${SCRIPT_DIR}/released.md"; then
+    cat >> "${SCRIPT_DIR}/released.md" <<EOF
 
-## ${TAG} — $(date +%F)
+## ${TAG} -- $(date +%F)
 
 - GAR npm: `mirrorneuron-web-ui@${VERSION}` in ${NPM_REPOSITORY}.
 - GAR Python: all packages in package-index/python-packages.toml, including
@@ -337,6 +418,7 @@ update_post_release_pins() {
   ${TAG}, ${VERSION}, and latest (pointing to this release at confirmation).
 - GitHub tag: ${TAG} across the release repositories.
 EOF
+  fi
 
   commit_and_push_if_changed \
     mn-deploy \
@@ -358,6 +440,12 @@ while [[ "$#" -gt 0 ]]; do
       [[ "$#" -gt 0 ]] || die "--version requires a value."
       VERSION="$1"
       ;;
+    --resume-from)
+      shift
+      [[ "$#" -gt 0 ]] || die "--resume-from requires a phase."
+      RESUME_FROM="$1"
+      ;;
+    --resume-from=*) RESUME_FROM="${1#*=}" ;;
     -h|--help)
       usage
       exit 0
@@ -372,21 +460,54 @@ done
 [[ -n "$VERSION" ]] || { usage >&2; exit 1; }
 validate_version "$VERSION"
 TAG="v${VERSION}"
+RESUME_FROM="${RESUME_FROM:-prepare}"
+phase_rank "$RESUME_FROM" >/dev/null
 
-for command in git gcloud docker npm perl python3 cmp; do
+CURRENT_PHASE="$RESUME_FROM"
+for command in git perl python3 cmp; do
   require_command "$command"
 done
-prepare_python_publish_environment
-docker info >/dev/null 2>&1 ||
-  die "Docker is not running or the current user cannot access the Docker daemon."
-docker buildx version >/dev/null 2>&1 ||
-  die "Docker Buildx is required to publish multi-platform runtime images."
+if should_run_phase python; then
+  require_command gcloud
+  prepare_python_publish_environment
+fi
+if should_run_phase web-ui; then
+  require_command gcloud
+  require_command npm
+fi
+if should_run_phase membrane || should_run_phase core; then
+  require_command gcloud
+  require_command docker
+  docker info >/dev/null 2>&1 ||
+    die "Docker is not running or the current user cannot access the Docker daemon."
+  docker buildx version >/dev/null 2>&1 ||
+    die "Docker Buildx is required to publish multi-platform runtime images."
+fi
 
-check_workspace
-prepare_release_metadata
-create_release_tags
-publish_and_verify_gar
-push_release_tags
-update_post_release_pins
+if [[ "$RESUME_FROM" == "prepare" ]]; then
+  check_workspace
+  CURRENT_PHASE="prepare"
+  prepare_release_metadata
+  create_release_tags
+else
+  check_resume_workspace
+  PREVIOUS_VERSION="$(resolve_previous_version "$VERSION")"
+fi
 
+if should_run_phase python || should_run_phase web-ui ||
+   should_run_phase membrane || should_run_phase core; then
+  publish_and_verify_gar
+fi
+if should_run_phase tags; then
+  CURRENT_PHASE="tags"
+  push_release_tags
+fi
+if should_run_phase finalize; then
+  CURRENT_PHASE="finalize"
+  [[ -n "${PREVIOUS_VERSION:-}" ]] ||
+    PREVIOUS_VERSION="$(resolve_previous_version "$VERSION")"
+  update_post_release_pins
+fi
+
+CURRENT_PHASE=""
 printf 'Release %s completed successfully.\n' "$TAG"

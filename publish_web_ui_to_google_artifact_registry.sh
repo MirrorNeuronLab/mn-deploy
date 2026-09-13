@@ -71,25 +71,43 @@ VERSION="${VERSION#v}"
 command -v "$NPM_BIN" >/dev/null 2>&1 || die "npm was not found: ${NPM_BIN}"
 command -v "$NODE_BIN" >/dev/null 2>&1 || die "Node.js was not found: ${NODE_BIN}"
 
-if [[ "$SKIP_BUILD" != "Y" ]]; then
-  (cd "$WEB_UI_DIR" && "$NPM_BIN" ci && "$NPM_BIN" run build)
-fi
-[[ -f "${WEB_UI_DIR}/dist/index.html" ]] || die "Web UI build output is missing: ${WEB_UI_DIR}/dist"
-
+build_dir=""
+package_source_dir="$WEB_UI_DIR"
 stage_dir="$(mktemp -d "${TMPDIR:-/tmp}/mn-web-ui-package.XXXXXX")"
 npmrc="$(mktemp "${TMPDIR:-/tmp}/mn-web-ui-npmrc.XXXXXX")"
 cleanup() {
+  [[ -z "$build_dir" ]] || rm -rf "$build_dir"
   rm -rf "$stage_dir"
   rm -f "$npmrc"
 }
 trap cleanup EXIT
 
-cp -R "${WEB_UI_DIR}/dist" "${stage_dir}/dist"
+if [[ "$SKIP_BUILD" != "Y" ]]; then
+  command -v git >/dev/null 2>&1 || die "git is required to prepare an isolated Web UI build."
+  command -v tar >/dev/null 2>&1 || die "tar is required to prepare an isolated Web UI build."
+  build_dir="$(mktemp -d "${TMPDIR:-/tmp}/mn-web-ui-build.XXXXXX")"
+  if git -C "$WEB_UI_DIR" rev-parse --verify --quiet "refs/tags/v${VERSION}^{commit}" >/dev/null; then
+    git -C "$WEB_UI_DIR" archive "refs/tags/v${VERSION}" | tar -xf - -C "$build_dir"
+  else
+    tar -C "$WEB_UI_DIR" \
+      --exclude='./.git' \
+      --exclude='./node_modules' \
+      --exclude='./dist' \
+      -cf - . | tar -xf - -C "$build_dir"
+  fi
+  (cd "$build_dir" && "$NPM_BIN" ci && "$NPM_BIN" run build)
+  package_source_dir="$build_dir"
+fi
+[[ -f "${package_source_dir}/dist/index.html" ]] ||
+  die "Web UI build output is missing: ${package_source_dir}/dist"
+
+cp -R "${package_source_dir}/dist" "${stage_dir}/dist"
 for file in README.md LICENSE; do
-  [[ -f "${WEB_UI_DIR}/${file}" ]] && cp "${WEB_UI_DIR}/${file}" "${stage_dir}/${file}"
+  [[ -f "${package_source_dir}/${file}" ]] &&
+    cp "${package_source_dir}/${file}" "${stage_dir}/${file}"
 done
 
-"$NODE_BIN" - "${WEB_UI_DIR}/package.json" "${stage_dir}/package.json" "$VERSION" <<'JS'
+"$NODE_BIN" - "${package_source_dir}/package.json" "${stage_dir}/package.json" "$VERSION" <<'JS'
 const fs = require("node:fs");
 const source = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
 const packageJson = {

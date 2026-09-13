@@ -312,8 +312,21 @@ immutable. The aggregate release builds and verifies the complete Python
 inventory and self-contained Web UI package directly from sibling worktrees in
 GAR before it pushes the prepared source tags. `release_all.sh` uses `uv` to
 create its dedicated Python publishing environment and install the required
-build, Twine, keyring, and GAR authentication packages automatically. GitHub release workflows are neither awaited nor used as
-package sources.
+build, Twine, keyring, and GAR authentication packages automatically. GitHub
+release workflows are neither awaited nor used as package sources.
+
+Each publishing step is a named resume phase. On failure, the script prints the
+exact recovery command, for example:
+
+```bash
+./release_all.sh -v 1.3.46 --resume-from web-ui
+```
+
+A resumed release validates the existing local release tags. Web UI builds run
+from the release tag in a temporary directory, and Membrane/Core Docker builds
+also use their tagged source, so those repositories may advance without changing
+the release inputs. Resuming at the Python phase additionally requires package
+source checkouts to remain at their tagged commits. Earlier phases are skipped.
 Source and wheel tests do not require a live runtime installation.
 
 
