@@ -152,11 +152,13 @@ GitHub installer defaults. Local development installs bind their distributions
 to sibling source checkouts, while blueprints and native response services
 still decide which capabilities to enable or prepare at runtime. A new release
 must publish the indexed packages and refresh its version pins and
-install-support snapshot together. Release preparation derives static project
-versions from each project's pyproject.toml, applies the requested release
-version only to dynamically versioned projects, and fails when an SDK component
-project is missing from the package index; historical snapshots remain
-immutable. The aggregate release builds the indexed Python inventory and a
+install-support snapshot together. Release preparation compares tracked package inputs with the previous release
+and automatically increments changed packages by one patch. Unchanged packages
+retain their versions; manually advanced static versions are preserved. The SDK
+and its component wheels share one version group because blueprint capability
+defaults derive from SDK identity. CLI, API, skills, agents, and Membrane Python
+projects advance independently. Missing SDK index entries fail preparation;
+historical snapshots remain immutable. The aggregate release builds the indexed Python inventory and a
 self-contained Web UI npm package from local sibling worktrees, publishes and
 verifies them in the single configured GAR project, and only then pushes the
 prepared source tags. GitHub release workflow outputs are not release inputs. MirrorNeuron-owned packages are installed from GAR; third-party dependencies continue to resolve directly from PyPI and npmjs. GAR's Python, npm, and Docker formats

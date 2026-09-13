@@ -17,6 +17,7 @@ NPM_REPOSITORY="mirrorneuron-npm"
 PUBLISH_PYTHON=""
 RESUME_FROM=""
 CURRENT_PHASE=""
+PLAN="N"
 
 REPOSITORIES=(
   mn-api
@@ -33,16 +34,20 @@ REPOSITORIES=(
 
 usage() {
   cat <<'EOF'
-Usage: release_all.sh -v MAJOR.MINOR.PATCH [--resume-from PHASE]
+Usage: release_all.sh [-v MAJOR.MINOR.PATCH] [--resume-from PHASE]
+
+Omit -v (or use --auto) to choose the next unused patch when source changed.
+Python distributions advance independently when their tracked inputs change.
+Use --plan for a read-only version preview.
 
 Create a complete multi-repository release:
   1. verify all release worktrees are clean and synchronized with main;
-  2. update indexed/static package versions and snapshot installer support;
+  2. update package versions and installer defaults, then snapshot support;
   3. create local annotated release tags, then build, publish, and verify all
      Python, Web UI, Core, and Membrane artifacts in Google Artifact Registry;
   4. push the prepared tags only after GAR verification succeeds, without
      consuming or waiting for GitHub release workflow artifacts;
-  5. update installer/blueprint pins and record the completed release.
+  5. update named blueprint pins and record the completed release.
 
 Resume phases: prepare, python, web-ui, membrane, core, tags, or finalize.
 After a failure, run the exact --resume-from command printed by this script.
@@ -94,25 +99,6 @@ prepare_python_publish_environment() {
 validate_version() {
   [[ "$1" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] ||
     die "Version must be MAJOR.MINOR.PATCH, got '$1'."
-}
-
-restore_version_text() {
-  local file="$1"
-  local old_version="$2"
-  local new_version="$3"
-
-  perl -0pi -e "s/\\Q${old_version}\\E/${new_version}/g" "$file"
-}
-
-set_static_project_version() {
-  local file="$1"
-  local version="$2"
-
-  MN_RELEASE_VERSION="$version" perl -0pi -e \
-    's~(\[project\](?:(?!\n\[).)*?\nversion\s*=\s*")[^"]+(")~$1$ENV{MN_RELEASE_VERSION}$2~s' \
-    "$file"
-  grep -Fq "version = \"${version}\"" "$file" ||
-    die "Could not set the Python project version in ${file}."
 }
 
 set_installer_default_version() {
@@ -199,6 +185,10 @@ trap report_resume_command EXIT
 
 check_workspace() {
   local repo path
+  if [[ -d "${WORKSPACE_ROOT}/otterdesk-blueprints/.git" ]]; then
+    [[ -z "$(git -C "${WORKSPACE_ROOT}/otterdesk-blueprints" status --porcelain)" ]] ||
+      die "Uncommitted changes in otterdesk-blueprints."
+  fi
 
   for repo in "${REPOSITORIES[@]}"; do
     path="${WORKSPACE_ROOT}/${repo}"
@@ -237,42 +227,14 @@ check_resume_workspace() {
       die "${repo}/main is not synchronized with origin/main."
     git -C "$path" rev-parse --verify --quiet "refs/tags/${TAG}^{commit}" >/dev/null ||
       die "${repo} is missing release tag ${TAG}; resume from prepare."
-    if [[ "$RESUME_FROM" == "python" ]]; then
+    if [[ "$repo" == "mn-deploy" ]]; then
+      git -C "$path" diff --quiet "$TAG" HEAD -- . ':!released.md' ||
+        die "Release tooling or metadata changed since ${TAG}; resume using the tagged checkout."
+    elif [[ "$RESUME_FROM" == "python" ]]; then
       [[ "$(git -C "$path" rev-list -n 1 "$TAG")" == "$(git -C "$path" rev-parse HEAD)" ]] ||
         die "${repo} advanced after ${TAG}; Python publishing cannot safely resume from changed source. Resume from the first incomplete later phase instead."
     fi
   done
-}
-
-resolve_previous_version() {
-  local detected_version="$1"
-  local preparation_commit historical_index
-
-  if [[ "$detected_version" != "$VERSION" ]]; then
-    printf '%s\n' "$detected_version"
-    return
-  fi
-
-  preparation_commit="$(git -C "$SCRIPT_DIR" log -1 \
-    -S "version = \"${VERSION}\"" \
-    --format=%H -- package-index/python-packages.toml)"
-  [[ -n "$preparation_commit" ]] ||
-    die "Could not locate the package-index preparation commit for ${TAG}."
-
-  historical_index="$(mktemp "${TMPDIR:-/tmp}/mn-previous-package-index.XXXXXX")"
-  if ! git -C "$SCRIPT_DIR" show \
-    "${preparation_commit}^:package-index/python-packages.toml" > "$historical_index"; then
-    rm -f "$historical_index"
-    die "Could not read the package index preceding ${TAG}."
-  fi
-
-  detected_version="$(python3 \
-    "${SCRIPT_DIR}/scripts/prepare-python-package-index.py" \
-    "$historical_index" "$WORKSPACE_ROOT" "$VERSION")"
-  rm -f "$historical_index"
-  [[ "$detected_version" != "$VERSION" ]] ||
-    die "Could not recover the release version preceding ${TAG}."
-  printf '%s\n' "$detected_version"
 }
 
 prepare_release_metadata() {
@@ -281,33 +243,37 @@ prepare_release_metadata() {
 
   set_compose_web_ui_version "${SCRIPT_DIR}/docker-compose.yml" "$VERSION"
 
-  for pyproject in \
-    "${WORKSPACE_ROOT}/Membrane/mn-context-engine-python-sdk/pyproject.toml" \
-    "${WORKSPACE_ROOT}/Membrane/mn-context-auto-optimizer/pyproject.toml" \
-    "${WORKSPACE_ROOT}/Membrane/mn-context-auto-optimizer-benchmark/pyproject.toml"; do
-    set_static_project_version "$pyproject" "$VERSION"
-  done
-
-  # All SDK component projects are versioned by the shared Git release tag.
-  # The package-index preparation step rejects a static component version so a
-  # release cannot publish the SDK and its component wheels at different versions.
-  PREVIOUS_VERSION="$(python3 \
+  # The aggregate tag identifies a release set, not every distribution version.
+  python3 \
     "${SCRIPT_DIR}/scripts/prepare-python-package-index.py" \
-    "$index_file" "$WORKSPACE_ROOT" "$VERSION")"
-  PREVIOUS_VERSION="$(resolve_previous_version "$PREVIOUS_VERSION")"
+    "$index_file" "$WORKSPACE_ROOT" "$VERSION" --independent \
+    --baseline "$MN_RELEASE_BASELINE" >/dev/null
 
+  update_installer_pins
   prepare_install_support_snapshot
 
   commit_and_push_if_changed \
     mn-deploy \
     "Prepare ${TAG} package index and installer support" \
-    package-index/python-packages.toml docker-compose.yml "install_support/${TAG}"
-  commit_and_push_if_changed \
-    Membrane \
-    "Prepare ${TAG} Membrane package metadata" \
-    mn-context-engine-python-sdk/pyproject.toml \
-    mn-context-auto-optimizer/pyproject.toml \
-    mn-context-auto-optimizer-benchmark/pyproject.toml
+    install.sh package-index/python-packages.toml docker-compose.yml "install_support/${TAG}"
+  local repo
+  for repo in "${REPOSITORIES[@]}"; do
+    local metadata_paths=()
+    while IFS= read -r pyproject; do
+      [[ -n "$pyproject" ]] && metadata_paths+=("$pyproject")
+    done < <(python3 - "${SCRIPT_DIR}/package-index/python-packages.toml" "$repo" <<'PYTHON'
+import sys, tomllib
+from pathlib import PurePosixPath
+for package in tomllib.loads(open(sys.argv[1]).read())["packages"]:
+    parts = PurePosixPath(package["path"]).parts
+    if parts[0] == sys.argv[2]:
+        print(str(PurePosixPath(*parts[1:]) / "pyproject.toml"))
+PYTHON
+    )
+    if [[ "${#metadata_paths[@]}" -gt 0 ]]; then
+      commit_and_push_if_changed "$repo" "Prepare ${TAG} package metadata" "${metadata_paths[@]}"
+    fi
+  done
 }
 
 create_release_tags() {
@@ -408,34 +374,33 @@ publish_and_verify_gar() {
   fi
 }
 
-update_post_release_pins() {
-  local file setting
-  local settings=(
-    MN_DEFAULT_CORE_VERSION
-    MN_DEFAULT_PYTHON_SDK_VERSION
-    MN_DEFAULT_CLI_VERSION
-    MN_DEFAULT_API_VERSION
-    MN_DEFAULT_WEB_UI_VERSION
-    MN_DEFAULT_AGENT_PACKAGE_INDEX_VERSION
-    MN_DEFAULT_MEMBRANE_CONTEXT_ENGINE_VERSION
-    MN_DEFAULT_INSTALL_VERSION
-  )
-
-  for setting in "${settings[@]}"; do
+update_installer_pins() {
+  local setting
+  for setting in MN_DEFAULT_CORE_VERSION MN_DEFAULT_WEB_UI_VERSION \
+    MN_DEFAULT_AGENT_PACKAGE_INDEX_VERSION MN_DEFAULT_MEMBRANE_CONTEXT_ENGINE_VERSION \
+    MN_DEFAULT_INSTALL_VERSION; do
     set_installer_default_version "$setting" "$TAG"
   done
+  while read -r setting version; do
+    set_installer_default_version "$setting" "v${version}"
+  done < <(python3 - "${SCRIPT_DIR}/package-index/python-packages.toml" <<'PYTHON'
+import sys, tomllib
+settings = {"mirrorneuron-python-sdk": "MN_DEFAULT_PYTHON_SDK_VERSION",
+            "mirrorneuron-cli": "MN_DEFAULT_CLI_VERSION", "mirrorneuron-api": "MN_DEFAULT_API_VERSION"}
+for package in tomllib.loads(open(sys.argv[1]).read())["packages"]:
+    if package["name"] in settings:
+        print(settings[package["name"]], package["version"])
+PYTHON
+  )
+}
 
-  while IFS= read -r -d '' file; do
-    restore_version_text "$file" "$PREVIOUS_VERSION" "$VERSION"
-  done < <(find "${WORKSPACE_ROOT}/otterdesk-blueprints" -type f \( \
-    -name manifest.json -o -name requirements.txt -o -name '*.json' \) -print0)
-
+update_post_release_pins() {
   if ! grep -Fq "## ${TAG} " "${SCRIPT_DIR}/released.md"; then
     cat >> "${SCRIPT_DIR}/released.md" <<EOF
 
 ## ${TAG} -- $(date +%F)
 
-- GAR npm: `mirrorneuron-web-ui@${VERSION}` in ${NPM_REPOSITORY}.
+- GAR npm: mirrorneuron-web-ui@${VERSION} in ${NPM_REPOSITORY}.
 - GAR Python: all packages in package-index/python-packages.toml, including
   mirrorneuron-api, mirrorneuron-cli, and mirrorneuron-python-sdk.
 - GAR Docker: mirror-neuron-core and membrane-context-engine each published
@@ -449,11 +414,18 @@ EOF
     "Document ${TAG} release" \
     install.sh released.md
 
-  if ! git -C "${WORKSPACE_ROOT}/otterdesk-blueprints" diff --quiet ||
-     ! git -C "${WORKSPACE_ROOT}/otterdesk-blueprints" diff --cached --quiet; then
-    git -C "${WORKSPACE_ROOT}/otterdesk-blueprints" add -- .
-    git -C "${WORKSPACE_ROOT}/otterdesk-blueprints" commit -m "Pin blueprint dependencies to ${VERSION}"
-    git -C "${WORKSPACE_ROOT}/otterdesk-blueprints" push origin main
+  if [[ -d "${WORKSPACE_ROOT}/otterdesk-blueprints/.git" ]]; then
+    [[ -z "$(git -C "${WORKSPACE_ROOT}/otterdesk-blueprints" status --porcelain)" ]] ||
+      die "Blueprint checkout changed during release; commit or stash before finalizing."
+    [[ "$(git -C "${WORKSPACE_ROOT}/otterdesk-blueprints" branch --show-current)" == "main" ]] ||
+      die "otterdesk-blueprints is not on main."
+    git -C "${WORKSPACE_ROOT}/otterdesk-blueprints" fetch --quiet origin main
+    [[ "$(git -C "${WORKSPACE_ROOT}/otterdesk-blueprints" rev-parse HEAD)" == \
+       "$(git -C "${WORKSPACE_ROOT}/otterdesk-blueprints" rev-parse origin/main)" ]] ||
+      die "otterdesk-blueprints is not synchronized with origin/main."
+    python3 "${SCRIPT_DIR}/scripts/release-contract.py" blueprints \
+      "${SCRIPT_DIR}/package-index/python-packages.toml" "${WORKSPACE_ROOT}/otterdesk-blueprints"
+    commit_and_push_if_changed otterdesk-blueprints "Pin blueprint dependencies for ${TAG}" .
   fi
 }
 
@@ -470,6 +442,8 @@ while [[ "$#" -gt 0 ]]; do
       RESUME_FROM="$1"
       ;;
     --resume-from=*) RESUME_FROM="${1#*=}" ;;
+    --auto) VERSION="" ;;
+    --plan) PLAN="Y" ;;
     -h|--help)
       usage
       exit 0
@@ -481,8 +455,27 @@ while [[ "$#" -gt 0 ]]; do
   shift
 done
 
-[[ -n "$VERSION" ]] || { usage >&2; exit 1; }
+if [[ -z "$VERSION" ]]; then
+  [[ -z "$RESUME_FROM" ]] || die "Resuming requires the original explicit --version."
+  if [[ "$PLAN" != "Y" ]]; then
+    for repo in "${REPOSITORIES[@]}"; do
+      [[ -z "$(git -C "${WORKSPACE_ROOT}/${repo}" status --porcelain)" ]] || die "Uncommitted changes in ${repo}."
+      git -C "${WORKSPACE_ROOT}/${repo}" fetch --quiet origin main --tags
+    done
+  fi
+  VERSION="$(python3 "${SCRIPT_DIR}/scripts/release-contract.py" next-version \
+    "$WORKSPACE_ROOT" "${REPOSITORIES[@]}")"
+  [[ -n "$VERSION" ]] || { printf 'No source changes since the last release.\n'; exit 0; }
+fi
+MN_RELEASE_BASELINE="$(sed -n 's/^MN_DEFAULT_INSTALL_VERSION=.*:-\(v[0-9.]*\)}"/\1/p' "${SCRIPT_DIR}/install.sh")"
 validate_version "$VERSION"
+if [[ "$PLAN" == "Y" ]]; then
+  printf 'Next release: v%s (local tags and committed source; publish refreshes remote tags).\n' "$VERSION"
+  python3 "${SCRIPT_DIR}/scripts/prepare-python-package-index.py" \
+    "${SCRIPT_DIR}/package-index/python-packages.toml" "$WORKSPACE_ROOT" "$VERSION" \
+    --independent --baseline "$MN_RELEASE_BASELINE" --dry-run >/dev/null
+  exit 0
+fi
 TAG="v${VERSION}"
 RESUME_FROM="${RESUME_FROM:-prepare}"
 phase_rank "$RESUME_FROM" >/dev/null
@@ -515,7 +508,6 @@ if [[ "$RESUME_FROM" == "prepare" ]]; then
   create_release_tags
 else
   check_resume_workspace
-  PREVIOUS_VERSION="$(resolve_previous_version "$VERSION")"
 fi
 
 if should_run_phase python || should_run_phase web-ui ||
@@ -528,8 +520,6 @@ if should_run_phase tags; then
 fi
 if should_run_phase finalize; then
   CURRENT_PHASE="finalize"
-  [[ -n "${PREVIOUS_VERSION:-}" ]] ||
-    PREVIOUS_VERSION="$(resolve_previous_version "$VERSION")"
   update_post_release_pins
 fi
 

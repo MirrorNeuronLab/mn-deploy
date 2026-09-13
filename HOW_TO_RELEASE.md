@@ -10,18 +10,20 @@ process does not wait for or consume packages produced by them.
 Run the orchestrator from `mn-deploy`:
 
 ```bash
-./release_all.sh -v 1.3.43
+./release_all.sh --plan  # Preview using local tags; no writes or publishing.
+./release_all.sh         # Refresh tags and release changed committed sources.
 ```
 
 The command:
 
 1. verifies every release worktree is clean, on `main`, and synchronized;
-2. prepares package metadata and the immutable installer-support snapshot;
+2. selects per-package versions, updates installer defaults, and creates the
+   immutable installer-support snapshot before tagging;
 3. creates local annotated tags needed by tag-derived builds;
 4. builds, publishes, and verifies all artifacts from the local sibling
    worktrees in GAR;
 5. pushes the source tags only after GAR verification succeeds; and
-6. updates installer and blueprint pins and records the release.
+6. updates named blueprint dependency pins and records the release.
 
 If publishing fails, the tags remain local and can be reused by a retry as long
 as they still point at `HEAD`. A remote release tag is treated as immutable and
@@ -63,15 +65,14 @@ mn-deploy
 mn-python-sdk
 mn-docs
 mn-agents
-otterdesk-blueprints
-mn-system-tests
 mn-skills
 MirrorNeuron
 Membrane
 ```
 
-All must be clean and synchronized with `origin/main`. Commit and push release
-preparation before invoking the orchestrator.
+All must be clean and synchronized with `origin/main`. Commit and push source
+changes before invoking the orchestrator. If an `otterdesk-blueprints` checkout
+is present, finalization also requires it to be clean and synchronized.
 
 ## Component publishers
 
@@ -117,7 +118,47 @@ version, and run the release again.
 
 ## Post-release pins
 
-After GAR verification and tag pushes, the orchestrator updates installer
-defaults and blueprint dependency pins, commits those changes, and appends the
-confirmed GAR destinations to `released.md`. Record only artifacts that were
-actually verified.
+Installer defaults are committed before release tags are created, so tagged
+installers and support snapshots describe the same package set. After GAR
+verification and tag pushes, finalization updates exact requirements by package
+name and GAR dependency records in the optional blueprint checkout. Blueprint
+identity versions, external package pins, and compatibility ranges are preserved.
+The confirmed destinations are appended to `released.md`.
+
+## Automatic and independent versions
+
+Omitting `--version` chooses one patch above the largest numeric release tag
+across the release repositories, after fetching remote tags. If committed source
+trees have not changed, the command exits without publishing. `released.md`
+finalization changes do not trigger another release. `--plan` uses local tags
+and committed source only; commit changes before relying on that preview.
+An explicit `-v MAJOR.MINOR.PATCH` selects the aggregate release-set tag, not a
+forced version for every Python distribution.
+
+Each package index entry records a source fingerprint. Changes to tracked
+package inputs or shared repository build files increment that package's patch;
+unchanged packages reuse their previous version. Static versions advance
+automatically unless already manually increased. SDK and SDK component wheels
+remain one version group: the runtime catalog currently derives component
+defaults from the SDK version. Other Python packages advance independently.
+Core, Membrane images, and Web UI currently retain the aggregate release tag.
+
+The Python publisher rejects dirty or changed sources when a prepared source
+fingerprint is present, verifies wheel metadata against the index, and rejects
+internal dependency conflicts, including optional blueprint capabilities, before
+any upload. Binary installation preserves snapshot package pins, applies explicit
+component overrides to the constraints, constrains dependency resolution to the
+release inventory, and runs `pip check` before startup. Constraints pin internal
+packages; they are not a cross-platform lock of every third-party dependency.
+
+After a failure, use the printed explicit version and `--resume-from` phase.
+Do not use automatic version selection to retry a partially published release.
+Resumes reject changed deployment tooling or metadata; Python resumes also
+require package sources to remain at the prepared tags.
+
+Offline verification:
+
+```bash
+../mn-python-sdk/.venv/bin/python -m pytest scripts/test_release_contract.py -q
+../mn-python-sdk/.venv/bin/python -m pytest ../mn-system-tests/tests/integration/installer -q
+```

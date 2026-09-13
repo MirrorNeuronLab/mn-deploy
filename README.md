@@ -311,11 +311,13 @@ GitHub installer defaults. Local development installs bind their distributions
 to sibling source checkouts, while blueprints and native response services
 still decide which capabilities to enable or prepare at runtime. A new release
 must publish the indexed packages and refresh its version pins and
-install-support snapshot together. Release preparation derives static project
-versions from each project's pyproject.toml, applies the requested release
-version only to dynamically versioned projects, and fails when an SDK component
-project is missing from the package index; historical snapshots remain
-immutable. The aggregate release builds and verifies the complete Python
+install-support snapshot together. Release preparation compares tracked package inputs with the previous release
+and automatically increments changed packages by one patch. Unchanged packages
+retain their versions; manually advanced static versions are preserved. The SDK
+and its component wheels share one version group because blueprint capability
+defaults derive from SDK identity. CLI, API, skills, agents, and Membrane Python
+projects advance independently. Missing SDK index entries fail preparation;
+historical snapshots remain immutable. The aggregate release builds and verifies the complete Python
 inventory and self-contained Web UI package directly from sibling worktrees in
 GAR before it pushes the prepared source tags. `release_all.sh` uses `uv` to
 create its dedicated Python publishing environment and install the required
