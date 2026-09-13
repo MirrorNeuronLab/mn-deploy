@@ -14,6 +14,7 @@ PROJECT="mirrorneuron-public-packages"
 LOCATION="us-central1"
 PYTHON_REPOSITORY="agent-skills"
 NPM_REPOSITORY="mirrorneuron-npm"
+PUBLISH_PYTHON=""
 
 REPOSITORIES=(
   mn-api
@@ -56,6 +57,18 @@ require_command() {
   command -v "$1" >/dev/null 2>&1 || die "Required command was not found: $1"
 }
 
+check_python_publish_environment() {
+  local publish_venv="${MN_GAR_PUBLISH_VENV:-${SCRIPT_DIR}/.venv-gar-publish}"
+
+  PUBLISH_PYTHON="${MN_PUBLISH_PYTHON:-${publish_venv}/bin/python}"
+  if ! command -v "$PUBLISH_PYTHON" >/dev/null 2>&1; then
+    die "Python publishing environment was not found: ${PUBLISH_PYTHON}. Run ${SCRIPT_DIR}/setup_google_artifact_registry.sh --project ${PROJECT} --location ${LOCATION} --repository ${PYTHON_REPOSITORY} --npm-repository ${NPM_REPOSITORY}, or set MN_PUBLISH_PYTHON to a prepared Python command."
+  fi
+  if ! "$PUBLISH_PYTHON" -c 'import build, packaging, twine' >/dev/null 2>&1; then
+    die "Python publishing environment is missing build, packaging, or twine: ${PUBLISH_PYTHON}. Run ${SCRIPT_DIR}/setup_google_artifact_registry.sh --project ${PROJECT} --location ${LOCATION} --repository ${PYTHON_REPOSITORY} --npm-repository ${NPM_REPOSITORY}."
+  fi
+}
+
 validate_version() {
   [[ "$1" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] ||
     die "Version must be MAJOR.MINOR.PATCH, got '$1'."
@@ -90,6 +103,25 @@ set_compose_web_ui_version() {
   grep -Fq \
     "MN_WEB_UI_PACKAGE_VERSION: \${MN_WEB_UI_PACKAGE_VERSION:-${version}}" \
     "$file" || die "Could not pin the Web UI Compose package version to ${version}."
+}
+
+prepare_install_support_snapshot() {
+  local support_dir="${SCRIPT_DIR}/install_support/${TAG}"
+
+  if [[ ! -d "$support_dir" ]]; then
+    "${SCRIPT_DIR}/save_install_support.sh" --version "$TAG"
+    return
+  fi
+
+  [[ -f "${support_dir}/docker-compose.yml" ]] &&
+    [[ -f "${support_dir}/package-index/python-packages.toml" ]] &&
+    cmp -s "${SCRIPT_DIR}/docker-compose.yml" "${support_dir}/docker-compose.yml" &&
+    cmp -s \
+      "${SCRIPT_DIR}/package-index/python-packages.toml" \
+      "${support_dir}/package-index/python-packages.toml" ||
+    die "Existing install support snapshot ${support_dir} does not match the prepared release metadata; refusing to overwrite an immutable snapshot."
+
+  printf 'Reusing matching install support snapshot: %s\n' "$support_dir"
 }
 
 commit_and_push_if_changed() {
@@ -150,7 +182,7 @@ prepare_release_metadata() {
     "${SCRIPT_DIR}/scripts/prepare-python-package-index.py" \
     "$index_file" "$WORKSPACE_ROOT" "$VERSION")"
 
-  "${SCRIPT_DIR}/save_install_support.sh" --version "$TAG"
+  prepare_install_support_snapshot
 
   commit_and_push_if_changed \
     mn-deploy \
@@ -187,7 +219,7 @@ publish_and_verify_gar() {
   local image tags_file core_image core_tags_file
 
   "${SCRIPT_DIR}/publish_python_packages_to_google_artifact_registry.sh" \
-    --python "${SCRIPT_DIR}/.venv-gar-publish/bin/python" \
+    --python "$PUBLISH_PYTHON" \
     --project "$PROJECT" \
     --location "$LOCATION" \
     --repository "$PYTHON_REPOSITORY" \
@@ -292,9 +324,10 @@ done
 validate_version "$VERSION"
 TAG="v${VERSION}"
 
-for command in git gcloud docker npm perl python3; do
+for command in git gcloud docker npm perl python3 cmp; do
   require_command "$command"
 done
+check_python_publish_environment
 docker info >/dev/null 2>&1 ||
   die "Docker is not running or the current user cannot access the Docker daemon."
 docker buildx version >/dev/null 2>&1 ||
