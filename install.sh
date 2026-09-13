@@ -2285,7 +2285,7 @@ function setup_context_engine() {
 }
 
 function pull_context_engine_image() {
-    local image docker_config
+    local image docker_config docker_host
     image="$(read_env_value "$RUNTIME_COMPOSE_ENV" "MN_MEMBRANE_ENGINE_IMAGE")"
     [ -n "$image" ] || image="$(read_env_value "$RUNTIME_COMPOSE_ENV" "ENGINE_IMAGE")"
     [ -n "$image" ] || {
@@ -2295,7 +2295,9 @@ function pull_context_engine_image() {
     case "$image" in
         us-central1-docker.pkg.dev/mirrorneuron-public-packages/*)
             docker_config="$(mktemp -d "${TMPDIR:-/tmp}/mn-public-gar-docker-config.XXXXXX")"
-            if ! DOCKER_CONFIG="$docker_config" docker pull "$image"; then
+            docker_host="${DOCKER_HOST:-$(docker context inspect --format "{{.Endpoints.docker.Host}}" 2>/dev/null | head -n 1 || true)}"
+            docker_host="${docker_host:-unix://${DOCKER_HOST_SOCKET}}"
+            if ! DOCKER_CONFIG="$docker_config" DOCKER_HOST="$docker_host" docker pull "$image"; then
                 rm -rf "$docker_config"
                 print_error "Could not pull the public Membrane image from Google Artifact Registry."
                 return 1
@@ -4366,7 +4368,7 @@ function setup_context_engine() {
 }
 
 function pull_context_engine_image() {
-    local image docker_config
+    local image docker_config docker_host
     image="$(read_env_value "$RUNTIME_COMPOSE_ENV" "MN_MEMBRANE_ENGINE_IMAGE")"
     [ -n "$image" ] || image="$(read_env_value "$RUNTIME_COMPOSE_ENV" "ENGINE_IMAGE")"
     [ -n "$image" ] || {
@@ -4376,7 +4378,9 @@ function pull_context_engine_image() {
     case "$image" in
         us-central1-docker.pkg.dev/mirrorneuron-public-packages/*)
             docker_config="$(mktemp -d "${TMPDIR:-/tmp}/mn-public-gar-docker-config.XXXXXX")"
-            if ! DOCKER_CONFIG="$docker_config" docker pull "$image"; then
+            docker_host="${DOCKER_HOST:-$(docker context inspect --format "{{.Endpoints.docker.Host}}" 2>/dev/null | head -n 1 || true)}"
+            docker_host="${docker_host:-unix://${DOCKER_HOST_SOCKET}}"
+            if ! DOCKER_CONFIG="$docker_config" DOCKER_HOST="$docker_host" docker pull "$image"; then
                 rm -rf "$docker_config"
                 print_error "Could not pull the public Membrane image from Google Artifact Registry."
                 return 1
@@ -6363,7 +6367,7 @@ function setup_context_engine() {
 }
 
 function pull_context_engine_image() {
-    local image docker_config
+    local image docker_config docker_host
     image="$(read_env_value "$RUNTIME_COMPOSE_ENV" "MN_MEMBRANE_ENGINE_IMAGE")"
     [ -n "$image" ] || image="$(read_env_value "$RUNTIME_COMPOSE_ENV" "ENGINE_IMAGE")"
     [ -n "$image" ] || {
@@ -6373,7 +6377,9 @@ function pull_context_engine_image() {
     case "$image" in
         us-central1-docker.pkg.dev/mirrorneuron-public-packages/*)
             docker_config="$(mktemp -d "${TMPDIR:-/tmp}/mn-public-gar-docker-config.XXXXXX")"
-            if ! DOCKER_CONFIG="$docker_config" docker pull "$image"; then
+            docker_host="${DOCKER_HOST:-$(docker context inspect --format "{{.Endpoints.docker.Host}}" 2>/dev/null | head -n 1 || true)}"
+            docker_host="${docker_host:-unix://${DOCKER_HOST_SOCKET}}"
+            if ! DOCKER_CONFIG="$docker_config" DOCKER_HOST="$docker_host" docker pull "$image"; then
                 rm -rf "$docker_config"
                 print_error "Could not pull the public Membrane image from Google Artifact Registry."
                 return 1
