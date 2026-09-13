@@ -6240,7 +6240,10 @@ function prepare_pip_index_args() {
     index_url="$(resolve_python_index_url)"
     PIP_OWNED_INDEX_URL="$index_url"
     if [ -n "$MN_PIP_EXTRA_INDEX_URL" ]; then
-        PIP_DEPENDENCY_INDEX_ARGS=(--index-url "$MN_PIP_EXTRA_INDEX_URL")
+        PIP_DEPENDENCY_INDEX_ARGS=(
+            --index-url "$index_url"
+            --extra-index-url "$MN_PIP_EXTRA_INDEX_URL"
+        )
     else
         PIP_DEPENDENCY_INDEX_ARGS=(--index-url "$index_url")
     fi
