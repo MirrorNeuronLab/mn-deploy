@@ -111,7 +111,10 @@ Run its isolated Git regression test with:
 - Default runtime state is stored under `~/.mn`. The installer also keeps a shell
   profile export for both MirrorNeuron and OtterDesk:
   `export MN_HOME="$HOME/.mn"`.
-- Generated Compose settings are stored in `~/.mn/docker-compose.env`.
+- Generated Compose settings are stored in `~/.mn/docker-compose.env`. Binary and
+  GitHub installs default to `MN_ENV=prod` and `MN_USE_LOCAL_SKILLS=0`; local
+  source installs enable local skills explicitly. User-provided values override
+  these defaults.
 - Every installation starts the same federation-capable runtime; there is no
   worker-only install or runtime mode.
 - LiteLLM binds to a federation-reachable interface by default so an

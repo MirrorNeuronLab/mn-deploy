@@ -55,7 +55,10 @@ restores the previous virtual environment.
 Runtime state and generated configuration live below the configured
 `MN_HOME` (documented default `~/.mn`) and established executable/install
 locations. Generated Compose environment belongs in installed state, not in
-this checkout. Redis is an attached service. Membrane preparation is an
+this checkout. Binary and GitHub installs default `MN_ENV` to `prod` and
+disable local skill sources; local source installs enable them explicitly. An
+explicit `MN_ENV` or `MN_USE_LOCAL_SKILLS` value remains authoritative. Redis
+is an attached service. Membrane preparation is an
 explicit package-install operation: installers and `mn runtime
 ensure-context-engine` pull the versioned GAR image before it is needed. A
 blueprint that requires context memory may start that prepared image but must
