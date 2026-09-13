@@ -430,6 +430,33 @@ if [ "$APPLY" = "Y" ]; then
 else
     echo "DRY RUN: would upload ${upload_artifact_count} missing distribution(s) to ${REPOSITORY_URL}."
 fi
+
+if [ "$APPLY" = "Y" ]; then
+    echo "Verifying every locally built distribution in GAR."
+    : > "$REMOTE_FILES"
+    while IFS="$(printf '\t')" read -r package_name _package_path _build_formats _package_version; do
+        [ -n "$package_name" ] || continue
+        "$GCLOUD_BIN" artifacts files list \
+            --project="$PROJECT" \
+            --repository="$REPOSITORY" \
+            --location="$LOCATION" \
+            --package="$package_name" \
+            --format='value(name)' \
+            | awk -F/ -v package="$package_name" 'NF {print package "\t" $NF}' \
+            >> "$REMOTE_FILES"
+    done < "$PACKAGE_ROWS"
+    sort -u "$REMOTE_FILES" -o "$REMOTE_FILES"
+
+    missing_after_upload=0
+    while IFS="$(printf '\t')" read -r package_name _artifact_path filename; do
+        [ -n "$package_name" ] || continue
+        if ! grep -Fqx "${package_name}$(printf '\t')${filename}" "$REMOTE_FILES"; then
+            echo "GAR is missing ${package_name}/${filename} after upload." >&2
+            missing_after_upload=$((missing_after_upload + 1))
+        fi
+    done < "$LOCAL_ARTIFACTS"
+    [ "$missing_after_upload" -eq 0 ] || exit 1
+fi
 echo "Already published distributions: ${skipped_artifact_count}"
 
 echo "Listing packages currently in GAR."

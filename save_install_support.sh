@@ -52,6 +52,11 @@ validate_support_files() {
         echo "Docker Compose Web UI version does not match ${expected_web_ui_version}: $compose_file" >&2
         exit 1
     fi
+    if ! grep -Fq "MN_WEB_UI_NPM_REGISTRY:" "$compose_file" ||
+       ! grep -Fq -- "-npm.pkg.dev/" "$compose_file"; then
+        echo "Docker Compose Web UI GAR npm registry is missing: $compose_file" >&2
+        exit 1
+    fi
 
     if [[ ! -f "$package_index" ]]; then
         echo "Python package index was not found: $package_index" >&2

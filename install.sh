@@ -24,7 +24,7 @@ MN_DEFAULT_CORE_VERSION="${MN_DEFAULT_CORE_VERSION:-v1.3.12}"
 MN_DEFAULT_PYTHON_SDK_VERSION="${MN_DEFAULT_PYTHON_SDK_VERSION:-v1.3.13}"
 MN_DEFAULT_CLI_VERSION="${MN_DEFAULT_CLI_VERSION:-v1.3.5}"
 MN_DEFAULT_API_VERSION="${MN_DEFAULT_API_VERSION:-v1.3.21}"
-# Web UI is an npm package (the installer strips the leading `v`).
+# Web UI is a GAR npm package (the installer strips the leading `v`).
 MN_DEFAULT_WEB_UI_VERSION="${MN_DEFAULT_WEB_UI_VERSION:-v1.3.4}"
 # Additional pip packages are selected from the versioned package index.
 MN_DEFAULT_AGENT_PACKAGE_INDEX_VERSION="${MN_DEFAULT_AGENT_PACKAGE_INDEX_VERSION:-v1.3.32}"
@@ -40,6 +40,8 @@ MN_DEFAULT_MEMBRANE_GAR_IMAGE="${MN_DEFAULT_MEMBRANE_GAR_IMAGE:-us-central1-dock
 MN_DEFAULT_PIP_INDEX_URL="${MN_DEFAULT_PIP_INDEX_URL:-https://us-central1-python.pkg.dev/mirrorneuron-public-packages/agent-skills/simple/}"
 MN_DEFAULT_PYTHON_GAR_LOCATION="${MN_DEFAULT_PYTHON_GAR_LOCATION:-us-central1}"
 MN_DEFAULT_PYTHON_GAR_REPOSITORY="${MN_DEFAULT_PYTHON_GAR_REPOSITORY:-agent-skills}"
+MN_DEFAULT_WEB_UI_GAR_NPM_REPOSITORY="${MN_DEFAULT_WEB_UI_GAR_NPM_REPOSITORY:-mirrorneuron-npm}"
+MN_DEFAULT_WEB_UI_NPM_REGISTRY="${MN_DEFAULT_WEB_UI_NPM_REGISTRY:-https://us-central1-npm.pkg.dev/mirrorneuron-public-packages/mirrorneuron-npm/}"
 
 # Docker images started directly by the installer or generated Compose config.
 MN_DEFAULT_REDIS_IMAGE="${MN_DEFAULT_REDIS_IMAGE:-redis:8}"
@@ -2839,6 +2841,7 @@ MN_WEB_UI_HOST=${MN_WEB_UI_HOST:-localhost}
 MN_WEB_UI_PORT=${MN_WEB_UI_PORT:-55173}
 MN_WEB_UI_BIND_HOST=${MN_WEB_UI_BIND_HOST:-127.0.0.1}
 MN_WEB_UI_IMAGE=${MN_WEB_UI_IMAGE:-$MN_DEFAULT_WEB_UI_IMAGE}
+MN_WEB_UI_NPM_REGISTRY=${MN_WEB_UI_NPM_REGISTRY:-https://${MN_GAR_LOCATION:-$MN_DEFAULT_PYTHON_GAR_LOCATION}-npm.pkg.dev/${MN_GAR_PROJECT:-$MN_DEFAULT_CORE_GAR_PROJECT}/${MN_GAR_NPM_REPOSITORY:-$MN_DEFAULT_WEB_UI_GAR_NPM_REPOSITORY}/}
 MN_WEB_UI_SOURCE_MODE=${MN_WEB_UI_SOURCE_MODE}
 MN_WEB_UI_SOURCE_MOUNT=${MN_WEB_UI_SOURCE_MOUNT}
 MN_WEB_UI_PACKAGE_VERSION=${MN_WEB_UI_PACKAGE_VERSION}
@@ -4718,6 +4721,7 @@ MN_WEB_UI_HOST=${MN_WEB_UI_HOST:-localhost}
 MN_WEB_UI_PORT=${MN_WEB_UI_PORT:-55173}
 MN_WEB_UI_BIND_HOST=${MN_WEB_UI_BIND_HOST:-127.0.0.1}
 MN_WEB_UI_IMAGE=${MN_WEB_UI_IMAGE:-$MN_DEFAULT_WEB_UI_IMAGE}
+MN_WEB_UI_NPM_REGISTRY=${MN_WEB_UI_NPM_REGISTRY:-https://${MN_GAR_LOCATION:-$MN_DEFAULT_PYTHON_GAR_LOCATION}-npm.pkg.dev/${MN_GAR_PROJECT:-$MN_DEFAULT_CORE_GAR_PROJECT}/${MN_GAR_NPM_REPOSITORY:-$MN_DEFAULT_WEB_UI_GAR_NPM_REPOSITORY}/}
 MN_WEB_UI_SOURCE_MODE=${MN_WEB_UI_SOURCE_MODE}
 MN_WEB_UI_SOURCE_MOUNT=${MN_WEB_UI_SOURCE_MOUNT}
 MN_WEB_UI_PACKAGE_VERSION=${MN_WEB_UI_PACKAGE_VERSION}
@@ -5452,7 +5456,7 @@ Release/source options:
   --gar-location LOCATION       Same as MN_GAR_LOCATION. Default: us-central1.
   --gar-repository NAME         Same as MN_GAR_REPOSITORY. Default: agent-skills.
   --python-index-url URL        Same as MN_PIP_INDEX_URL. Default: ${MN_DEFAULT_PIP_INDEX_URL}
-  --python-extra-index-url URL  Same as MN_PIP_EXTRA_INDEX_URL. Default: https://pypi.org/simple.
+  --python-extra-index-url URL  Additional dependency index. Default: https://pypi.org/simple.
   --python PATH                 Same as MN_PYTHON. Must be Python 3.11+.
   --no-managed-python           Do not use uv to install a private Python runtime.
   MN_HOME=/path                 Override the runtime state directory. Defaults to ${HOME}/.mn.
@@ -6179,7 +6183,8 @@ function install_core_from_release() {
     install_core_from_gar
 }
 
-PIP_INDEX_ARGS=()
+PIP_OWNED_INDEX_URL=""
+PIP_DEPENDENCY_INDEX_ARGS=()
 
 function normalize_python_distribution_name() {
     "$MN_PYTHON_BIN" - "$1" <<'PY'
@@ -6233,20 +6238,11 @@ function resolve_python_index_url() {
 function prepare_pip_index_args() {
     local index_url
     index_url="$(resolve_python_index_url)"
-    PIP_INDEX_ARGS=(--index-url "$index_url")
+    PIP_OWNED_INDEX_URL="$index_url"
     if [ -n "$MN_PIP_EXTRA_INDEX_URL" ]; then
-        PIP_INDEX_ARGS+=(--extra-index-url "$MN_PIP_EXTRA_INDEX_URL")
-    fi
-}
-
-function bootstrap_gar_keyring_auth() {
-    local index_url
-    index_url="$(resolve_python_index_url)"
-    if [[ "$index_url" == *".pkg.dev/"* ]]; then
-        run_quiet "install-gar-keyring-auth" "$VENV_DIR/bin/pip" install --upgrade \
-            --index-url https://pypi.org/simple \
-            keyring \
-            keyrings.google-artifactregistry-auth
+        PIP_DEPENDENCY_INDEX_ARGS=(--index-url "$MN_PIP_EXTRA_INDEX_URL")
+    else
+        PIP_DEPENDENCY_INDEX_ARGS=(--index-url "$index_url")
     fi
 }
 
@@ -6308,10 +6304,15 @@ function install_indexed_group() {
             case "$pinned_requirement" in
                 *\[*\]*) wheel_extras="[${pinned_requirement#*[}"; wheel_extras="${wheel_extras%%]*}]" ;;
             esac
-            run_quiet "install-${label}" "$VENV_DIR/bin/pip" install "${PIP_INDEX_ARGS[@]}" --find-links "$(dirname "$bundled_wheel")" --upgrade "${bundled_wheel}${wheel_extras}"
+            run_quiet "install-${label}" "$VENV_DIR/bin/pip" install \
+                --no-deps --force-reinstall "${bundled_wheel}${wheel_extras}"
         else
-            run_quiet "install-${label}" "$VENV_DIR/bin/pip" install "${PIP_INDEX_ARGS[@]}" --upgrade "$pinned_requirement"
+            run_quiet "install-${label}" "$VENV_DIR/bin/pip" install \
+                --index-url "$PIP_OWNED_INDEX_URL" \
+                --no-deps --force-reinstall "$pinned_requirement"
         fi
+        run_quiet "dependencies-${label}" "$VENV_DIR/bin/pip" install \
+            "${PIP_DEPENDENCY_INDEX_ARGS[@]}" "$pinned_requirement"
         installed="Y"
     done < <(indexed_requirements_for_group "$group")
     if [ "$installed" != "Y" ]; then
@@ -6334,7 +6335,6 @@ function install_python_packages() {
     "$MN_PYTHON_BIN" -m venv "$VENV_DIR" >/dev/null 2>&1
     run_quiet "pip-upgrade" "$VENV_DIR/bin/pip" install --upgrade pip
     prepare_pip_index_args
-    bootstrap_gar_keyring_auth
     if [ "$INSTALL_PYTHON_SDK" = "Y" ]; then
         install_indexed_group sdk
     fi
@@ -6906,6 +6906,7 @@ MN_WEB_UI_HOST=${MN_WEB_UI_HOST:-localhost}
 MN_WEB_UI_PORT=${MN_WEB_UI_PORT:-55173}
 MN_WEB_UI_BIND_HOST=${MN_WEB_UI_BIND_HOST:-127.0.0.1}
 MN_WEB_UI_IMAGE=${MN_WEB_UI_IMAGE:-$MN_DEFAULT_WEB_UI_IMAGE}
+MN_WEB_UI_NPM_REGISTRY=${MN_WEB_UI_NPM_REGISTRY:-https://${MN_GAR_LOCATION:-$MN_DEFAULT_PYTHON_GAR_LOCATION}-npm.pkg.dev/${MN_GAR_PROJECT:-$MN_DEFAULT_CORE_GAR_PROJECT}/${MN_GAR_NPM_REPOSITORY:-$MN_DEFAULT_WEB_UI_GAR_NPM_REPOSITORY}/}
 MN_WEB_UI_SOURCE_MODE=${MN_WEB_UI_SOURCE_MODE}
 MN_WEB_UI_SOURCE_MOUNT=${MN_WEB_UI_SOURCE_MOUNT}
 MN_WEB_UI_PACKAGE_VERSION=${MN_WEB_UI_PACKAGE_VERSION}

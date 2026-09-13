@@ -11,6 +11,7 @@ services:
     environment:
       MN_WEB_UI_SOURCE_MODE: ${MN_WEB_UI_SOURCE_MODE:-package}
       MN_WEB_UI_PACKAGE_VERSION: ${MN_WEB_UI_PACKAGE_VERSION:-1.3.42}
+      MN_WEB_UI_NPM_REGISTRY: ${MN_WEB_UI_NPM_REGISTRY:-https://us-central1-npm.pkg.dev/mirrorneuron-public-packages/mirrorneuron-npm/}
       MN_WEB_UI_API_HOST: ${MN_WEB_UI_API_HOST:-host.docker.internal}
       MN_API_PORT: ${MN_API_PORT:-54001}
       MN_API_TOKEN: ${MN_API_TOKEN:-}
@@ -49,7 +50,9 @@ services:
             mkdir -p "$$workdir/package"
             cd "$$workdir/package"
             npm init -y >/dev/null 2>&1
-            npm install --omit=dev "mirrorneuron-web-ui@$$MN_WEB_UI_PACKAGE_VERSION"
+            npm install --omit=dev \
+              --registry="$$MN_WEB_UI_NPM_REGISTRY" \
+              "mirrorneuron-web-ui@$$MN_WEB_UI_PACKAGE_VERSION"
             cp -a node_modules/mirrorneuron-web-ui/dist/. "$$site_dir/"
           fi
           cat > "$$workdir/server.mjs" <<'NODE'

@@ -147,8 +147,9 @@ Run its isolated Git regression test with:
   gateway so both the host CLI and sandbox containers can reach the service.
 - The Web UI is a Docker Compose service published on port `55173` by default;
   installing it does not require npm on the host. Binary installs fetch the
-  selected `mirrorneuron-web-ui` package version inside the service, while
-  local installs mount and build the `mn-web-ui` checkout inside the service.
+  selected `mirrorneuron-web-ui` package from the public GAR npm repository
+  inside the service, while local installs mount and build the `mn-web-ui`
+  checkout inside the service.
   Its local job-UI proxy resolves the authenticated job handle and forwards
   only that job's declared dashboard and companion ports; it never redirects a
   browser to a selected remote node's LAN address.
@@ -197,8 +198,10 @@ Run its isolated Git regression test with:
   install.
 - Python packages published to Google Artifact Registry are controlled by
   `package-index/python-packages.toml`.
-- Binary mode uses the current public package repository by default:
-  `https://us-central1-python.pkg.dev/mirrorneuron-public-packages/agent-skills/simple/`.
+- Binary mode uses one GAR project as its artifact authority. Python packages
+  come from
+  `https://us-central1-python.pkg.dev/mirrorneuron-public-packages/agent-skills/simple/`, with public dependencies resolved directly from PyPI; the Web UI comes from `https://us-central1-npm.pkg.dev/mirrorneuron-public-packages/mirrorneuron-npm/`, while its public build dependencies come directly from npmjs;
+  and runtime images come from the `mirrorneuron-runtime` Docker repository.
 - Binary mode installs agent definitions and the Membrane Python runtime from
   that package repository and uses the versioned Membrane GAR image. It does
   not clone `mn-agents` or `Membrane`; repository checkouts remain development
@@ -211,7 +214,8 @@ Run its isolated Git regression test with:
   ./setup_google_artifact_registry.sh \
     --project mirrorneuron-public-packages \
     --location us-central1 \
-    --repository agent-skills
+    --repository agent-skills \
+    --npm-repository mirrorneuron-npm
   ```
 
 - GAR publish/sync dry run:
@@ -231,6 +235,20 @@ Run its isolated Git regression test with:
     --project mirrorneuron-public-packages \
     --location us-central1 \
     --repository agent-skills
+  ```
+
+- Web UI GAR npm publish dry run:
+
+  ```bash
+  ./publish_web_ui_to_google_artifact_registry.sh --version v1.2.30
+  ```
+
+- Web UI GAR npm publish apply:
+
+  ```bash
+  ./publish_web_ui_to_google_artifact_registry.sh \
+    --apply \
+    --version v1.2.30
   ```
 
 - Public Core multi-platform Docker image GAR apply:
@@ -290,7 +308,10 @@ install-support snapshot together. Release preparation derives static project
 versions from each project's pyproject.toml, applies the requested release
 version only to dynamically versioned projects, and fails when an SDK component
 project is missing from the package index; historical snapshots remain
-immutable.
+immutable. The aggregate release builds and verifies the complete Python
+inventory and self-contained Web UI package directly from sibling worktrees in
+GAR before it pushes the prepared source tags. GitHub release workflows are
+neither awaited nor used as package sources.
 Source and wheel tests do not require a live runtime installation.
 
 

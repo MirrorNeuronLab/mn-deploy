@@ -13,6 +13,7 @@ TAG=""
 PROJECT="mirrorneuron-public-packages"
 LOCATION="us-central1"
 PYTHON_REPOSITORY="agent-skills"
+NPM_REPOSITORY="mirrorneuron-npm"
 
 REPOSITORIES=(
   mn-api
@@ -27,18 +28,6 @@ REPOSITORIES=(
   Membrane
 )
 
-# These repositories publish artifacts or release assets from tag-triggered
-# workflows. The other tagged repositories are source-only at release time.
-WORKFLOW_REPOSITORIES=(
-  mn-api
-  mn-cli
-  mn-web-ui
-  mn-deploy
-  mn-python-sdk
-  MirrorNeuron
-  Membrane
-)
-
 usage() {
   cat <<'EOF'
 Usage: release_all.sh -v MAJOR.MINOR.PATCH
@@ -46,15 +35,15 @@ Usage: release_all.sh -v MAJOR.MINOR.PATCH
 Create a complete multi-repository release:
   1. verify all release worktrees are clean and synchronized with main;
   2. update indexed/static package versions and snapshot installer support;
-  3. commit, push, and annotate one tag in every release repository;
-  4. wait for tag-triggered GitHub release workflows;
-  5. publish and verify Python packages in GAR, PyPI, npm, and the Core and
-     Membrane runtime images (Core is built locally with Docker Buildx/QEMU);
-  6. update installer/blueprint pins and record the completed release.
+  3. create local annotated release tags, then build, publish, and verify all
+     Python, Web UI, Core, and Membrane artifacts in Google Artifact Registry;
+  4. push the prepared tags only after GAR verification succeeds, without
+     consuming or waiting for GitHub release workflow artifacts;
+  5. update installer/blueprint pins and record the completed release.
 
-Prerequisites: authenticated git, gh, gcloud, npm, curl, Docker with Buildx,
-Python build/Twine environment, and publishing authority for the configured
-npm/PyPI/GAR targets.
+Prerequisites: authenticated git and gcloud, npm, Docker with Buildx, a Python
+build/Twine environment, and publishing authority for the configured GAR
+Python, npm, and Docker repositories.
 EOF
 }
 
@@ -128,8 +117,12 @@ check_workspace() {
     git -C "$path" fetch --quiet origin main --tags
     [[ "$(git -C "$path" rev-parse main)" == "$(git -C "$path" rev-parse origin/main)" ]] ||
       die "${repo}/main is not synchronized with origin/main."
+    if git -C "$path" ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+      die "${repo} already contains remote tag ${TAG}; tags are immutable release inputs."
+    fi
     if git -C "$path" rev-parse --verify --quiet "refs/tags/${TAG}" >/dev/null; then
-      die "${repo} already contains ${TAG}; tags are immutable release inputs."
+      [[ "$(git -C "$path" rev-list -n 1 "$TAG")" == "$(git -C "$path" rev-parse HEAD)" ]] ||
+        die "${repo} has local ${TAG} on a different commit."
     fi
   done
 
@@ -171,40 +164,27 @@ prepare_release_metadata() {
     mn-context-auto-optimizer-benchmark/pyproject.toml
 }
 
-tag_all_repositories() {
+create_release_tags() {
   local repo path
 
   for repo in "${REPOSITORIES[@]}"; do
     path="${WORKSPACE_ROOT}/${repo}"
-    git -C "$path" tag -a "$TAG" -m "Release ${TAG}"
-    git -C "$path" push origin "refs/tags/${TAG}"
+    if ! git -C "$path" rev-parse --verify --quiet "refs/tags/${TAG}" >/dev/null; then
+      git -C "$path" tag -a "$TAG" -m "Release ${TAG}"
+    fi
   done
 }
 
-wait_for_tag_workflows() {
-  local repo run_ids attempt
+push_release_tags() {
+  local repo
 
-  for repo in "${WORKFLOW_REPOSITORIES[@]}"; do
-    run_ids=""
-
-    for attempt in $(seq 1 30); do
-      run_ids="$(gh run list --repo "MirrorNeuronLab/${repo}" --limit 100 \
-        --json databaseId,headBranch,event \
-        --jq ".[] | select(.headBranch == \"${TAG}\" and .event == \"push\") | .databaseId")"
-      [[ -n "$run_ids" ]] && break
-      sleep 10
-    done
-
-    [[ -n "$run_ids" ]] || die "No tag-triggered workflow appeared for ${repo}."
-    while IFS= read -r run_id; do
-      [[ -n "$run_id" ]] || continue
-      gh run watch "$run_id" --repo "MirrorNeuronLab/${repo}" --exit-status
-    done <<< "$run_ids"
+  for repo in "${REPOSITORIES[@]}"; do
+    git -C "${WORKSPACE_ROOT}/${repo}" push origin "refs/tags/${TAG}"
   done
 }
 
 publish_and_verify_gar() {
-  local local_count remote_count image tags_file core_image core_tags_file
+  local image tags_file core_image core_tags_file
 
   "${SCRIPT_DIR}/publish_python_packages_to_google_artifact_registry.sh" \
     --python "${SCRIPT_DIR}/.venv-gar-publish/bin/python" \
@@ -213,6 +193,13 @@ publish_and_verify_gar() {
     --repository "$PYTHON_REPOSITORY" \
     --apply \
     --no-prune
+
+  "${SCRIPT_DIR}/publish_web_ui_to_google_artifact_registry.sh" \
+    --version "$VERSION" \
+    --project "$PROJECT" \
+    --location "$LOCATION" \
+    --repository "$NPM_REPOSITORY" \
+    --apply
 
   image="${LOCATION}-docker.pkg.dev/${PROJECT}/mirrorneuron-runtime/membrane-context-engine"
   tags_file="$(mktemp "${TMPDIR:-/tmp}/mn-membrane-tags.XXXXXX")"
@@ -246,31 +233,6 @@ publish_and_verify_gar() {
   grep -qx "${TAG}" "$core_tags_file" || die "Core Docker tag ${TAG} was not published."
   grep -qx latest "$core_tags_file" || die "Core Docker latest tag was not published."
 
-  local_count="$(find "${SCRIPT_DIR}/dist/python-packages" -maxdepth 1 -type f | wc -l | tr -d ' ')"
-  remote_count="$(gcloud artifacts files list \
-    --project "$PROJECT" \
-    --location "$LOCATION" \
-    --repository "$PYTHON_REPOSITORY" \
-    --format='value(name)' | awk -v version="$VERSION" 'index($0, version) {count++} END {print count+0}')"
-  [[ "$local_count" == "$remote_count" ]] ||
-    die "GAR artifact count mismatch: local=${local_count}, remote=${remote_count}."
-}
-
-verify_public_registries() {
-  local package
-
-  npm view "mirrorneuron-web-ui@${VERSION}" version | grep -qx "$VERSION" ||
-    die "npm does not contain mirrorneuron-web-ui@${VERSION}."
-
-  for package in \
-    mirrorneuron-api \
-    mirrorneuron-cli \
-    mirrorneuron-python-sdk \
-    mirrorneuron-membrane-python-sdk; do
-    curl --fail --silent --show-error \
-      "https://pypi.org/pypi/${package}/${VERSION}/json" \
-      --output /dev/null || die "PyPI does not contain ${package}==${VERSION}."
-  done
 }
 
 update_post_release_pins() {
@@ -287,10 +249,9 @@ update_post_release_pins() {
 
 ## ${TAG} — $(date +%F)
 
-- npm: `mirrorneuron-web-ui@${VERSION}`.
-- PyPI: mirrorneuron-api, mirrorneuron-cli, mirrorneuron-python-sdk,
-  and mirrorneuron-membrane-python-sdk ${VERSION}.
-- GAR Python: all packages in package-index/python-packages.toml at ${VERSION}.
+- GAR npm: `mirrorneuron-web-ui@${VERSION}` in ${NPM_REPOSITORY}.
+- GAR Python: all packages in package-index/python-packages.toml, including
+  mirrorneuron-api, mirrorneuron-cli, and mirrorneuron-python-sdk.
 - GAR Docker: mirror-neuron-core and membrane-context-engine each published
   ${TAG}, ${VERSION}, and latest (pointing to this release at confirmation).
 - GitHub tag: ${TAG} across the release repositories.
@@ -331,7 +292,7 @@ done
 validate_version "$VERSION"
 TAG="v${VERSION}"
 
-for command in git gh gcloud docker npm curl perl python3; do
+for command in git gcloud docker npm perl python3; do
   require_command "$command"
 done
 docker info >/dev/null 2>&1 ||
@@ -341,10 +302,9 @@ docker buildx version >/dev/null 2>&1 ||
 
 check_workspace
 prepare_release_metadata
-tag_all_repositories
-wait_for_tag_workflows
+create_release_tags
 publish_and_verify_gar
-verify_public_registries
+push_release_tags
 update_post_release_pins
 
 printf 'Release %s completed successfully.\n' "$TAG"

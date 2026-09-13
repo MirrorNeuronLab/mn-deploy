@@ -1,21 +1,24 @@
 # Google Artifact Registry Publishing
 
 This runbook publishes every package listed in
-`package-index/python-packages.toml` to Google Artifact Registry (GAR). The
-index is the source of truth for publishable Python packages, including
-`mn-skills/*`, Membrane packages, and Synapse packages.
+`package-index/python-packages.toml` plus the self-contained Web UI package
+and runtime images to Google Artifact Registry (GAR). The index is the source
+of truth for publishable Python packages, including `mn-skills/*`, Membrane
+packages, and Synapse packages.
 
-Python distributions, Docker images, and generic release archives use
-different GAR repository formats. A single GAR repository cannot serve more
-than one of those formats.
+One GAR project is the sole release artifact authority. Python distributions,
+npm packages, Docker images, and generic release archives require separate
+format-specific repositories inside that project; GAR cannot mix those formats
+in one repository.
 
 ## Current Registry
 
 - Project: `mirrorneuron-public-packages`
 - Location: `us-central1`
-- `agent-skills` (Python): the current public simple index for all indexed
-  Python distributions:
+- `agent-skills` (Python): the publish and primary install repository for all indexed MirrorNeuron Python distributions:
   `https://us-central1-python.pkg.dev/mirrorneuron-public-packages/agent-skills/simple/`
+- `mirrorneuron-npm` (npm): the publish and install repository for the self-contained Web UI package:
+  `https://us-central1-npm.pkg.dev/mirrorneuron-public-packages/mirrorneuron-npm/`
 - `mirrorneuron-runtime` (Docker): the public runtime-image repository. Core
   and Membrane publish here as
   `us-central1-docker.pkg.dev/mirrorneuron-public-packages/mirrorneuron-runtime/mirror-neuron-core:<tag>`
@@ -23,9 +26,7 @@ than one of those formats.
   `us-central1-docker.pkg.dev/mirrorneuron-public-packages/mirrorneuron-runtime/membrane-context-engine:<tag>`.
 - `mirrorneuron-binaries` (Generic): public binary release archives.
 
-The binary installer downloads the Python SDK, CLI, API, Membrane Python SDK,
-agents, and skills from `agent-skills`; it pulls the immutable Core and Membrane
-engine images from `mirrorneuron-runtime`. The Web UI is published to npm.
+The binary installer downloads MirrorNeuron Python packages from `agent-skills` and resolves their public dependencies from PyPI. It pulls immutable Core and Membrane images from `mirrorneuron-runtime`. The Web UI service installs the self-contained MirrorNeuron package from `mirrorneuron-npm`; Web UI build dependencies continue to come from the public npm registry.
 
 ## Runtime Image Release Contract
 
@@ -55,31 +56,13 @@ for image in mirror-neuron-core membrane-context-engine; do
 done
 ```
 
-The standard `release_all.sh` flow publishes the Core image from the local
-release machine after the Core GitHub Release workflow finishes. GitHub Actions
-builds the Core OTP archives but does not publish the Core GAR image.
+The standard `release_all.sh` flow builds and verifies every GAR artifact
+from the local workspace before pushing source tags. It does not wait for or
+consume GitHub release workflow artifacts.
 
-## Requested Python Namespace Split
+## Package Source Layout
 
-`mirrorneuron-runtime` already exists as a Docker repository, so GAR cannot
-also use that exact name for Python distributions. The proposed separate
-Python repositories are therefore:
-
-| Package family | Python GAR repository | Notes |
-| --- | --- | --- |
-| Core-adjacent runtime packages: `mirrorneuron-python-sdk`, `mirrorneuron-cli`, `mirrorneuron-api`, and the Membrane Python SDK | `mirrorneuron-runtime-python` | Core and Membrane runtime images remain Docker images in `mirrorneuron-runtime`. |
-| `mn-skills/*` packages | `mirrorneuron-skills` | Python repository. |
-| `mn-agents/*` packages | `mirrorneuron-agents` | Python repository. |
-
-This is a planned migration, not the current production layout. The installer
-and package index currently address the single `agent-skills` Python repository.
-Before creating or switching to the three repositories, update the publisher
-and installer to resolve an index entry's repository by package family, publish
-each group, and validate installs against all three public simple indexes.
-
-The repository is intended to be public read-only. The project has a
-project-level domain-restriction exception, and the repository IAM policy grants
-`roles/artifactregistry.reader` to `allUsers`.
+All MirrorNeuron-owned Python distributions publish to the standard `agent-skills` repository. Binary installers first force-install each indexed MirrorNeuron distribution from this GAR repository without dependencies, then resolve its missing public dependencies directly from PyPI. The Web UI build uses npmjs for public build dependencies and publishes only its self-contained static package to `mirrorneuron-npm`. No GAR remote or virtual proxy repositories are required.
 
 ## Auth
 
@@ -105,11 +88,12 @@ PATH="$HOME/google-cloud-sdk/bin:$PATH" \
 ./setup_google_artifact_registry.sh \
   --project mirrorneuron-public-packages \
   --location us-central1 \
-  --repository agent-skills
+  --repository agent-skills \
+  --npm-repository mirrorneuron-npm
 ```
 
-The setup script verifies the repo, checks auth, creates
-`.venv-gar-publish/`, and installs:
+The setup script verifies or creates the public Python and npm repositories,
+checks auth, creates `.venv-gar-publish/`, and installs:
 
 - `build`
 - `twine`
@@ -166,6 +150,22 @@ GAR's Python repository endpoint does not support Twine's `--skip-existing`.
 The publish script intentionally omits that flag and compares GAR file listings
 before upload so reruns can complete a partially published version without
 resending files that already exist.
+
+## Web UI npm Package
+
+The Web UI publisher runs `npm ci` and `npm run build` in the local
+`mn-web-ui` checkout, then creates a dependency-free static npm tarball. This
+uses npmjs for its public build dependencies. Binary installation downloads only the resulting self-contained MirrorNeuron package from GAR.
+
+```bash
+./publish_web_ui_to_google_artifact_registry.sh --version v1.2.30
+./publish_web_ui_to_google_artifact_registry.sh --apply --version v1.2.30
+```
+
+Apply mode authenticates with a short-lived `gcloud auth print-access-token`
+token, publishes to `mirrorneuron-npm`, and verifies the remote npm integrity
+against the locally built tarball. A rerun accepts an identical version and
+rejects different content under the same immutable version.
 
 ## Public Membrane Binaries And Docker Images
 
@@ -315,18 +315,20 @@ because its custom `mn_build_backend` implements `build_wheel` but not
 
 ## Public Read-Only IAM
 
-The public repo requires:
+The public standard, remote, virtual, npm, and Docker repositories require:
 
 ```bash
 $HOME/google-cloud-sdk/bin/gcloud org-policies set-policy /private/tmp/public-registry-drs-exception.yaml \
   --project=mirrorneuron-public-packages
 
-$HOME/google-cloud-sdk/bin/gcloud artifacts repositories add-iam-policy-binding agent-skills \
+for repository in agent-skills mirrorneuron-npm; do
+  $HOME/google-cloud-sdk/bin/gcloud artifacts repositories add-iam-policy-binding "$repository" \
   --project=mirrorneuron-public-packages \
   --location=us-central1 \
   --member=allUsers \
   --role=roles/artifactregistry.reader \
   --condition=None
+done
 ```
 
 The `--condition=None` flag avoids conditional-policy prompts and was required
