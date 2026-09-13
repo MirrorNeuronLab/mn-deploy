@@ -179,8 +179,8 @@ Run its isolated Git regression test with:
   and `--web-ui-version` can override those components independently; for
   example, `./install.sh --core-version v1.2.24 --python-sdk-version v1.2.24
   --cli-version v1.2.24 --api-version v1.2.24 --web-ui-version v1.2.24`.
-  With no version flags, binary installs use core `v1.2.24` and SDK, CLI, API,
-  and Web UI `v1.2.24`.
+  With no version flags, binary installs use `v1.3.47` for Core, SDK, CLI, API,
+  Web UI, the package index, Membrane, and installer support.
 - Versioned installer support files live under `install_support/<version>/`.
   Create a release snapshot with:
 
