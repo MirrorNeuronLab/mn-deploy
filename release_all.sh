@@ -228,8 +228,11 @@ check_resume_workspace() {
     git -C "$path" rev-parse --verify --quiet "refs/tags/${TAG}^{commit}" >/dev/null ||
       die "${repo} is missing release tag ${TAG}; resume from prepare."
     if [[ "$repo" == "mn-deploy" ]]; then
-      git -C "$path" diff --quiet "$TAG" HEAD -- . ':!released.md' ||
-        die "Release tooling or metadata changed since ${TAG}; resume using the tagged checkout."
+      # Tooling fixes may be needed to recover a release. Its artifact inputs
+      # and immutable support contract must still match the prepared tag.
+      git -C "$path" diff --quiet "$TAG" HEAD -- install.sh docker-compose.yml \
+        package-index "install_support/${TAG}" ||
+        die "Release metadata changed since ${TAG}; restore the prepared release inputs before resuming."
     elif [[ "$RESUME_FROM" == "python" ]]; then
       [[ "$(git -C "$path" rev-list -n 1 "$TAG")" == "$(git -C "$path" rev-parse HEAD)" ]] ||
         die "${repo} advanced after ${TAG}; Python publishing cannot safely resume from changed source. Resume from the first incomplete later phase instead."

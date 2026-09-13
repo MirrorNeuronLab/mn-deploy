@@ -159,3 +159,42 @@ def test_package_preview_never_writes_static_project_or_index(tmp_path):
     before = (project.read_text(), index.read_text())
     indexer.synchronize(index, tmp_path, '1.1.0', independent=True, dry_run=True)
     assert (project.read_text(), index.read_text()) == before
+
+
+def test_static_metadata_commit_does_not_reorder_fingerprint_inputs(tmp_path):
+    import hashlib
+
+    repo = repository(tmp_path)
+    project = repo / 'optimizer'
+    project.mkdir()
+    old = '[project]\nname="optimizer"\nversion="1.3.47"\n'
+    new = old.replace('1.3.47', '1.3.48')
+
+    def blob_id(content):
+        data = content.encode()
+        return hashlib.sha1(f'blob {len(data)}\0'.encode() + data).hexdigest()
+
+    low, high = sorted([blob_id(old), blob_id(new)])
+    # A blob between the two metadata IDs proves the old sorter changes order.
+    code = next(f'value = {i}\n' for i in range(10000) if low < blob_id(f'value = {i}\n') < high)
+    (project / 'pyproject.toml').write_text(old)
+    (project / 'code.py').write_text(code)
+    commit(repo)
+    legacy = indexer.source_fingerprint(tmp_path, 'repo/optimizer', legacy=True)
+    stable = indexer.source_fingerprint(tmp_path, 'repo/optimizer')
+    (project / 'pyproject.toml').write_text(new)
+    commit(repo)
+    assert indexer.source_fingerprint(tmp_path, 'repo/optimizer', legacy=True) != legacy
+    assert indexer.source_fingerprint(tmp_path, 'repo/optimizer') == stable
+    assert indexer.source_matches(tmp_path, 'repo/optimizer', legacy)
+    index = tmp_path / 'index.toml'
+    index.write_text(f'[[packages]]\nname="optimizer"\npath="repo/optimizer"\nversion = "1.3.48"\nsource_hash = "{legacy}"\n')
+    indexer.verify_sources(index, tmp_path)
+    indexer.synchronize(index, tmp_path, '1.3.49', independent=True)
+    record = indexer.tomllib.loads(index.read_text())['packages'][0]
+    assert record['version'] == '1.3.48'
+    assert record['source_hash'] == stable
+    (project / 'code.py').write_text('actual new behavior\n')
+    commit(repo)
+    assert not indexer.source_matches(tmp_path, 'repo/optimizer', legacy)
+    assert not indexer.source_matches(tmp_path, 'repo/optimizer', stable)

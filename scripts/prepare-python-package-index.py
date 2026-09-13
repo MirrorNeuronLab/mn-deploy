@@ -40,7 +40,7 @@ def git(repo: Path, *args: str) -> str:
     return subprocess.check_output(["git", "-C", str(repo), *args], text=True).strip()
 
 
-def source_fingerprint(workspace: Path, relative: str, ref: str = "HEAD", *, include_nested: bool = False) -> str:
+def source_fingerprint(workspace: Path, relative: str, ref: str = "HEAD", *, include_nested: bool = False, legacy: bool = False) -> str:
     """Hash tracked package inputs, excluding nested independently built projects.
 
     Normalize the static version so preparation itself never causes another bump.
@@ -53,7 +53,10 @@ def source_fingerprint(workspace: Path, relative: str, ref: str = "HEAD", *, inc
     if scope != ".":
         rows += git(repo, "ls-tree", ref).splitlines()
     digest = hashlib.sha256()
-    for row in sorted(set(rows)):
+    # Raw tree rows contain blob IDs; sorting those before normalization makes
+    # a version-only edit reorder otherwise identical inputs.
+    ordered = sorted(set(rows), key=None if legacy else lambda row: row.split("\t", 1)[1])
+    for row in ordered:
         metadata, name = row.split("\t", 1)
         mode, kind, oid = metadata.split()
         if kind != "blob" or (scope == "." and not include_nested and name.startswith("packages/")):
@@ -63,7 +66,30 @@ def source_fingerprint(workspace: Path, relative: str, ref: str = "HEAD", *, inc
             content = re.sub(r'(?m)^version\s*=\s*"[^"\n]+"', 'version = "<release>"', content)
             oid = hashlib.sha256(content.encode()).hexdigest()
         digest.update(f"{mode} {name} {oid}\n".encode())
-    return digest.hexdigest()
+    return ("" if legacy else "v2:") + digest.hexdigest()
+
+
+def source_matches(workspace: Path, relative: str, expected: str, *, include_nested: bool = False) -> bool:
+    actual = source_fingerprint(workspace, relative, include_nested=include_nested)
+    if expected.startswith("v2:"):
+        return expected == actual
+    if source_fingerprint(workspace, relative, include_nested=include_nested, legacy=True) == expected:
+        return True
+    # Recover only the original ordering defect across the immediately preceding
+    # commit. Its recorded legacy hash must match AND normalized inputs must be
+    # identical. This does not rewrite a release snapshot or accept code drift.
+    repo = workspace / Path(relative).parts[0]
+    parent = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "--verify", "HEAD^"],
+        capture_output=True, text=True,
+    )
+    if parent.returncode:
+        return False
+    ref = parent.stdout.strip()
+    return (
+        source_fingerprint(workspace, relative, ref, include_nested=include_nested, legacy=True) == expected
+        and source_fingerprint(workspace, relative, ref, include_nested=include_nested) == actual
+    )
 
 
 def patch_version(version: str) -> str:
@@ -107,7 +133,8 @@ def synchronize(index_file: Path, workspace_root: Path, release_version: str, *,
         if not all(previous_hashes) and baseline:
             previous_hashes = [source_fingerprint(workspace_root, "mn-python-sdk", baseline, include_nested=True)]
         previous = max((str(p["version"]) for p in sdk_entries), key=numeric_version_key)
-        sdk_version = patch_version(previous) if any(h != sdk_hash for h in previous_hashes) else previous
+        sdk_changed = any(not h or not source_matches(workspace_root, "mn-python-sdk", h, include_nested=True) for h in previous_hashes)
+        sdk_version = patch_version(previous) if sdk_changed else previous
 
     updates: dict[Path, str] = {}
     rendered: list[str] = []
@@ -128,7 +155,7 @@ def synchronize(index_file: Path, workspace_root: Path, release_version: str, *,
                 except subprocess.CalledProcessError:
                     pass  # Newly indexed repositories have no baseline tag.
             previous = str(package["version"])
-            changed = fingerprint != previous_hash
+            changed = not previous_hash or not source_matches(workspace_root, str(package["path"]), previous_hash)
             project = tomllib.loads(pyproject.read_text())["project"]
             if project.get("version"):
                 declared = str(project["version"])
@@ -182,11 +209,10 @@ def verify_sources(index_file: Path, workspace_root: Path) -> None:
             continue  # Historical release indexes predate source fingerprints.
         sdk = Path(package["path"]).parts[0] == "mn-python-sdk"
         scope = "mn-python-sdk" if sdk else package["path"]
-        actual = source_fingerprint(workspace_root, scope, include_nested=sdk)
         repo = workspace_root / Path(scope).parts[0]
         if git(repo, "status", "--porcelain"):
             raise SystemExit(f"Uncommitted source changes in {repo}; publishing requires the prepared source.")
-        if actual != expected:
+        if not source_matches(workspace_root, scope, expected, include_nested=sdk):
             raise SystemExit(f"Source changed after version preparation: {package['name']}; prepare a new release.")
 
 

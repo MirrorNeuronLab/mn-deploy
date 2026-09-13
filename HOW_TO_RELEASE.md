@@ -153,7 +153,8 @@ packages; they are not a cross-platform lock of every third-party dependency.
 
 After a failure, use the printed explicit version and `--resume-from` phase.
 Do not use automatic version selection to retry a partially published release.
-Resumes reject changed deployment tooling or metadata; Python resumes also
+Resumes allow committed deployment tooling fixes but reject changed installer,
+Compose, package-index, or release-snapshot inputs. Python resumes also
 require package sources to remain at the prepared tags.
 
 Offline verification:
@@ -162,3 +163,11 @@ Offline verification:
 ../mn-python-sdk/.venv/bin/python -m pytest scripts/test_release_contract.py -q
 ../mn-python-sdk/.venv/bin/python -m pytest ../mn-system-tests/tests/integration/installer -q
 ```
+
+
+Source fingerprints use `v2:` hashes ordered by file path. Legacy hashes from
+preparation before this fix are accepted across a version-only preparation
+commit only when the parent's legacy hash matches the recorded hash and the
+normalized package inputs are identical. This permits resuming `v1.3.48`
+without changing its tags, package versions, or immutable support snapshot.
+Commit and push release-tooling fixes before retrying the printed resume command.
