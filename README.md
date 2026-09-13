@@ -3,6 +3,13 @@
 `mn-deploy` contains the unified installer and local service scripts for MirrorNeuron.
 By default, `install.sh` installs released artifacts and Python packages.
 
+## Installer compatibility fix (unreleased)
+
+Installers on macOS Bash 3.2 now handle empty arrays under strict mode, including
+reset with no remaining options, empty Python component selections, and optional
+wheel-search arguments. The optional Ubuntu privilege prefix is also safe when
+running as root. All three install modes retain argument boundaries and defaults.
+
 ## Quick Start
 
 Inspect installer options:

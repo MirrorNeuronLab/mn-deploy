@@ -280,12 +280,12 @@ function mn_install_ubuntu_docker_model_plugin() {
     fi
 
     print_step "Installing Docker Model Runner plugin for Ubuntu"
-    if ! "${privilege[@]}" apt-get update; then
+    if ! ${privilege[@]+"${privilege[@]}"} apt-get update; then
         print_error "Could not refresh Ubuntu package metadata."
         mn_print_docker_model_runner_install_hint
         exit 1
     fi
-    if ! "${privilege[@]}" apt-get install "$package_name" -y; then
+    if ! ${privilege[@]+"${privilege[@]}"} apt-get install "$package_name" -y; then
         print_error "Could not install docker-model-plugin."
         mn_print_docker_model_runner_install_hint
         exit 1
@@ -1105,14 +1105,16 @@ function mn_reset_drop_conflicting_install_args() {
     local arg
     local -a filtered_args=()
 
-    for arg in "${MN_INSTALL_ARGS[@]}"; do
+    # Bash 3.2 treats empty arrays as unset with nounset. Preserve zero arguments.
+
+    for arg in ${MN_INSTALL_ARGS[@]+"${MN_INSTALL_ARGS[@]}"}; do
         if [ "$arg" = "--no-reinstall" ]; then
             mn_reset_warning "Ignoring --no-reinstall because --reset requires a fresh installation."
         else
             filtered_args+=("$arg")
         fi
     done
-    MN_INSTALL_ARGS=("${filtered_args[@]}")
+    MN_INSTALL_ARGS=(${filtered_args[@]+"${filtered_args[@]}"})
 }
 
 function mn_github_raw_asset_url() {
@@ -1978,7 +1980,7 @@ function set_python_components() {
     INSTALL_API="N"
 
     IFS=',' read -r -a components <<< "$value"
-    for component in "${components[@]}"; do
+    for component in ${components[@]+"${components[@]}"}; do
         component="$(echo "$component" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
         case "$component" in
             all)
@@ -5499,7 +5501,7 @@ function set_python_components() {
     INSTALL_API="N"
 
     IFS=',' read -r -a components <<< "$value"
-    for component in "${components[@]}"; do
+    for component in ${components[@]+"${components[@]}"}; do
         component="$(echo "$component" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
         case "$component" in
             all)
@@ -6335,8 +6337,9 @@ function install_indexed_group() {
                 --index-url "$PIP_OWNED_INDEX_URL" \
                 --no-deps --force-reinstall "$pinned_requirement"
         fi
+        # Bash 3.2 treats empty arrays as unset under nounset; omit optional arguments.
         run_quiet "dependencies-${label}" "$VENV_DIR/bin/pip" install \
-            "${PIP_DEPENDENCY_INDEX_ARGS[@]}" "${dependency_links[@]}" --constraint "$VENV_DIR/mn-release-constraints.txt" "$dependency_requirement"
+            "${PIP_DEPENDENCY_INDEX_ARGS[@]}" ${dependency_links[@]+"${dependency_links[@]}"} --constraint "$VENV_DIR/mn-release-constraints.txt" "$dependency_requirement"
         installed="Y"
     done < <(indexed_requirements_for_group "$group")
     if [ "$installed" != "Y" ]; then
