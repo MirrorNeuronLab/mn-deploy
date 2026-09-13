@@ -115,6 +115,19 @@ set_static_project_version() {
     die "Could not set the Python project version in ${file}."
 }
 
+set_installer_default_version() {
+  local setting="$1"
+  local tag="$2"
+  local expected
+
+  env MN_RELEASE_SETTING="$setting" MN_RELEASE_TAG="$tag" perl -0pi -e \
+    's~^(\Q$ENV{MN_RELEASE_SETTING}\E="\$\{\Q$ENV{MN_RELEASE_SETTING}\E:-)[^}]+(\}")~$1$ENV{MN_RELEASE_TAG}$2~m' \
+    "${SCRIPT_DIR}/install.sh"
+  printf -v expected '%s="${%s:-%s}"' "$setting" "$setting" "$tag"
+  grep -Fq "$expected" "${SCRIPT_DIR}/install.sh" ||
+    die "Could not set ${setting} to ${tag} in install.sh."
+}
+
 set_compose_web_ui_version() {
   local file="$1"
   local version="$2"
@@ -397,9 +410,21 @@ publish_and_verify_gar() {
 }
 
 update_post_release_pins() {
-  local file
+  local file setting
+  local settings=(
+    MN_DEFAULT_CORE_VERSION
+    MN_DEFAULT_PYTHON_SDK_VERSION
+    MN_DEFAULT_CLI_VERSION
+    MN_DEFAULT_API_VERSION
+    MN_DEFAULT_WEB_UI_VERSION
+    MN_DEFAULT_AGENT_PACKAGE_INDEX_VERSION
+    MN_DEFAULT_MEMBRANE_CONTEXT_ENGINE_VERSION
+    MN_DEFAULT_INSTALL_VERSION
+  )
 
-  restore_version_text "${SCRIPT_DIR}/install.sh" "$PREVIOUS_VERSION" "$VERSION"
+  for setting in "${settings[@]}"; do
+    set_installer_default_version "$setting" "$TAG"
+  done
 
   while IFS= read -r -d '' file; do
     restore_version_text "$file" "$PREVIOUS_VERSION" "$VERSION"
