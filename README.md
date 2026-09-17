@@ -33,10 +33,10 @@ that command to your shell profile yourself for future terminals.
 OpenShell runs through the managed containers in every install mode; the
 installer does not run the upstream host package installer.
 
-Docker must already be running. The installer does not change Docker Desktop
-settings or request access to other apps' data. If Model Runner is disabled,
-enable it in Docker Desktop Settings and retry. Docker manages its own images,
-volumes, and platform permissions outside `MN_HOME`.
+Docker must already be running. When Model Runner is required but disabled, the
+installer enables it with `docker desktop enable model-runner`. Docker Desktop
+may request the platform permission needed to update that setting. Docker
+manages its own images, volumes, and platform permissions outside `MN_HOME`.
 
 ## Quick Start
 

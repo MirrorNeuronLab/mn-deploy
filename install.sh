@@ -297,8 +297,11 @@ function mn_prepare_docker_model_runner_cli() {
         if docker model status >/dev/null 2>&1; then
             return 0
         fi
-        print_error "Enable Model Runner in Docker Desktop Settings, then rerun install.sh."
-        return 1
+        print_step "Enabling Docker Model Runner in Docker Desktop"
+        if ! docker desktop enable model-runner >/dev/null 2>&1; then
+            print_warning "Docker Desktop did not enable Model Runner automatically."
+        fi
+        return 0
     fi
 
     if mn_is_ubuntu_linux_host && ! docker model --help >/dev/null 2>&1; then
