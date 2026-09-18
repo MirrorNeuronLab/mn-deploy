@@ -21,11 +21,12 @@ This specification applies only to deployment assets in this repository.
 Flags shown by each script's `--help` are the exact command contract.
 
 `install.sh --detect-only` is a read-only query for integrations. It prints one
-JSON object containing `installed`, `running`, `status`, the installed Core
-`version`, `docker_installed`, and `docker_running`, and exits without preparing
-paths, downloading assets, or changing runtime state. If an installation is
-present but Docker cannot be queried, `status` is `docker_not_running` and
-`running` is JSON `null`.
+JSON object containing `installed`, `running`, `runtime_ready`, `status`, the
+installed Core `version`, `docker_installed`, and `docker_running`, and exits
+without preparing paths, downloading assets, or changing runtime state.
+`runtime_ready` is true only when the installed `mn runtime status` command
+succeeds. If an installation is present but Docker cannot be queried, `status`
+is `docker_not_running` and `running` is JSON `null`.
 
 ## Install Modes
 

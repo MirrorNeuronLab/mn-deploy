@@ -56,8 +56,11 @@ The command exits successfully after printing one JSON object. `status` is
 `not_installed`, `stopped`, `running`, or `docker_not_running`. The last status
 means an install was found but the Docker daemon was unavailable, so runtime
 `running` is `null`. `docker_installed` and `docker_running` report Docker's
-state separately. `version` is the installed Core release when it can be
-determined, otherwise `null`.
+state separately. `runtime_ready` is true only when the installed `mn runtime
+status` health check succeeds; an installation can therefore report
+`installed: true` and `runtime_ready: false` when repair or reinstallation may
+be needed. `version` is the installed Core release when it can be determined,
+otherwise `null`.
 
 Install the local runtime:
 

@@ -201,11 +201,20 @@ function mn_detect_version_from_cli() {
     printf '%s' "$version"
 }
 
+function mn_detect_runtime_is_ready() {
+    local cli="$1"
+
+    [ -x "$cli" ] || return 1
+    MN_CLI_OUTPUT=plain MN_DISABLE_UPDATE_CHECK=1 \
+        "$cli" runtime status >/dev/null 2>&1
+}
+
 function mn_detect_runtime() {
     local install_dir="${MN_HOME:-${HOME}/.mn}"
     local metadata_file="${install_dir}/install_metadata.json"
     local installed="false"
     local running="false"
+    local runtime_ready="false"
     local status="not_installed"
     local version=""
     local docker_installed="false"
@@ -231,6 +240,16 @@ function mn_detect_runtime() {
         installed="true"
     fi
 
+    if [ -x "${install_dir}/bin/mn" ]; then
+        cli="${install_dir}/bin/mn"
+    elif [ -x "${install_dir}/venv/bin/mn" ]; then
+        cli="${install_dir}/venv/bin/mn"
+    fi
+
+    if [ "$installed" = "true" ] && [ -n "$cli" ] && mn_detect_runtime_is_ready "$cli"; then
+        runtime_ready="true"
+    fi
+
     if [ "$installed" = "true" ]; then
         if [ "$docker_ready" != "Y" ]; then
             running="null"
@@ -248,20 +267,15 @@ function mn_detect_runtime() {
         version="$(mn_detect_version_from_docker || true)"
     fi
     if [ -z "$version" ]; then
-        if [ -x "${install_dir}/bin/mn" ]; then
-            cli="${install_dir}/bin/mn"
-        elif [ -x "${install_dir}/venv/bin/mn" ]; then
-            cli="${install_dir}/venv/bin/mn"
-        fi
         [ -z "$cli" ] || version="$(mn_detect_version_from_cli "$cli" || true)"
     fi
 
     if [ -n "$version" ]; then
-        printf '{"installed":%s,"running":%s,"status":"%s","version":"%s","docker_installed":%s,"docker_running":%s}\n' \
-            "$installed" "$running" "$status" "$version" "$docker_installed" "$docker_running"
+        printf '{"installed":%s,"running":%s,"runtime_ready":%s,"status":"%s","version":"%s","docker_installed":%s,"docker_running":%s}\n' \
+            "$installed" "$running" "$runtime_ready" "$status" "$version" "$docker_installed" "$docker_running"
     else
-        printf '{"installed":%s,"running":%s,"status":"%s","version":null,"docker_installed":%s,"docker_running":%s}\n' \
-            "$installed" "$running" "$status" "$docker_installed" "$docker_running"
+        printf '{"installed":%s,"running":%s,"runtime_ready":%s,"status":"%s","version":null,"docker_installed":%s,"docker_running":%s}\n' \
+            "$installed" "$running" "$runtime_ready" "$status" "$docker_installed" "$docker_running"
     fi
 }
 
