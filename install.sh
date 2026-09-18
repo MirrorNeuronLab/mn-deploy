@@ -79,6 +79,7 @@ MN_INSTALL_MODE_EXPLICIT="N"
 MN_INSTALL_HELP_REQUESTED="N"
 MN_INSTALL_VERBOSE="${MN_INSTALL_VERBOSE:-N}"
 MN_INSTALL_RESET="N"
+MN_INSTALL_DETECT_ONLY="N"
 MN_BUILD_MEMBRANE="N"
 MN_BUILD_MEMBRANE_DIR=""
 MN_MEMBRANE_BUILD_PREPARED="N"
@@ -101,6 +102,7 @@ Modes:
   binary   Install released artifacts/packages. This is the default.
 
 Common options:
+  --detect-only                 Print installed/running status and version as JSON; make no changes.
   --version TAG                 Install this release version, for example v1.2.31.
   --yes, -y                     Run non-interactively with defaults and flags. This is the default.
   --interactive                 Ask each install question before proceeding.
@@ -134,6 +136,7 @@ Common options:
   -h, --help                    Show this help.
 
 Examples:
+  ./$MN_INSTALL_SCRIPT_NAME --detect-only
   ./$MN_INSTALL_SCRIPT_NAME --no-web-ui
   ./$MN_INSTALL_SCRIPT_NAME --interactive
   ./$MN_INSTALL_SCRIPT_NAME --reset
@@ -143,6 +146,123 @@ Examples:
   ./$MN_INSTALL_SCRIPT_NAME --mode github --version v1.2.31
   ./$MN_INSTALL_SCRIPT_NAME --core-version v1.2.31 --python-sdk-version v1.2.31 --cli-version v1.2.31 --api-version v1.2.31 --web-ui-version v1.2.31
 EOF
+}
+
+# =============================================================================
+# READ-ONLY RUNTIME DETECTION
+# =============================================================================
+
+function mn_detect_version_is_valid() {
+    local version="$1"
+    local version_regex='^v(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)([-+][0-9A-Za-z.-]+)?$'
+
+    [[ "$version" =~ $version_regex ]]
+}
+
+function mn_detect_version_from_metadata() {
+    local metadata_file="$1"
+    local version=""
+
+    [ -r "$metadata_file" ] || return 1
+    version="$(sed -n 's/^[[:space:]]*"core_release_tag"[[:space:]]*:[[:space:]]*"\([^"]*\)"[[:space:]]*,\{0,1\}[[:space:]]*$/\1/p' "$metadata_file" | head -n 1)"
+    mn_detect_version_is_valid "$version" || return 1
+    printf '%s' "$version"
+}
+
+function mn_detect_version_from_docker() {
+    local image=""
+    local version=""
+
+    image="$(docker container inspect --format '{{.Config.Image}}' mirror-neuron-core 2>/dev/null || true)"
+    if [ -n "$image" ]; then
+        version="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' "$image" 2>/dev/null || true)"
+    fi
+    if [ -z "$version" ]; then
+        version="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' mirror-neuron-core:latest 2>/dev/null || true)"
+    fi
+    mn_detect_version_is_valid "$version" || return 1
+    printf '%s' "$version"
+}
+
+function mn_detect_version_from_cli() {
+    local cli="$1"
+    local output=""
+    local version=""
+
+    [ -x "$cli" ] || return 1
+    output="$(MN_DISABLE_UPDATE_CHECK=1 "$cli" --version 2>/dev/null || true)"
+    version="$(printf '%s\n' "$output" | sed -n 's/.*\(v\{0,1\}[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\([-+][0-9A-Za-z.-][0-9A-Za-z.-]*\)\{0,1\}\).*/\1/p' | head -n 1)"
+    [ -n "$version" ] || return 1
+    case "$version" in
+        v*) ;;
+        *) version="v${version}" ;;
+    esac
+    mn_detect_version_is_valid "$version" || return 1
+    printf '%s' "$version"
+}
+
+function mn_detect_runtime() {
+    local install_dir="${MN_HOME:-${HOME}/.mn}"
+    local metadata_file="${install_dir}/install_metadata.json"
+    local installed="false"
+    local running="false"
+    local status="not_installed"
+    local version=""
+    local docker_installed="false"
+    local docker_running="false"
+    local docker_ready="N"
+    local core_container_exists="N"
+    local cli=""
+
+    if command -v docker >/dev/null 2>&1; then
+        docker_installed="true"
+        if docker info >/dev/null 2>&1; then
+            docker_running="true"
+            docker_ready="Y"
+            if docker container inspect mirror-neuron-core >/dev/null 2>&1; then
+                core_container_exists="Y"
+            fi
+        fi
+    fi
+
+    if [ -f "$metadata_file" ] || [ -f "${install_dir}/docker-compose.yml" ] || \
+       [ -x "${install_dir}/bin/mn" ] || [ -x "${install_dir}/venv/bin/mn" ] || \
+       [ "$core_container_exists" = "Y" ]; then
+        installed="true"
+    fi
+
+    if [ "$installed" = "true" ]; then
+        if [ "$docker_ready" != "Y" ]; then
+            running="null"
+            status="docker_not_running"
+        elif [ "$(docker container inspect --format '{{.State.Running}}' mirror-neuron-core 2>/dev/null || true)" = "true" ]; then
+            running="true"
+            status="running"
+        else
+            status="stopped"
+        fi
+    fi
+
+    version="$(mn_detect_version_from_metadata "$metadata_file" || true)"
+    if [ -z "$version" ] && [ "$docker_ready" = "Y" ]; then
+        version="$(mn_detect_version_from_docker || true)"
+    fi
+    if [ -z "$version" ]; then
+        if [ -x "${install_dir}/bin/mn" ]; then
+            cli="${install_dir}/bin/mn"
+        elif [ -x "${install_dir}/venv/bin/mn" ]; then
+            cli="${install_dir}/venv/bin/mn"
+        fi
+        [ -z "$cli" ] || version="$(mn_detect_version_from_cli "$cli" || true)"
+    fi
+
+    if [ -n "$version" ]; then
+        printf '{"installed":%s,"running":%s,"status":"%s","version":"%s","docker_installed":%s,"docker_running":%s}\n' \
+            "$installed" "$running" "$status" "$version" "$docker_installed" "$docker_running"
+    else
+        printf '{"installed":%s,"running":%s,"status":"%s","version":null,"docker_installed":%s,"docker_running":%s}\n' \
+            "$installed" "$running" "$status" "$docker_installed" "$docker_running"
+    fi
 }
 
 function mn_validate_version_tag_or_exit() {
@@ -636,12 +756,27 @@ while [ "$#" -gt 0 ]; do
         --reset)
             MN_INSTALL_RESET="Y"
             ;;
+        --detect-only)
+            MN_INSTALL_DETECT_ONLY="Y"
+            ;;
         *)
             MN_INSTALL_ARGS+=("$1")
             ;;
     esac
     shift
 done
+
+if [ "$MN_INSTALL_DETECT_ONLY" = "Y" ]; then
+    if [ "$MN_INSTALL_MODE_EXPLICIT" = "Y" ] || [ -n "$MN_INSTALL_VERSION" ] || \
+       [ "$MN_INSTALL_HELP_REQUESTED" = "Y" ] || [ "$MN_INSTALL_VERBOSE" = "Y" ] || \
+       [ "$MN_INSTALL_RESET" = "Y" ] || [ "$MN_BUILD_MEMBRANE" = "Y" ] || \
+       [ "${#MN_INSTALL_ARGS[@]}" -ne 0 ]; then
+        echo "install.sh: --detect-only cannot be combined with installation options." >&3
+        exit 1
+    fi
+    mn_detect_runtime
+    exit 0
+fi
 
 case "$MN_INSTALL_MODE" in
     github|local|binary) ;;

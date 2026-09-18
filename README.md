@@ -46,6 +46,19 @@ Inspect installer options:
 ./install.sh --help
 ```
 
+Detect an existing runtime without installing or changing anything:
+
+```bash
+./install.sh --detect-only
+```
+
+The command exits successfully after printing one JSON object. `status` is
+`not_installed`, `stopped`, `running`, or `docker_not_running`. The last status
+means an install was found but the Docker daemon was unavailable, so runtime
+`running` is `null`. `docker_installed` and `docker_running` report Docker's
+state separately. `version` is the installed Core release when it can be
+determined, otherwise `null`.
+
 Install the local runtime:
 
 ```bash
