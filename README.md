@@ -1,7 +1,23 @@
 # MirrorNeuron Deploy
 
+Desktop node identity fixes are unreleased. They require the matching CLI and
+Core changes: persistent `MN_HOME/node-identity.json`, startup validation, and
+`mn runtime reconnect`. Reinstall preserves existing configured names; missing
+or mismatched runtime identity fails readiness. Historical release snapshots and
+published installer defaults remain unchanged until the coordinated release.
+
 `mn-deploy` contains the unified installer and local service scripts for MirrorNeuron.
 By default, `install.sh` installs released artifacts and Python packages.
+
+## Uninstall worker cleanup (unreleased)
+
+Uninstall now removes the SDK worker Compose project (`mirror-neuron-workers`,
+or `MN_DOCKER_WORKER_COMPOSE_PROJECT` from the installed Compose environment)
+as well as the main runtime project. Containers from both projects are removed
+before volumes and networks, so workers cannot hold the runtime network open.
+External networks and unrelated projects are retained. Failed Docker inventory
+or removal stops uninstall before runtime files are deleted and identifies the
+resource to check before retrying.
 
 ## Installer compatibility fix (unreleased)
 

@@ -212,3 +212,12 @@ versions lose all their tags. Failures during inventory abort before deletion;
 failures during deletion stop and report completed deletions and the failed
 resource. An updated deletion plan during confirmation aborts for fresh review.
 Tests use a fake gcloud executable and must never clean the live registry.
+# Desktop node identity contract
+
+Managed Core launch commands reject empty, malformed, and nonode@nohost names
+in both release and source modes. Reinstall preserves the configured name before
+rewriting Compose environment; the CLI validates and persists identity before
+creating containers. Installer detection uses runtime status JSON and reports
+status identity_invalid with runtime_ready false for an identity failure.
+Release these templates together with the persistent-identity CLI and Core;
+historical install-support snapshots must not be modified.

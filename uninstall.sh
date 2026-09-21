@@ -124,6 +124,8 @@ function read_env_value() {
 
 COMPOSE_PROJECT_NAME="$(read_env_value "$RUNTIME_COMPOSE_ENV" "COMPOSE_PROJECT_NAME")"
 COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-mirror-neuron}"
+WORKER_COMPOSE_PROJECT_NAME="$(read_env_value "$RUNTIME_COMPOSE_ENV" "MN_DOCKER_WORKER_COMPOSE_PROJECT")"
+WORKER_COMPOSE_PROJECT_NAME="${WORKER_COMPOSE_PROJECT_NAME:-${MN_DOCKER_WORKER_COMPOSE_PROJECT:-mirror-neuron-workers}}"
 DOCKER_NETWORK_NAME="$(read_env_value "$RUNTIME_COMPOSE_ENV" "MN_DOCKER_NETWORK_NAME")"
 DOCKER_NETWORK_NAME="${DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
 DOCKER_NETWORK_EXTERNAL_VALUE="$(read_env_value "$RUNTIME_COMPOSE_ENV" "MN_DOCKER_NETWORK_EXTERNAL")"
@@ -174,34 +176,61 @@ function remove_compose_project_resources() {
     local network_project
     local cleanup_failed="N"
 
-    while IFS= read -r resource_id; do
-        [ -n "$resource_id" ] || continue
-        if ! docker rm -f "$resource_id" >/dev/null 2>&1; then
-            cleanup_failed="Y"
-        fi
-    done < <(docker ps -aq --filter "label=com.docker.compose.project=${COMPOSE_PROJECT_NAME}" 2>/dev/null || true)
+    local project_name
+    local resources
+    local projects=("$COMPOSE_PROJECT_NAME")
+    if [ "$WORKER_COMPOSE_PROJECT_NAME" != "$COMPOSE_PROJECT_NAME" ]; then
+        projects+=("$WORKER_COMPOSE_PROJECT_NAME")
+    fi
 
-    while IFS= read -r resource_id; do
-        [ -n "$resource_id" ] || continue
-        if ! docker volume rm -f "$resource_id" >/dev/null 2>&1; then
-            cleanup_failed="Y"
+    # Workers use a separate SDK Compose project and attach to the runtime
+    # network. Remove every project's containers before shared dependencies.
+    for project_name in "${projects[@]}"; do
+        if ! resources=$(docker ps -aq --filter "label=com.docker.compose.project=${project_name}" 2>/dev/null); then
+            print_error "Could not list containers for Compose project $project_name."
+            return 1
         fi
-    done < <(docker volume ls -q --filter "label=com.docker.compose.project=${COMPOSE_PROJECT_NAME}" 2>/dev/null || true)
+        while IFS= read -r resource_id; do
+            [ -n "$resource_id" ] || continue
+            if ! docker rm -f "$resource_id" >/dev/null 2>&1; then
+                print_error "Could not remove container $resource_id (project $project_name)."
+                cleanup_failed="Y"
+            fi
+        done <<< "$resources"
+    done
+    [ "$cleanup_failed" = "N" ] || return 1
 
-    while IFS=' ' read -r resource_id resource_name; do
-        [ -n "$resource_id" ] || continue
-        if [ "$DOCKER_NETWORK_EXTERNAL" = "Y" ] &&
-           [ "$resource_name" = "$DOCKER_NETWORK_NAME" ]; then
-            continue
+    for project_name in "${projects[@]}"; do
+        if ! resources=$(docker volume ls -q --filter "label=com.docker.compose.project=${project_name}" 2>/dev/null); then
+            print_error "Could not list volumes for Compose project $project_name."
+            return 1
         fi
-        if ! docker network rm "$resource_id" >/dev/null 2>&1; then
-            cleanup_failed="Y"
+        while IFS= read -r resource_id; do
+            [ -n "$resource_id" ] || continue
+            if ! docker volume rm -f "$resource_id" >/dev/null 2>&1; then
+                print_error "Could not remove volume $resource_id (project $project_name)."
+                cleanup_failed="Y"
+            fi
+        done <<< "$resources"
+
+        if ! resources=$(docker network ls \
+            --filter "label=com.docker.compose.project=${project_name}" \
+            --format '{{.ID}} {{.Name}}' 2>/dev/null); then
+            print_error "Could not list networks for Compose project $project_name."
+            return 1
         fi
-    done < <(
-        docker network ls \
-            --filter "label=com.docker.compose.project=${COMPOSE_PROJECT_NAME}" \
-            --format '{{.ID}} {{.Name}}' 2>/dev/null || true
-    )
+        while IFS=' ' read -r resource_id resource_name; do
+            [ -n "$resource_id" ] || continue
+            if [ "$DOCKER_NETWORK_EXTERNAL" = "Y" ] &&
+               [ "$resource_name" = "$DOCKER_NETWORK_NAME" ]; then
+                continue
+            fi
+            if ! docker network rm "$resource_id" >/dev/null 2>&1; then
+                print_error "Could not remove network $resource_name ($resource_id); check its attached containers."
+                cleanup_failed="Y"
+            fi
+        done <<< "$resources"
+    done
 
     if [ "$DOCKER_NETWORK_EXTERNAL" != "Y" ] &&
        docker network inspect "$DOCKER_NETWORK_NAME" >/dev/null 2>&1; then
@@ -209,6 +238,7 @@ function remove_compose_project_resources() {
         if [ "$network_project" = "$COMPOSE_PROJECT_NAME" ] ||
            [ "$DOCKER_NETWORK_EXTERNAL_KNOWN" = "Y" ]; then
             if ! docker network rm "$DOCKER_NETWORK_NAME" >/dev/null 2>&1; then
+                print_error "Could not remove network $DOCKER_NETWORK_NAME; check its attached containers."
                 cleanup_failed="Y"
             fi
         fi

@@ -633,7 +633,11 @@ services:
       - "${MN_GRPC_BIND_HOST:-127.0.0.1}:${MN_GRPC_PORT:-55051}:50051"
       - "${MN_ARTIFACT_PUBLISH_HOST:-127.0.0.1}:${MN_ARTIFACT_PORT:-55660}:${MN_ARTIFACT_PORT:-55660}"
     command: >
-      sh -c 'if [ -x "bin/mirror_neuron" ]; then
+      sh -c 'case "$${MN_NODE_NAME:-}" in ""|nonode@nohost|*[!a-zA-Z0-9_.@-]*|@*|*@|*@*@*|[!a-zA-Z0-9_]*)
+      echo "error: invalid MN_NODE_NAME; run mn runtime start to repair configuration" >&2; exit 1;; esac;
+      case "$$MN_NODE_NAME" in *@*) ;; *) echo "error: MN_NODE_NAME requires name@host" >&2; exit 1;; esac;
+      case "$${MN_NODE_NAME#*@}" in [!a-zA-Z0-9]*) echo "error: invalid node hostname" >&2; exit 1;; esac;
+      if [ -x "bin/mirror_neuron" ]; then
       if [ -n "$$MN_NODE_NAME" ]; then
       if [ -z "$$MN_COOKIE" ] || [ "$$MN_COOKIE" = "mirrorneuron" ]; then
       echo "MN_COOKIE must be set to a non-default secret when MN_NODE_NAME enables distributed Erlang" >&2; exit 1;
@@ -644,8 +648,6 @@ services:
       export RELEASE_DISTRIBUTION=name;
       export RELEASE_NODE="$$MN_NODE_NAME";
       export RELEASE_COOKIE="$$MN_COOKIE";
-      else
-      export RELEASE_DISTRIBUTION=none;
       fi;
       exec bin/mirror_neuron start;
       fi;
@@ -657,7 +659,7 @@ services:
       unset ERL_EPMD_ADDRESS;
       epmd -daemon;
       exec elixir --name "$$MN_NODE_NAME" --cookie "$$MN_COOKIE" --erl "-kernel inet_dist_listen_min $${dist_port} inet_dist_listen_max $${dist_port}" -S mix run --no-halt;
-      else exec mix run --no-halt; fi'
+      fi'
     environment:
       HOME: /root
       # Core runs in Docker while the native response service runs on the host.
