@@ -1,8 +1,10 @@
 """Offline release-policy regressions using isolated Git repositories and wheels."""
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
+import sys
 import zipfile
 
 import pytest
@@ -18,6 +20,81 @@ def module(filename):
 indexer = module('prepare-python-package-index.py')
 contract = module('release-contract.py')
 validator = module('validate-python-release.py')
+
+
+def test_release_preparation_reads_package_index_with_bash_32(tmp_path):
+    release = Path(__file__).resolve().parents[1] / 'release_all.sh'
+    source, separator, _ = release.read_text().partition('\nwhile [[ "$#" -gt 0 ]]')
+    assert separator
+    functions = tmp_path / 'release-functions.sh'
+    functions.write_text(source)
+
+    index = tmp_path / 'package-index' / 'python-packages.toml'
+    index.parent.mkdir()
+    index.write_text('''\
+[[packages]]
+name = "mirrorneuron-python-sdk"
+path = "mn-python-sdk"
+version = "1.3.51"
+
+[[packages]]
+name = "mirrorneuron-cli"
+path = "mn-cli"
+version = "1.3.52"
+
+[[packages]]
+name = "mirrorneuron-api"
+path = "mn-api"
+version = "1.3.51"
+
+[[packages]]
+name = "example"
+path = "mn-api/component with spaces"
+version = "1.0.0"
+''')
+    shell = '''\
+source "$FUNCTIONS_FILE"
+VERSION=1.3.55
+TAG=v1.3.55
+MN_RELEASE_BASELINE=v1.3.54
+REPOSITORIES=(mn-api no-packages)
+python3() {
+  if [[ "$1" == */scripts/prepare-python-package-index.py ]]; then
+    return 0
+  fi
+  "$TEST_PYTHON" "$@"
+}
+set_compose_web_ui_version() { :; }
+prepare_install_support_snapshot() { :; }
+set_installer_default_version() { printf 'PIN:%s=%s\\n' "$1" "$2"; }
+commit_and_push_if_changed() {
+  printf 'COMMIT:%s' "$1"
+  shift 2
+  printf ' <%s>' "$@"
+  printf '\\n'
+}
+prepare_release_metadata
+'''
+    result = subprocess.run(
+        ['bash', '-c', shell],
+        capture_output=True,
+        text=True,
+        env={**os.environ, 'FUNCTIONS_FILE': str(functions), 'TEST_PYTHON': sys.executable},
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == [
+        'PIN:MN_DEFAULT_CORE_VERSION=v1.3.55',
+        'PIN:MN_DEFAULT_WEB_UI_VERSION=v1.3.55',
+        'PIN:MN_DEFAULT_AGENT_PACKAGE_INDEX_VERSION=v1.3.55',
+        'PIN:MN_DEFAULT_MEMBRANE_CONTEXT_ENGINE_VERSION=v1.3.55',
+        'PIN:MN_DEFAULT_INSTALL_VERSION=v1.3.55',
+        'PIN:MN_DEFAULT_PYTHON_SDK_VERSION=v1.3.51',
+        'PIN:MN_DEFAULT_CLI_VERSION=v1.3.52',
+        'PIN:MN_DEFAULT_API_VERSION=v1.3.51',
+        'COMMIT:mn-deploy <install.sh> <package-index/python-packages.toml> '
+        '<docker-compose.yml> <install_support/v1.3.55>',
+        'COMMIT:mn-api <pyproject.toml> <component with spaces/pyproject.toml>',
+    ]
 
 
 def git(repo, *args):

@@ -242,7 +242,7 @@ check_resume_workspace() {
 
 prepare_release_metadata() {
   local index_file="${SCRIPT_DIR}/package-index/python-packages.toml"
-  local pyproject
+  local pyproject metadata_output
 
   set_compose_web_ui_version "${SCRIPT_DIR}/docker-compose.yml" "$VERSION"
 
@@ -261,10 +261,7 @@ prepare_release_metadata() {
     install.sh package-index/python-packages.toml docker-compose.yml "install_support/${TAG}"
   local repo
   for repo in "${REPOSITORIES[@]}"; do
-    local metadata_paths=()
-    while IFS= read -r pyproject; do
-      [[ -n "$pyproject" ]] && metadata_paths+=("$pyproject")
-    done < <(python3 - "${SCRIPT_DIR}/package-index/python-packages.toml" "$repo" <<'PYTHON'
+    metadata_output="$(python3 - "$index_file" "$repo" <<'PYTHON'
 import sys, tomllib
 from pathlib import PurePosixPath
 for package in tomllib.loads(open(sys.argv[1]).read())["packages"]:
@@ -272,10 +269,13 @@ for package in tomllib.loads(open(sys.argv[1]).read())["packages"]:
     if parts[0] == sys.argv[2]:
         print(str(PurePosixPath(*parts[1:]) / "pyproject.toml"))
 PYTHON
-    )
-    if [[ "${#metadata_paths[@]}" -gt 0 ]]; then
-      commit_and_push_if_changed "$repo" "Prepare ${TAG} package metadata" "${metadata_paths[@]}"
-    fi
+    )" || die "Could not read package metadata paths for ${repo}."
+    [[ -n "$metadata_output" ]] || continue
+    local metadata_paths=()
+    while IFS= read -r pyproject; do
+      metadata_paths+=("$pyproject")
+    done <<< "$metadata_output"
+    commit_and_push_if_changed "$repo" "Prepare ${TAG} package metadata" "${metadata_paths[@]}"
   done
 }
 
@@ -378,15 +378,13 @@ publish_and_verify_gar() {
 }
 
 update_installer_pins() {
-  local setting
+  local setting version package_versions
   for setting in MN_DEFAULT_CORE_VERSION MN_DEFAULT_WEB_UI_VERSION \
     MN_DEFAULT_AGENT_PACKAGE_INDEX_VERSION MN_DEFAULT_MEMBRANE_CONTEXT_ENGINE_VERSION \
     MN_DEFAULT_INSTALL_VERSION; do
     set_installer_default_version "$setting" "$TAG"
   done
-  while read -r setting version; do
-    set_installer_default_version "$setting" "v${version}"
-  done < <(python3 - "${SCRIPT_DIR}/package-index/python-packages.toml" <<'PYTHON'
+  package_versions="$(python3 - "${SCRIPT_DIR}/package-index/python-packages.toml" <<'PYTHON'
 import sys, tomllib
 settings = {"mirrorneuron-python-sdk": "MN_DEFAULT_PYTHON_SDK_VERSION",
             "mirrorneuron-cli": "MN_DEFAULT_CLI_VERSION", "mirrorneuron-api": "MN_DEFAULT_API_VERSION"}
@@ -394,7 +392,11 @@ for package in tomllib.loads(open(sys.argv[1]).read())["packages"]:
     if package["name"] in settings:
         print(settings[package["name"]], package["version"])
 PYTHON
-  )
+  )" || die "Could not read installer versions from the Python package index."
+  [[ -n "$package_versions" ]] || die "No installer versions found in the Python package index."
+  while read -r setting version; do
+    set_installer_default_version "$setting" "v${version}"
+  done <<< "$package_versions"
 }
 
 update_post_release_pins() {
@@ -487,6 +489,8 @@ CURRENT_PHASE="$RESUME_FROM"
 for command in git perl python3 cmp; do
   require_command "$command"
 done
+python3 -c 'import tomllib' >/dev/null 2>&1 ||
+  die "Python 3.11 or newer is required to read the package index."
 if should_run_phase python; then
   require_command gcloud
   prepare_python_publish_environment

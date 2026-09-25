@@ -10,7 +10,7 @@ services:
     working_dir: /work
     environment:
       MN_WEB_UI_SOURCE_MODE: ${MN_WEB_UI_SOURCE_MODE:-package}
-      MN_WEB_UI_PACKAGE_VERSION: ${MN_WEB_UI_PACKAGE_VERSION:-1.3.54}
+      MN_WEB_UI_PACKAGE_VERSION: ${MN_WEB_UI_PACKAGE_VERSION:-1.3.55}
       MN_WEB_UI_NPM_REGISTRY: ${MN_WEB_UI_NPM_REGISTRY:-https://us-central1-npm.pkg.dev/mirrorneuron-public-packages/mirrorneuron-npm/}
       MN_WEB_UI_API_HOST: ${MN_WEB_UI_API_HOST:-host.docker.internal}
       MN_API_PORT: ${MN_API_PORT:-54001}
