@@ -64,6 +64,23 @@ manages its own images, volumes, and platform permissions outside `MN_HOME`.
 
 ## Quick Start
 
+Start an existing Docker installation without installing MirrorNeuron or Docker
+(unreleased):
+
+```bash
+./install.sh --start-docker
+```
+
+This launches Docker Desktop on macOS, starts the selected Docker Engine,
+rootless Docker, or Docker Desktop service on Linux, and waits for `docker info`
+to succeed. Windows Bash environments use `docker desktop start`. Linux system
+services use non-interactive sudo when needed; if permission is unavailable,
+the command prints the manual startup command. Remote endpoints must be started
+on their host. Installation/reset options cannot be combined with this flag.
+The readiness wait defaults to 60 attempts spaced two seconds apart; override
+with `MN_DOCKER_START_ATTEMPTS`. Normal installation still requires Docker to be
+running first.
+
 Inspect installer options:
 
 ```bash

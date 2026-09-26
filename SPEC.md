@@ -20,6 +20,15 @@ This specification applies only to deployment assets in this repository.
 
 Flags shown by each script's `--help` are the exact command contract.
 
+`install.sh --start-docker` starts an existing Docker installation and exits
+before installation path preparation, downloads, reset, or runtime setup. It is
+idempotent when the selected daemon is accessible. Startup supports Docker
+Desktop on macOS and Windows Bash, and system/user services on Linux. It never
+installs Docker, changes Docker contexts, or enables services at boot. Remote
+endpoints, unsupported service managers, startup failures, and readiness timeouts
+fail with an actionable next step. System-service privilege escalation is
+non-interactive. Detection and installation options cannot be combined with it.
+
 `install.sh --detect-only` is a read-only query for integrations. It prints one
 JSON object containing `installed`, `running`, `runtime_ready`, `status`, the
 installed Core `version`, `docker_installed`, and `docker_running`, and exits
