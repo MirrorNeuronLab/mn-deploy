@@ -596,6 +596,29 @@ function mn_resolve_docker_host_socket() {
     fi
 }
 
+# Public GAR pulls must not invoke the caller's credential helpers. Resolve
+# the daemon before isolating Docker's config so Docker Desktop keeps its socket.
+function mn_pull_public_gar_image() (
+    local image="$1"
+    local docker_config docker_host
+
+    case "$image" in
+        us-central1-docker.pkg.dev/mirrorneuron-public-packages/*) ;;
+        *) docker pull "$image"; return $? ;;
+    esac
+
+    if [ -n "${DOCKER_CONTEXT:-}" ]; then
+        docker_host="$(docker context inspect --format '{{.Endpoints.docker.Host}}')" || return 1
+    else
+        docker_host="${DOCKER_HOST:-$(docker context inspect --format '{{.Endpoints.docker.Host}}' 2>/dev/null | head -n 1 || true)}"
+    fi
+    docker_host="${docker_host:-unix://${DOCKER_HOST_SOCKET:-$(mn_resolve_docker_host_socket)}}"
+    docker_config="$(mktemp -d "${TMPDIR:-/tmp}/mn-public-gar-docker-config.XXXXXX")" || return 1
+    trap 'rm -rf "$docker_config"' EXIT
+    unset DOCKER_CONTEXT DOCKER_AUTH_CONFIG
+    DOCKER_CONFIG="$docker_config" DOCKER_HOST="$docker_host" docker pull "$image"
+)
+
 function mn_report_docker_daemon_failure() {
     if docker info >/dev/null 2>&1; then
         return 0
@@ -2399,7 +2422,7 @@ function setup_context_engine() {
 }
 
 function pull_context_engine_image() {
-    local image docker_config docker_host
+    local image
     image="$(read_env_value "$RUNTIME_COMPOSE_ENV" "MN_MEMBRANE_ENGINE_IMAGE")"
     [ -n "$image" ] || image="$(read_env_value "$RUNTIME_COMPOSE_ENV" "ENGINE_IMAGE")"
     [ -n "$image" ] || {
@@ -2408,15 +2431,10 @@ function pull_context_engine_image() {
     }
     case "$image" in
         us-central1-docker.pkg.dev/mirrorneuron-public-packages/*)
-            docker_config="$(mktemp -d "${TMPDIR:-/tmp}/mn-public-gar-docker-config.XXXXXX")"
-            docker_host="${DOCKER_HOST:-$(docker context inspect --format "{{.Endpoints.docker.Host}}" 2>/dev/null | head -n 1 || true)}"
-            docker_host="${docker_host:-unix://${DOCKER_HOST_SOCKET}}"
-            if ! DOCKER_CONFIG="$docker_config" DOCKER_HOST="$docker_host" docker pull "$image"; then
-                rm -rf "$docker_config"
+            if ! mn_pull_public_gar_image "$image"; then
                 print_error "Could not pull the public Membrane image from Google Artifact Registry."
                 return 1
             fi
-            rm -rf "$docker_config"
             ;;
         *)
             runtime_compose pull membrane-context-engine
@@ -4387,7 +4405,7 @@ function setup_context_engine() {
 }
 
 function pull_context_engine_image() {
-    local image docker_config docker_host
+    local image
     image="$(read_env_value "$RUNTIME_COMPOSE_ENV" "MN_MEMBRANE_ENGINE_IMAGE")"
     [ -n "$image" ] || image="$(read_env_value "$RUNTIME_COMPOSE_ENV" "ENGINE_IMAGE")"
     [ -n "$image" ] || {
@@ -4396,15 +4414,10 @@ function pull_context_engine_image() {
     }
     case "$image" in
         us-central1-docker.pkg.dev/mirrorneuron-public-packages/*)
-            docker_config="$(mktemp -d "${TMPDIR:-/tmp}/mn-public-gar-docker-config.XXXXXX")"
-            docker_host="${DOCKER_HOST:-$(docker context inspect --format "{{.Endpoints.docker.Host}}" 2>/dev/null | head -n 1 || true)}"
-            docker_host="${docker_host:-unix://${DOCKER_HOST_SOCKET}}"
-            if ! DOCKER_CONFIG="$docker_config" DOCKER_HOST="$docker_host" docker pull "$image"; then
-                rm -rf "$docker_config"
+            if ! mn_pull_public_gar_image "$image"; then
                 print_error "Could not pull the public Membrane image from Google Artifact Registry."
                 return 1
             fi
-            rm -rf "$docker_config"
             ;;
         *)
             runtime_compose pull membrane-context-engine
@@ -6080,7 +6093,7 @@ function install_core_from_gar() {
     image="$(core_gar_image_for_tag "$tag")"
     print_detail "Pulling Core GAR image $image."
 
-    if ! docker pull "$image"; then
+    if ! mn_pull_public_gar_image "$image"; then
         print_error "Could not pull the required Core GAR image: $image"
         print_error "Binary installs require this immutable Core image. Verify the release image is published and public, then retry."
         exit 1
@@ -6313,7 +6326,7 @@ function setup_context_engine() {
 }
 
 function pull_context_engine_image() {
-    local image docker_config docker_host
+    local image
     image="$(read_env_value "$RUNTIME_COMPOSE_ENV" "MN_MEMBRANE_ENGINE_IMAGE")"
     [ -n "$image" ] || image="$(read_env_value "$RUNTIME_COMPOSE_ENV" "ENGINE_IMAGE")"
     [ -n "$image" ] || {
@@ -6322,15 +6335,10 @@ function pull_context_engine_image() {
     }
     case "$image" in
         us-central1-docker.pkg.dev/mirrorneuron-public-packages/*)
-            docker_config="$(mktemp -d "${TMPDIR:-/tmp}/mn-public-gar-docker-config.XXXXXX")"
-            docker_host="${DOCKER_HOST:-$(docker context inspect --format "{{.Endpoints.docker.Host}}" 2>/dev/null | head -n 1 || true)}"
-            docker_host="${docker_host:-unix://${DOCKER_HOST_SOCKET}}"
-            if ! DOCKER_CONFIG="$docker_config" DOCKER_HOST="$docker_host" docker pull "$image"; then
-                rm -rf "$docker_config"
+            if ! mn_pull_public_gar_image "$image"; then
                 print_error "Could not pull the public Membrane image from Google Artifact Registry."
                 return 1
             fi
-            rm -rf "$docker_config"
             ;;
         *)
             runtime_compose pull membrane-context-engine

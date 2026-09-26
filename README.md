@@ -19,6 +19,14 @@ External networks and unrelated projects are retained. Failed Docker inventory
 or removal stops uninstall before runtime files are deleted and identifies the
 resource to check before retrying.
 
+## Public image downloads (unreleased)
+
+Core and Membrane downloads from the public GAR project use an isolated Docker
+configuration, so expired gcloud credentials do not block installation. No
+`gcloud auth login` is required. Pulls retain the selected Docker daemon and
+leave the user's Docker configuration unchanged. Custom private image locations
+continue to use the user's Docker credentials.
+
 ## Installer compatibility fix (unreleased)
 
 Installers on macOS Bash 3.2 now handle empty arrays under strict mode, including
