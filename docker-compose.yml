@@ -487,6 +487,7 @@ services:
     environment:
       MN_CONTEXT_ADDR: 0.0.0.0:50052
       MN_CONTEXT_REDIS_URL: ${MN_CONTEXT_REDIS_URL:-redis://redis:6379/1}
+      MN_CONTEXT_FS_MEMORY_ROOT: /var/lib/mirrorneuron/memory
       MN_CONTEXT_DEBUG: ${MN_CONTEXT_DEBUG:-0}
       MN_CONTEXT_DEBUG_DETAIL: ${MN_CONTEXT_DEBUG_DETAIL:-basic}
       MN_CONTEXT_DEBUG_DIR: /tmp/mn-context-engine/context-views
@@ -500,6 +501,7 @@ services:
         condition: service_started
     volumes:
       - context-debug:/tmp/mn-context-engine
+      - ${MN_HOST_HOME_DIR:-${MN_HOST_MN_DIR:-./mn}}/memory:/var/lib/mirrorneuron/memory
     networks:
       - runtime
 

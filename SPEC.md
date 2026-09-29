@@ -230,3 +230,14 @@ creating containers. Installer detection uses runtime status JSON and reports
 status identity_invalid with runtime_ready false for an identity failure.
 Release these templates together with the persistent-identity CLI and Core;
 historical install-support snapshots must not be modified.
+
+## Filesystem runtime memory (unreleased)
+
+The current Compose template mounts the installed home directory's `memory/`
+into Membrane at `/var/lib/mirrorneuron/memory` and sets
+`MN_CONTEXT_FS_MEMORY_ROOT`. This is explicit human-readable job/run-scoped
+memory for coworker retrieval. It is independent of Redis snapshots and graph
+storage. It requires the matching Membrane build exposing `FileMemory` and SDK
+file-memory client. Historical install-support snapshots are unchanged; ship a
+new coordinated release before using this configuration in binary installations.
+This source change does not restart or reset an installed runtime.
