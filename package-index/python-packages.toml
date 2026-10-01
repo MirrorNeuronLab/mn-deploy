@@ -497,3 +497,11 @@ installer_groups = ["agent"]
 binary_default = false
 source_hash = "v2:ec6fc3a9787b9e391dae0df3b53db2c56b884df7fca8c7553b2609d333a1e326"
 
+
+[[packages]]
+name = "mirrorneuron-opencode-skill"
+path = "mn-skills/opencode_skill"
+publish_group = "skill"
+version = "1.3.58"
+installer_groups = ["skill"]
+binary_default = false
