@@ -185,12 +185,13 @@ remain separate repositories within that project.
 Source and wheel tests do not require a live runtime installation.
 
 
-The default Compose runtime starts Membrane alongside LiteLLM for automatic
-request context compression. No blueprint profile is needed. The SDK gateway
-uses the configured serving window and calls Membrane's `CompilePrompt` RPC
-when necessary; deploy the SDK and Membrane image together. Model compression
-remains optional, and no workflow timeout behavior changes. Historical release
-support snapshots remain unchanged.
+The current Compose template starts the authenticated Membrane v2 service with
+CPU processing, authoritative Markdown and one disposable DuckDB index per job.
+Model compression is disabled. Context preparation does not download or start a
+Docker Model Runner compressor. The installer creates a private persistent
+`context_auth.token` and forwards the same token to Core and workers. Publish a
+coordinated SDK/engine release before using binary installs; immutable historical
+support snapshots retain their original contracts.
 
 Use `./install.sh --mode local --build-membrane` to build the Membrane runtime
 image from the sibling `Membrane` checkout. Set `MN_MEMBRANE_DIR` to use a
@@ -235,9 +236,24 @@ historical install-support snapshots must not be modified.
 
 The current Compose template mounts the installed home directory's `memory/`
 into Membrane at `/var/lib/mirrorneuron/memory` and sets
-`MN_CONTEXT_FS_MEMORY_ROOT`. This is explicit human-readable job/run-scoped
-memory for coworker retrieval. It is independent of Redis snapshots and graph
-storage. It requires the matching Membrane build exposing `FileMemory` and SDK
-file-memory client. Historical install-support snapshots are unchanged; ship a
-new coordinated release before using this configuration in binary installations.
-This source change does not restart or reset an installed runtime.
+`MN_CONTEXT_FS_MEMORY_ROOT`. Markdown revisions hold complete preprocessed text
+and durable runtime receipts. Job memory is shared explicitly; run memory is
+isolated. One disposable DuckDB file per job provides lexical, graph and vector
+queries. `MN_CONTEXT_AUTH_TOKEN` binds trusted runtime access. Optional
+`MN_CONTEXT_OBSERVABILITY=true` logs detailed authorized sources and assembly.
+Membrane has no Redis dependency and CPU settings default to two DuckDB threads
+and 256 MiB. Optional embeddings require a configured local CPU checkpoint.
+This profile requires Membrane SDK 2 and the matching v2 engine. A new coordinated
+release is required for binary installations; historical snapshots remain unchanged.
+These source edits do not restart or reset an installed runtime.
+
+
+Managed Markdown context turns may bind a trusted serving-tokenizer integration
+with `MN_CONTEXT_TOKEN_COUNTER_FACTORY=package.module:create_counter`. The factory
+receives `request`, `scope` and `principal` keyword arguments and returns a
+Membrane `VerifiedCounter` calibrated against actual provider prompt usage for
+that request's serving route, including tools and schema framing. Workers receive
+the setting through native/runtime preparation. No factory means counting remains
+unavailable; errors or lexical/byte estimates never authorize dispatch. Install
+the serving integration in the worker environment before enabling live managed
+turns. Tokenization and context processing must remain on CPU.

@@ -2985,8 +2985,8 @@ function prepare_litellm_gateway_config() {
 }
 
 function write_runtime_compose_files() {
-    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_agents_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image litellm_gateway_bind_host openshell_gateway_bind_host openshell_gateway_endpoint api_host
-    model_runner_model="${MN_CONTEXT_MODEL_RUNNER_MODEL:-$MN_DEFAULT_CONTEXT_MODEL_RUNNER_MODEL}"
+    local context_auth_token profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_agents_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image litellm_gateway_bind_host openshell_gateway_bind_host openshell_gateway_endpoint api_host
+    context_auth_token="$(resolve_secret_file "${MN_CONTEXT_AUTH_TOKEN:-}" "${INSTALL_DIR}/context_auth.token" "MN_CONTEXT_AUTH_TOKEN")"
     profiles="$(compose_profiles)"
     api_host="${MN_API_HOST:-}"
     if [ -z "$api_host" ]; then
@@ -3059,7 +3059,10 @@ ENGINE_IMAGE=${membrane_engine_image}
 MN_MEMBRANE_ENGINE_IMAGE=${membrane_engine_image}
 MN_MEMBRANE_ENGINE_IMAGE_TAG=${membrane_engine_tag}
 MN_REDIS_IMAGE=${MN_REDIS_IMAGE:-$MN_DEFAULT_REDIS_IMAGE}
-MN_CONTEXT_MODEL_RUNNER_MODEL=${model_runner_model}
+MN_CONTEXT_AUTH_TOKEN=${context_auth_token}
+MN_CONTEXT_MODEL_COMPRESSION_ENABLED=false
+MN_CONTEXT_OBSERVABILITY=${MN_CONTEXT_OBSERVABILITY:-false}
+MN_CONTEXT_TOKEN_COUNTER_FACTORY=${MN_CONTEXT_TOKEN_COUNTER_FACTORY:-}
 MN_LLM_MODEL_RUNNER_MODEL=${MN_LLM_MODEL_RUNNER_MODEL:-$MN_DEFAULT_LLM_MODEL_RUNNER_MODEL}
 MN_GRPC_BIND_HOST=${MN_GRPC_BIND_HOST:-127.0.0.1}
 MN_GRPC_PORT=${MN_GRPC_PORT:-55051}
@@ -3127,7 +3130,6 @@ MN_CLUSTER_NODES=${MN_CLUSTER_NODES:-}
 MN_NETWORK_JOIN_TOKEN=${network_token}
 MN_REDIS_PASSWORD=${redis_password}
 MN_REDIS_URL=${MN_REDIS_URL:-redis://:${redis_password}@redis:6379/0}
-MN_CONTEXT_REDIS_URL=${MN_CONTEXT_REDIS_URL:-redis://:${redis_password}@redis:6379/1}
 MN_REDIS_HA_MODE=${MN_REDIS_HA_MODE:-single}
 MN_REDIS_SENTINELS=${MN_REDIS_SENTINELS:-}
 MN_REDIS_SENTINEL_MASTER=${MN_REDIS_SENTINEL_MASTER:-mirror-neuron}
@@ -3220,7 +3222,7 @@ function ensure_docker_model_runner() {
         linux_nvidia="Y"
     fi
 
-    if [ "$linux_nvidia" != "Y" ] && [ "$INSTALL_CONTEXT_ENGINE" != "Y" ] && [ "${INSTALL_DOCKER_MODEL_RUNNER:-N}" != "Y" ] && [ "${MN_ENABLE_DOCKER_MODEL_RUNNER:-N}" != "Y" ]; then
+    if [ "$linux_nvidia" != "Y" ] && [ "${INSTALL_DOCKER_MODEL_RUNNER:-N}" != "Y" ] && [ "${MN_ENABLE_DOCKER_MODEL_RUNNER:-N}" != "Y" ]; then
         return 0
     fi
 
@@ -4231,6 +4233,24 @@ function generate_mn_cookie() {
     return 1
 }
 
+function resolve_secret_file() {
+    local value="${1:-}" file="$2" label="$3"
+    mkdir -p "$INSTALL_DIR"
+    if [ -z "$value" ] && [ -s "$file" ]; then
+        value="$(tr -d '[:space:]' < "$file")"
+    fi
+    if [ -z "$value" ]; then
+        value="$(generate_mn_cookie)" || return 1
+    fi
+    if [ -z "$value" ]; then
+        print_error "Failed to generate ${label}."
+        return 1
+    fi
+    (umask 077; printf '%s\n' "$value" > "$file")
+    chmod 600 "$file"
+    printf '%s\n' "$value"
+}
+
 function resolve_mn_cookie() {
     local env_cookie="${MN_COOKIE:-}"
     local cookie_file="${INSTALL_DIR}/erlang.cookie"
@@ -4761,8 +4781,8 @@ function prepare_litellm_gateway_config() {
 }
 
 function write_runtime_compose_files() {
-    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_agents_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image litellm_gateway_bind_host openshell_gateway_bind_host openshell_gateway_endpoint api_host blueprint_web_ui_port_start blueprint_web_ui_port_end
-    model_runner_model="${MN_CONTEXT_MODEL_RUNNER_MODEL:-$MN_DEFAULT_CONTEXT_MODEL_RUNNER_MODEL}"
+    local context_auth_token profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_agents_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image litellm_gateway_bind_host openshell_gateway_bind_host openshell_gateway_endpoint api_host blueprint_web_ui_port_start blueprint_web_ui_port_end
+    context_auth_token="$(resolve_secret_file "${MN_CONTEXT_AUTH_TOKEN:-}" "${INSTALL_DIR}/context_auth.token" "MN_CONTEXT_AUTH_TOKEN")"
     profiles="$(compose_profiles)"
     api_host="${MN_API_HOST:-}"
     if [ -z "$api_host" ]; then
@@ -4841,7 +4861,10 @@ ENGINE_IMAGE=${membrane_engine_image}
 MN_MEMBRANE_ENGINE_IMAGE=${membrane_engine_image}
 MN_MEMBRANE_ENGINE_IMAGE_TAG=${membrane_engine_tag}
 MN_REDIS_IMAGE=${MN_REDIS_IMAGE:-$MN_DEFAULT_REDIS_IMAGE}
-MN_CONTEXT_MODEL_RUNNER_MODEL=${model_runner_model}
+MN_CONTEXT_AUTH_TOKEN=${context_auth_token}
+MN_CONTEXT_MODEL_COMPRESSION_ENABLED=false
+MN_CONTEXT_OBSERVABILITY=${MN_CONTEXT_OBSERVABILITY:-false}
+MN_CONTEXT_TOKEN_COUNTER_FACTORY=${MN_CONTEXT_TOKEN_COUNTER_FACTORY:-}
 MN_LLM_MODEL_RUNNER_MODEL=${MN_LLM_MODEL_RUNNER_MODEL:-$MN_DEFAULT_LLM_MODEL_RUNNER_MODEL}
 MN_GRPC_BIND_HOST=${MN_GRPC_BIND_HOST:-127.0.0.1}
 MN_GRPC_PORT=${MN_GRPC_PORT:-55051}
@@ -4909,7 +4932,6 @@ MN_CLUSTER_NODES=${MN_CLUSTER_NODES:-}
 MN_NETWORK_JOIN_TOKEN=${network_token}
 MN_REDIS_PASSWORD=${redis_password}
 MN_REDIS_URL=${MN_REDIS_URL:-redis://:${redis_password}@redis:6379/0}
-MN_CONTEXT_REDIS_URL=${MN_CONTEXT_REDIS_URL:-redis://:${redis_password}@redis:6379/1}
 MN_REDIS_HA_MODE=${MN_REDIS_HA_MODE:-single}
 MN_REDIS_SENTINELS=${MN_REDIS_SENTINELS:-}
 MN_REDIS_SENTINEL_MASTER=${MN_REDIS_SENTINEL_MASTER:-mirror-neuron}
@@ -5002,7 +5024,7 @@ function ensure_docker_model_runner() {
         linux_nvidia="Y"
     fi
 
-    if [ "$linux_nvidia" != "Y" ] && [ "$INSTALL_CONTEXT_ENGINE" != "Y" ] && [ "${INSTALL_DOCKER_MODEL_RUNNER:-N}" != "Y" ] && [ "${MN_ENABLE_DOCKER_MODEL_RUNNER:-N}" != "Y" ]; then
+    if [ "$linux_nvidia" != "Y" ] && [ "${INSTALL_DOCKER_MODEL_RUNNER:-N}" != "Y" ] && [ "${MN_ENABLE_DOCKER_MODEL_RUNNER:-N}" != "Y" ]; then
         return 0
     fi
 
@@ -6889,8 +6911,8 @@ function prepare_litellm_gateway_config() {
 }
 
 function write_runtime_compose_files() {
-    local model_runner_model profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_agents_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image litellm_gateway_bind_host openshell_gateway_bind_host openshell_gateway_endpoint api_host
-    model_runner_model="${MN_CONTEXT_MODEL_RUNNER_MODEL:-$MN_DEFAULT_CONTEXT_MODEL_RUNNER_MODEL}"
+    local context_auth_token profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_agents_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image litellm_gateway_bind_host openshell_gateway_bind_host openshell_gateway_endpoint api_host
+    context_auth_token="$(resolve_secret_file "${MN_CONTEXT_AUTH_TOKEN:-}" "${INSTALL_DIR}/context_auth.token" "MN_CONTEXT_AUTH_TOKEN")"
     profiles="$(compose_profiles)"
     api_host="${MN_API_HOST:-}"
     if [ -z "$api_host" ]; then
@@ -6963,7 +6985,10 @@ ENGINE_IMAGE=${membrane_engine_image}
 MN_MEMBRANE_ENGINE_IMAGE=${membrane_engine_image}
 MN_MEMBRANE_ENGINE_IMAGE_TAG=${membrane_engine_tag}
 MN_REDIS_IMAGE=${MN_REDIS_IMAGE:-$MN_DEFAULT_REDIS_IMAGE}
-MN_CONTEXT_MODEL_RUNNER_MODEL=${model_runner_model}
+MN_CONTEXT_AUTH_TOKEN=${context_auth_token}
+MN_CONTEXT_MODEL_COMPRESSION_ENABLED=false
+MN_CONTEXT_OBSERVABILITY=${MN_CONTEXT_OBSERVABILITY:-false}
+MN_CONTEXT_TOKEN_COUNTER_FACTORY=${MN_CONTEXT_TOKEN_COUNTER_FACTORY:-}
 MN_LLM_MODEL_RUNNER_MODEL=${MN_LLM_MODEL_RUNNER_MODEL:-$MN_DEFAULT_LLM_MODEL_RUNNER_MODEL}
 MN_GRPC_BIND_HOST=${MN_GRPC_BIND_HOST:-127.0.0.1}
 MN_GRPC_PORT=${MN_GRPC_PORT:-55051}
@@ -7031,7 +7056,6 @@ MN_CLUSTER_NODES=${MN_CLUSTER_NODES:-}
 MN_NETWORK_JOIN_TOKEN=${network_token}
 MN_REDIS_PASSWORD=${redis_password}
 MN_REDIS_URL=${MN_REDIS_URL:-redis://:${redis_password}@redis:6379/0}
-MN_CONTEXT_REDIS_URL=${MN_CONTEXT_REDIS_URL:-redis://:${redis_password}@redis:6379/1}
 MN_REDIS_HA_MODE=${MN_REDIS_HA_MODE:-single}
 MN_REDIS_SENTINELS=${MN_REDIS_SENTINELS:-}
 MN_REDIS_SENTINEL_MASTER=${MN_REDIS_SENTINEL_MASTER:-mirror-neuron}
@@ -7124,7 +7148,7 @@ function ensure_docker_model_runner() {
         linux_nvidia="Y"
     fi
 
-    if [ "$linux_nvidia" != "Y" ] && [ "$INSTALL_CONTEXT_ENGINE" != "Y" ] && [ "${INSTALL_DOCKER_MODEL_RUNNER:-N}" != "Y" ] && [ "${MN_ENABLE_DOCKER_MODEL_RUNNER:-N}" != "Y" ]; then
+    if [ "$linux_nvidia" != "Y" ] && [ "${INSTALL_DOCKER_MODEL_RUNNER:-N}" != "Y" ] && [ "${MN_ENABLE_DOCKER_MODEL_RUNNER:-N}" != "Y" ]; then
         return 0
     fi
 
