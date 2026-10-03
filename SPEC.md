@@ -187,8 +187,9 @@ Source and wheel tests do not require a live runtime installation.
 
 The current Compose template starts the authenticated Membrane v2 service with
 CPU processing, authoritative Markdown and one disposable DuckDB index per job.
-Model compression is disabled. Context preparation does not download or start a
-Docker Model Runner compressor. The installer creates a private persistent
+Optional last-resort record selection uses the existing LiteLLM `default` route
+after CPU compaction still exceeds the final budget. Context preparation does not
+download or start a separate Docker Model Runner compressor. The installer creates a private persistent
 `context_auth.token` and forwards the same token to Core and workers. Publish a
 coordinated SDK/engine release before using binary installs; immutable historical
 support snapshots retain their original contracts.
