@@ -111,6 +111,14 @@ binary_default = false
 source_hash = "v2:57e222216d39c0adeca32f4e6e4fa7126e9307d40b4a7d516cd65d21334da21f"
 
 [[packages]]
+name = "mn-context-source-code"
+path = "Membrane/mn-context-source-code"
+publish_group = "membrane"
+version = "0.1.1"
+installer_groups = ["membrane-tools"]
+binary_default = false
+
+[[packages]]
 name = "mn-context-auto-optimizer-benchmark"
 path = "Membrane/mn-context-auto-optimizer-benchmark"
 publish_group = "membrane"
