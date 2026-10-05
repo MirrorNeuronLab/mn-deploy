@@ -258,3 +258,12 @@ the setting through native/runtime preparation. No factory means counting remain
 unavailable; errors or lexical/byte estimates never authorize dispatch. Install
 the serving integration in the worker environment before enabling live managed
 turns. Tokenization and context processing must remain on CPU.
+
+Register `mn-context-source-code` as an optional `membrane-tools` package with
+`binary_default=false`. Version-constrained local runtime requirements resolve
+its authoritative source path through this inventory. Registration is not a
+publication; binary deployments require the coordinated SDK/child release and
+a new immutable install-support snapshot.
+Include the existing code-search and BEAM-analysis skill packages in the optional
+skill inventory; neither becomes a binary default or an automatically enabled
+runtime capability.

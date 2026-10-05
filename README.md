@@ -510,3 +510,12 @@ the setting through native/runtime preparation. No factory means counting remain
 unavailable; errors or lexical/byte estimates never authorize dispatch. Install
 the serving integration in the worker environment before enabling live managed
 turns. Tokenization and context processing must remain on CPU.
+
+The unreleased package inventory includes optional `mn-context-source-code`
+0.1.1 for declared architecture source queries. Local-source resolution uses
+that checkout when requested; `binary_default=false` keeps it out of the default
+install set. A coordinated publication is still required for binary workers.
+Historical install-support snapshots are unchanged.
+The existing code-search and BEAM-analysis skill checkouts are also registered
+as optional capabilities so declared source-mode dependencies resolve through
+the same inventory. Their registration does not publish a release.
