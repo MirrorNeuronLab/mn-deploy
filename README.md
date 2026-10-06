@@ -519,3 +519,8 @@ Historical install-support snapshots are unchanged.
 The existing code-search and BEAM-analysis skill checkouts are also registered
 as optional capabilities so declared source-mode dependencies resolve through
 the same inventory. Their registration does not publish a release.
+
+The unreleased skill inventory uses `mirrorneuron-docs-to-markdown-skill` for
+complete document conversion, embedded PDF extraction and lazy OCR. Separate
+document-reading, PDF-extraction and OCR packages are removed from the current
+inventory. Install-support snapshots remain historical release records.
