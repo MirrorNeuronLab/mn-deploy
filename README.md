@@ -500,6 +500,13 @@ This profile requires Membrane SDK 2 and the matching v2 engine. A new coordinat
 release is required for binary installations; historical snapshots remain unchanged.
 These source edits do not restart or reset an installed runtime.
 
+Membrane publishes its authenticated gRPC port on host loopback for native Job
+responders: `127.0.0.1:50052`, configurable with `MN_CONTEXT_HOST_PORT`.
+Docker workers keep the internal service address. The matching SDK resolves
+host connections and the installed private `context_auth.token`. Existing
+runtimes must apply the current Compose template and restart the native SDK
+service to use this contract; job and memory data remain intact.
+
 
 Managed Markdown context turns may bind a trusted serving-tokenizer integration
 with `MN_CONTEXT_TOKEN_COUNTER_FACTORY=package.module:create_counter`. The factory

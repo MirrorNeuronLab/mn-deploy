@@ -248,6 +248,14 @@ This profile requires Membrane SDK 2 and the matching v2 engine. A new coordinat
 release is required for binary installations; historical snapshots remain unchanged.
 These source edits do not restart or reset an installed runtime.
 
+The current template publishes Membrane gRPC only on `127.0.0.1`, using
+`MN_CONTEXT_HOST_PORT` (default `50052`). Authentication remains mandatory.
+This host endpoint serves the native SDK Job responder; container clients use
+the internal service DNS. Ship the matching SDK connection selection with this
+template. Existing deployments need template application and a native SDK
+restart, without resetting Job data or memory. Historical snapshots remain
+unchanged.
+
 
 Managed Markdown context turns may bind a trusted serving-tokenizer integration
 with `MN_CONTEXT_TOKEN_COUNTER_FACTORY=package.module:create_counter`. The factory
