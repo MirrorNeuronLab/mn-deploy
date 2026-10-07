@@ -438,16 +438,26 @@ download or start a separate Docker Model Runner compressor. The installer creat
 coordinated SDK/engine release before using binary installs; immutable historical
 support snapshots retain their original contracts.
 
+The current installer defaults Membrane to the GAR engine release `v2.0.0`:
+`us-central1-docker.pkg.dev/mirrorneuron-public-packages/mirrorneuron-runtime/membrane-context-engine:v2.0.0`.
+It implements `mirrorneuron.context.v2` for the matching Membrane SDK 2 clients,
+with CPU Markdown memory and DuckDB indexes. Older context protocols and automatic
+memory migration are unsupported. Historical install-support snapshots remain
+unchanged.
+The release supports `linux/amd64` and `linux/arm64`, was built from Membrane
+commit `f857d47725e50e1c3aa3d149694ca5e6c75f389f`, and resolves to manifest digest
+`sha256:7edd1cb92e4e053f44da6b147e97bfdad63162f12a3dbd277fa23ee9855442e3`.
+The installer `--version` does not change this independent engine version. Use
+`MN_MEMBRANE_ENGINE_IMAGE_TAG` to select an explicit engine release.
+
 Use `./install.sh --mode local --build-membrane` to build the Membrane runtime
-image from the sibling `Membrane` checkout. Set `MN_MEMBRANE_DIR` to use a
+image from the sibling `Membrane` checkout instead. Set `MN_MEMBRANE_DIR` to use a
 specific local checkout. Binary and GitHub install modes ignore this flag and
-continue using their normal GAR images. The flag overrides the released engine image with
-`mirror-neuron-memory-engine:local`, records source mode, and builds the Dockerfile
-`runtime` target once per installer invocation using the normal Docker cache.
-Without the flag, all modes retain their normal GAR image selection and pull.
-Subsequent runtime/blueprint startup does not build images. Missing source and
-`--build-membrane --no-context-engine` fail before installation; a failed build
-stops the installer without pulling GAR as a fallback. No image is published.
+continue using GAR images. The flag selects `mirror-neuron-memory-engine:local`,
+records source mode, and builds the Dockerfile `runtime` target once per installer
+invocation using the normal Docker cache. Subsequent runtime/blueprint startup
+does not build images. Missing source and `--build-membrane --no-context-engine`
+fail before installation; a failed build stops installation. No image is published.
 
 ## Delete GAR package versions
 

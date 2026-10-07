@@ -79,7 +79,7 @@ disable local skill sources; local source installs enable them explicitly. An
 explicit `MN_ENV` or `MN_USE_LOCAL_SKILLS` value remains authoritative. Redis
 is an attached service. Membrane preparation is an
 explicit package-install operation: installers and `mn runtime
-ensure-context-engine` pull the versioned GAR image before it is needed. A
+ensure-context-engine` prepare the configured image before it is needed. A
 blueprint that requires context memory may start that prepared image but must
 not build or clone Membrane source.
 
@@ -194,16 +194,23 @@ download or start a separate Docker Model Runner compressor. The installer creat
 coordinated SDK/engine release before using binary installs; immutable historical
 support snapshots retain their original contracts.
 
+The current installer selects Membrane GAR release `v2.0.0` by default through
+`MN_DEFAULT_MEMBRANE_CONTEXT_ENGINE_VERSION`. The image implements
+`mirrorneuron.context.v2` for matching Membrane SDK 2 clients. Older context
+protocols and automatic memory migration are unsupported; historical
+install-support snapshots remain immutable.
+The engine version is independent of the aggregate installer `--version`;
+`MN_MEMBRANE_ENGINE_IMAGE_TAG` remains the explicit engine-tag override.
+
 Use `./install.sh --mode local --build-membrane` to build the Membrane runtime
-image from the sibling `Membrane` checkout. Set `MN_MEMBRANE_DIR` to use a
-specific local checkout. Binary and GitHub install modes ignore this flag and
-continue using their normal GAR images. The flag overrides the released engine image with
-`mirror-neuron-memory-engine:local`, records source mode, and builds the Dockerfile
-`runtime` target once per installer invocation using the normal Docker cache.
-Without the flag, all modes retain their normal GAR image selection and pull.
-Subsequent runtime/blueprint startup does not build images. Missing source and
-`--build-membrane --no-context-engine` fail before installation; a failed build
-stops the installer without pulling GAR as a fallback. No image is published.
+image from the sibling `Membrane` checkout. `MN_MEMBRANE_DIR` may select another
+local checkout. Binary and GitHub modes ignore this flag and use GAR images.
+The flag selects `mirror-neuron-memory-engine:local`, records source mode, and
+builds the Dockerfile `runtime` target once per installer invocation using the
+normal Docker cache. Subsequent runtime/blueprint startup does not build images.
+Missing source and `--build-membrane --no-context-engine` fail before installation;
+a failed build stops installation without selecting an older image. No image is
+published and no memory migration is performed.
 
 ## Explicit GAR cleanup
 

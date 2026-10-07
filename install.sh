@@ -28,8 +28,8 @@ MN_DEFAULT_API_VERSION="${MN_DEFAULT_API_VERSION:-v1.3.52}"
 MN_DEFAULT_WEB_UI_VERSION="${MN_DEFAULT_WEB_UI_VERSION:-v1.3.57}"
 # Additional pip packages are selected from the versioned package index.
 MN_DEFAULT_AGENT_PACKAGE_INDEX_VERSION="${MN_DEFAULT_AGENT_PACKAGE_INDEX_VERSION:-v1.3.57}"
-# Membrane context engine is a GAR Docker image.
-MN_DEFAULT_MEMBRANE_CONTEXT_ENGINE_VERSION="${MN_DEFAULT_MEMBRANE_CONTEXT_ENGINE_VERSION:-v1.3.57}"
+# Membrane v2 context engine is a GAR Docker image.
+MN_DEFAULT_MEMBRANE_CONTEXT_ENGINE_VERSION="${MN_DEFAULT_MEMBRANE_CONTEXT_ENGINE_VERSION:-v2.0.0}"
 
 # Google Artifact Registry coordinates.
 MN_DEFAULT_CORE_GAR_PROJECT="${MN_DEFAULT_CORE_GAR_PROJECT:-mirrorneuron-public-packages}"
@@ -419,11 +419,7 @@ function mn_web_ui_package_version_from_tag() {
 }
 
 function mn_default_membrane_engine_tag() {
-    if [ "${INSTALL_VERSION_EXPLICIT:-N}" = "Y" ] && [ -n "${INSTALL_VERSION:-}" ] && [ "$INSTALL_VERSION" != "$MN_DEFAULT_INSTALL_VERSION" ]; then
-        printf '%s' "$INSTALL_VERSION"
-    else
-        printf '%s' "$MN_DEFAULT_MEMBRANE_CONTEXT_ENGINE_VERSION"
-    fi
+    printf '%s' "$MN_DEFAULT_MEMBRANE_CONTEXT_ENGINE_VERSION"
 }
 
 function mn_run_uv_installer() {
