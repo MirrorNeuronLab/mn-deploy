@@ -88,6 +88,13 @@ loads that job's authenticated durable UI handle from the local API. Its target
 host is fixed by that handle and its ports are limited to the handle's declared
 allowlist; it is never a general LAN proxy or browser redirect to a remote
 runtime node.
+The API checks readiness through this same iframe route. Authenticated probe
+requests load the address/lifecycle descriptor without recursive readiness
+checks; they still enforce the active lifecycle and declared ports. Ordinary
+iframe and WebSocket requests require a current readiness receipt. Probe headers
+and API credentials are removed before forwarding to worker services. Apply
+matching API and Compose proxy revisions together; historical support snapshots
+remain unchanged.
 
 Install operations must be restartable after partial completion. Existing
 valid configuration is preserved unless the selected operation explicitly

@@ -138,13 +138,14 @@ services:
             return apiToken ? { Authorization: "Bearer " + apiToken } : {};
           }
 
-          function loadJobWebUi(jobId) {
+          function loadJobWebUi(jobId, checkReadiness = true) {
             return new Promise((resolve, reject) => {
               const request = http.request(
                 {
                   hostname: apiHost,
                   port: apiPort,
-                  path: "/api/v1/jobs/" + encodeURIComponent(jobId) + "/ui",
+                  path: "/api/v1/jobs/" + encodeURIComponent(jobId) + "/ui"
+                    + (checkReadiness ? "" : "?check_readiness=false"),
                   method: "GET",
                   headers: apiHeaders(),
                 },
@@ -192,7 +193,12 @@ services:
             return parts.map((part) => encodeURIComponent(decodeURIComponent(part)).replace(/%3A/gi, ":")).join("/");
           }
 
-          function jobUiTarget(webUi, requestedPort, requestedPath, search, websocket = false) {
+          function jobUiTarget(webUi, requestedPort, requestedPath, search, websocket = false, checkReadiness = true) {
+            const readiness = webUi && webUi.metadata && webUi.metadata.readiness;
+            if (!["running", "ready", "passing"].includes(String(webUi && webUi.status || "").trim().toLowerCase())
+              || (checkReadiness && readiness && readiness.ready !== true)) {
+              throw Object.assign(new Error("service not running"), { statusCode: 409 });
+            }
             let declared;
             try {
               declared = new URL(String(webUi && webUi.url || ""));
@@ -204,7 +210,7 @@ services:
             }
             const primaryPort = Number(declared.port || (declared.protocol === "https:" ? 443 : 80));
             const allowed = allowedPorts(webUi, websocket ? "websocket_ports" : "http_ports", primaryPort);
-            if (!allowed.has(requestedPort)) throw new Error("undeclared port");
+            if (!allowed.has(requestedPort)) throw Object.assign(new Error("undeclared port"), { statusCode: 404 });
             const target = new URL(declared);
             target.protocol = websocket ? (declared.protocol === "https:" ? "wss:" : "ws:") : declared.protocol;
             target.port = String(requestedPort);
@@ -215,7 +221,7 @@ services:
           }
 
           function remoteRequestHeaders(headers) {
-            const excluded = new Set(["host", "authorization", "cookie", "accept-encoding", "connection", "upgrade"]);
+            const excluded = new Set(["host", "authorization", "cookie", "accept-encoding", "connection", "upgrade", "x-mn-job-ui-probe"]);
             const forwarded = {};
             for (const [name, value] of Object.entries(headers)) {
               if (!excluded.has(name.toLowerCase()) && value !== undefined) forwarded[name] = value;
@@ -247,13 +253,17 @@ services:
             let webUi;
             let target;
             try {
-              webUi = await loadJobWebUi(details.jobId);
-              target = jobUiTarget(webUi, details.port, details.path, search);
+              const probe = request.headers["x-mn-job-ui-probe"] === "1"
+                && (!apiToken || request.headers.authorization === "Bearer " + apiToken);
+              webUi = await loadJobWebUi(details.jobId, !probe);
+              target = jobUiTarget(webUi, details.port, details.path, search, false, !probe);
             } catch (error) {
-              proxyError(response, error && error.statusCode === 404 ? 404 : 502,
+              proxyError(response, error && [404, 409].includes(error.statusCode) ? error.statusCode : 502,
                 error && error.message === "undeclared port"
                   ? "That job Web UI connection is not declared."
-                  : "The job Web UI could not be reached.");
+                  : error && error.statusCode === 409
+                    ? "The job Web UI service is not running."
+                    : "The job Web UI could not be reached.");
               return;
             }
             const transport = target.protocol === "https:" ? https : http;
