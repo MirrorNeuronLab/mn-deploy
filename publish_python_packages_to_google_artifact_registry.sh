@@ -127,8 +127,12 @@ LOCAL_ARTIFACTS="$(mktemp "${TMPDIR:-/tmp}/mn-local-artifacts.XXXXXX")"
 REMOTE_FILES="$(mktemp "${TMPDIR:-/tmp}/mn-remote-files.XXXXXX")"
 UPLOAD_ARTIFACTS="$(mktemp "${TMPDIR:-/tmp}/mn-upload-artifacts.XXXXXX")"
 REMOTE_NAMES="$(mktemp "${TMPDIR:-/tmp}/mn-remote-package-names.XXXXXX")"
+BUILD_WORKSPACE=""
 cleanup() {
     rm -f "$PACKAGE_ROWS" "$INDEXED_NAMES" "$LOCAL_ARTIFACTS" "$REMOTE_FILES" "$UPLOAD_ARTIFACTS" "$REMOTE_NAMES"
+    if [ -n "$BUILD_WORKSPACE" ]; then
+        rm -rf "$BUILD_WORKSPACE"
+    fi
 }
 trap cleanup EXIT
 
@@ -236,6 +240,11 @@ sort -u "$INDEXED_NAMES" -o "$INDEXED_NAMES"
 
 "$PYTHON_BIN" "${SCRIPT_DIR}/scripts/prepare-python-package-index.py" \
     "$INDEX_FILE" "$WORKSPACE_ROOT" unused --verify-source --verify-dependencies
+
+# Backends rewrite egg-info and build trees, including files tracked by some
+# repositories. Build in owned temporary sources so retries keep main clean.
+BUILD_WORKSPACE="$(mktemp -d "${TMPDIR:-/tmp}/mn-python-build.XXXXXX")"
+"$PYTHON_BIN" "${SCRIPT_DIR}/scripts/stage-python-release-sources.py" "$PACKAGE_ROWS" "$BUILD_WORKSPACE"
 
 echo "Building indexed Python packages from $INDEX_FILE."
 rm -rf "$DIST_DIR" "$LOCAL_INDEX_DIR"

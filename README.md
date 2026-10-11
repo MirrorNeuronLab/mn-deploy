@@ -439,6 +439,8 @@ The Python publisher validates frozen dependency pins before building and keeps
 the built-wheel compatibility gate before upload. An incompatible frozen set
 requires a new aggregate release version, rather than a Python-phase resume;
 see [release recovery](./HOW_TO_RELEASE.md#automatic-and-independent-versions).
+Python backends build from temporary source archives so generated `build/` and
+`.egg-info` files cannot dirty the source repositories or block retries.
 
 
 The current Compose template starts the authenticated Membrane v2 service with

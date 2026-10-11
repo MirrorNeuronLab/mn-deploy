@@ -190,7 +190,9 @@ its matching final release; no development versions or downgrades are selected.
 Conflicting constraints fail preparation without changing the release inputs.
 Unchanged packages retain their versions when compatible; manually advanced
 static versions are preserved. Frozen dependency pins are checked before builds,
-and built-wheel dependencies remain a separate gate before upload. An
+and built-wheel dependencies remain a separate gate before upload. Python builds
+use temporary archives of clean committed repositories, preserving shared build
+configuration and keeping backend-generated files out of source checkouts. An
 incompatible frozen set requires a new aggregate version and snapshot. The SDK
 and its component wheels share one version group because blueprint capability
 defaults derive from SDK identity. CLI, API, skills, agents, and Membrane Python

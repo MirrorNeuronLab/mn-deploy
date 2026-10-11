@@ -162,6 +162,12 @@ any upload. Binary installation preserves snapshot package pins, applies explici
 component overrides to the constraints, constrains dependency resolution to the
 release inventory, and runs `pip check` before startup. Constraints pin internal
 packages; they are not a cross-platform lock of every third-party dependency.
+Python builds use temporary archives of clean committed repositories, retaining
+shared build configuration and SDK component layout. Standalone projects in a
+custom index are copied to temporary sources. Backend-generated `build/` and
+`.egg-info` changes remain there and never dirty the release checkouts; temporary
+sources are removed on success or failure.
+Archive extraction requires a current Python 3.11+ with `tarfile.data_filter`.
 
 After a failure, use the printed explicit version and `--resume-from` phase.
 Do not use automatic version selection to retry a partially published release.

@@ -20,6 +20,7 @@ def module(filename):
 indexer = module('prepare-python-package-index.py')
 contract = module('release-contract.py')
 validator = module('validate-python-release.py')
+stager = module('stage-python-release-sources.py')
 
 
 def test_release_preparation_reads_package_index_with_bash_32(tmp_path):
@@ -362,6 +363,42 @@ def test_frozen_conflict_does_not_recommend_resuming_python(tmp_path):
     assert result.returncode == 65
     assert 'prepare a new aggregate version' in result.stderr
     assert '--resume-from python' not in result.stderr
+
+
+def test_build_sources_preserve_sdk_layout_and_do_not_dirty_tracked_artifacts(tmp_path):
+    repo = repository(tmp_path, 'mn-python-sdk')
+    component = repo / 'packages/common'
+    component.mkdir(parents=True)
+    (repo / 'pyproject.toml').write_text('[project]\nname="sdk"\nversion="1.0.0"\n')
+    (component / 'pyproject.toml').write_text('[project]\nname="common"\nversion="1.0.0"\n')
+    artifact = component / 'src/common.egg-info/PKG-INFO'
+    artifact.parent.mkdir(parents=True)
+    artifact.write_text('previous generated metadata')
+    commit(repo)
+    rows = tmp_path / 'rows.tsv'
+    rows.write_text(f'sdk\t{repo}\twheel\t1.0.0\ncommon\t{component}\twheel\t1.0.0\n')
+    staging = tmp_path / 'build sources'
+    stager.stage_sources(rows, staging)
+    sdk, common = [Path(line.split('\t')[1]) for line in rows.read_text().splitlines()]
+    assert common == sdk / 'packages/common'
+    (common / 'src/common.egg-info/PKG-INFO').write_text('rewritten during build')
+    (common / 'build').mkdir()
+    (common / 'build/backend-output').write_text('new')
+    assert artifact.read_text() == 'previous generated metadata'
+    assert not (component / 'build').exists()
+    assert git(repo, 'status', '--porcelain') == ''
+
+
+def test_build_staging_rejects_uncommitted_source(tmp_path):
+    repo = repository(tmp_path)
+    (repo / 'pyproject.toml').write_text('[project]\nname="one"\nversion="1.0.0"\n')
+    commit(repo)
+    (repo / 'code.py').write_text('uncommitted work')
+    rows = tmp_path / 'rows.tsv'
+    rows.write_text(f'one\t{repo}\twheel\t1.0.0\n')
+    with pytest.raises(SystemExit, match='Uncommitted source changes'):
+        stager.stage_sources(rows, tmp_path / 'build')
+    assert (repo / 'code.py').read_text() == 'uncommitted work'
 
 
 def test_gar_records_update_without_relabeling_payload_sources(tmp_path):
