@@ -168,3 +168,12 @@ runtime.
 - GAR Docker: mirror-neuron-core and membrane-context-engine each published
   v1.3.59, 1.3.59, and latest (pointing to this release at confirmation).
 - GitHub tag: v1.3.59 across the release repositories.
+
+## v1.3.60 -- 2026-10-11
+
+- GAR npm: mirrorneuron-web-ui@1.3.60 in mirrorneuron-npm.
+- GAR Python: all packages in package-index/python-packages.toml, including
+  mirrorneuron-api, mirrorneuron-cli, and mirrorneuron-python-sdk.
+- GAR Docker: mirror-neuron-core and membrane-context-engine each published
+  v1.3.60, 1.3.60, and latest (pointing to this release at confirmation).
+- GitHub tag: v1.3.60 across the release repositories.
