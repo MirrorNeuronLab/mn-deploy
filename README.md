@@ -495,6 +495,9 @@ Docker versions are selected by release tags; a digest with any comparable tag
 at or above the cutoff is retained. Untagged images and unrecognized version
 names are reported and skipped in cutoff mode, but included by `-a`.
 Deleting a selected version removes its associated tags, including aliases.
+For OCI image indexes, the script removes a selected parent manifest before
+retrying deletion of any selected child it references. It never expands the
+confirmed deletion plan to remove an unselected parent.
 This uses Google's [Artifact Registry version deletion command](https://docs.cloud.google.com/sdk/gcloud/reference/artifacts/versions/delete).
 
 **Deletion is permanent.** The cutoff applies to each package's own version,

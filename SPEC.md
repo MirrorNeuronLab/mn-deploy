@@ -248,7 +248,10 @@ comparable tag is at or above the cutoff. Cutoff mode reports unversioned or
 unrecognized versions without deleting them; `-a` includes them. Deleted
 versions lose all their tags. Failures during inventory abort before deletion;
 failures during deletion stop and report completed deletions and the failed
-resource. An updated deletion plan during confirmation aborts for fresh review.
+resource. When GAR reports that a selected OCI child manifest is still
+referenced, its selected parent manifest is deleted first and the child is
+retried; a parent outside the confirmed plan is never added to the deletion
+set. An updated deletion plan during confirmation aborts for fresh review.
 Tests use a fake gcloud executable and must never clean the live registry.
 # Desktop node identity contract
 

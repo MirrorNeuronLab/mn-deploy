@@ -18,6 +18,12 @@ class Deletion:
     tags: tuple[str, ...]
 
 
+class GcloudDeleteError(RuntimeError):
+    def __init__(self, message: str, parent: str | None = None):
+        super().__init__(message)
+        self.parent = parent
+
+
 def version_key(value: str):
     """Compare numeric releases and common SemVer/PEP 440 prereleases, not text."""
     match = re.fullmatch(
@@ -46,6 +52,42 @@ def run_gcloud(binary: str, *args: str, listing: bool = True):
     if not isinstance(data, list) or any(not isinstance(item, dict) for item in data):
         raise ValueError('Expected a JSON resource list from gcloud')
     return data
+
+
+def delete_version(binary: str, item: Deletion, project: str) -> None:
+    """Delete one version, reporting a validated same-package OCI parent if blocked."""
+    command = [binary, 'artifacts', 'versions', 'delete', item.name,
+               f'--project={project}', '--delete-tags', '--quiet']
+    result = subprocess.run(command, text=True, capture_output=True)
+    if result.returncode == 0:
+        return
+
+    # GAR rejects deleting a child manifest while an OCI index still references
+    # it. Only recognize a digest and package reported by GAR; never execute or
+    # trust an arbitrary resource path from CLI output.
+    output = result.stderr + '\n' + result.stdout
+    if (re.search(r'"code"\s*:\s*5', output)
+            and item.name in output
+            and re.search(r'\bwas not found\b', output)):
+        # Removing an OCI index may also remove a selected child version. Treat
+        # GAR's exact-resource 404 as complete when that child is later reached.
+        return
+    match = re.search(
+        r'manifest has referenced parents:\s*([^\s/]+(?:/[^\s/]+)*)/manifests/(sha256:[0-9a-f]{64})',
+        output,
+    )
+    parent = None
+    if match:
+        package_path, digest = match.groups()
+        package_prefix, marker, _ = item.name.partition('/versions/')
+        package_id = unquote(package_prefix.rsplit('/packages/', 1)[-1]) if marker else ''
+        if package_path == package_id:
+            parent = f'{package_prefix}/versions/{digest}'
+    raise GcloudDeleteError(
+        f"gcloud artifacts versions delete failed (exit {result.returncode}); "
+        "check authentication, permissions, and repository state, then retry.",
+        parent=parent,
+    )
 
 
 def resource_name(row: dict, prefix: str) -> str:
@@ -127,7 +169,7 @@ def inventory(binary: str, project: str, cutoff, delete_all: bool):
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         prog='CLEARN_GAR.sh', description='Delete GAR package versions across all repository locations in one project.',
-        epilog='Requires gcloud and Python 3.10+. Always lists deletions and requires exact YES. Repositories and IAM remain intact. Cutoff mode skips unversioned artifacts; -a includes them. Independent packages below the cutoff are deleted even if a release still depends on them.',
+        epilog='Requires gcloud and Python 3.10+. Always lists deletions and requires exact YES. Repositories and IAM remain intact. Cutoff mode skips unversioned artifacts; -a includes them. Independent packages below the cutoff are deleted even if a release still depends on them. OCI parent manifests are deleted before selected child manifests that they reference.',
     )
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument('-v', '--version', help='Delete versions strictly older than MAJOR.MINOR.PATCH (optional v prefix).')
@@ -164,13 +206,28 @@ def main(argv=None) -> int:
     if current != plan:
         raise RuntimeError('Registry deletion plan changed during confirmation. Nothing deleted. Run again to review the new plan.')
     completed = 0
-    for item in plan:
+    deleted: set[str] = set()
+    by_name = {item.name: item for item in plan}
+    pending = list(plan)
+    while pending:
+        item = pending.pop(0)
         print(f'==> Deleting {item.name}', flush=True)
         try:
-            run_gcloud(binary, 'versions', 'delete', item.name, f'--project={args.project}', '--delete-tags', '--quiet', listing=False)
-        except RuntimeError as exc:
-            raise RuntimeError(f'{exc} Stopped at {item.name}; {completed}/{len(plan)} deletions completed. Run again to inspect what remains.') from exc
+            delete_version(binary, item, args.project)
+        except GcloudDeleteError as exc:
+            if exc.parent and exc.parent != item.name and exc.parent in by_name and exc.parent not in deleted:
+                # The complete plan was explicitly confirmed and revalidated.
+                # Move the referenced parent ahead of this child, then retry.
+                parent_item = by_name[exc.parent]
+                pending = [queued for queued in pending if queued.name != exc.parent]
+                pending.insert(0, item)
+                pending.insert(0, parent_item)
+                print(f'    GAR requires parent manifest first: {parent_item.name}', flush=True)
+                continue
+            detail = f' Parent manifest {exc.parent} is outside the confirmed deletion plan.' if exc.parent else ''
+            raise RuntimeError(f'{exc}{detail} Stopped at {item.name}; {completed}/{len(plan)} deletions completed. Run again to inspect what remains.') from exc
         completed += 1
+        deleted.add(item.name)
     print(f'✓ Deleted {completed} version(s). Repositories retained.')
     return 0
 
