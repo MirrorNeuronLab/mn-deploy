@@ -50,7 +50,8 @@ Create a complete multi-repository release:
   5. update named blueprint pins and record the completed release.
 
 Resume phases: prepare, python, web-ui, membrane, core, tags, or finalize.
-After a failure, run the exact --resume-from command printed by this script.
+Resume only while the prepared package set remains compatible. An incompatible
+frozen package index requires a new aggregate release version.
 
 Prerequisites: authenticated git and gcloud, npm, Docker with Buildx, uv (or a
 prepared MN_PUBLISH_PYTHON), and publishing authority for the configured GAR
@@ -79,10 +80,11 @@ prepare_python_publish_environment() {
       printf 'Preparing Python publishing environment with uv: %s\n' "$publish_venv"
       uv venv "$publish_venv"
     fi
-    if ! "$PUBLISH_PYTHON" -c 'import build, packaging, twine' >/dev/null 2>&1; then
+    if ! "$PUBLISH_PYTHON" -c 'import build, packaging, tomllib, twine' >/dev/null 2>&1; then
       printf 'Installing Python publishing dependencies with uv.\n'
       uv pip install --python "$PUBLISH_PYTHON" --upgrade \
         build \
+        packaging \
         twine \
         keyring \
         keyrings.google-artifactregistry-auth
@@ -91,9 +93,16 @@ prepare_python_publish_environment() {
 
   command -v "$PUBLISH_PYTHON" >/dev/null 2>&1 ||
     die "Python publishing command was not found: ${PUBLISH_PYTHON}."
-  if ! "$PUBLISH_PYTHON" -c 'import build, packaging, twine' >/dev/null 2>&1; then
-    die "Python publishing environment is missing build, packaging, or twine: ${PUBLISH_PYTHON}."
+  if ! "$PUBLISH_PYTHON" -c 'import build, packaging, tomllib, twine' >/dev/null 2>&1; then
+    die "Python publishing requires Python 3.11+ with build, packaging, and twine: ${PUBLISH_PYTHON}."
   fi
+}
+
+select_python_plan_environment() {
+  PUBLISH_PYTHON="${MN_PUBLISH_PYTHON:-${MN_GAR_PUBLISH_VENV:-${SCRIPT_DIR}/.venv-gar-publish}/bin/python}"
+  command -v "$PUBLISH_PYTHON" >/dev/null 2>&1 &&
+    "$PUBLISH_PYTHON" -c 'import packaging, tomllib' >/dev/null 2>&1 ||
+    die "Release preview requires a prepared Python 3.11+ publishing environment with packaging. Set MN_PUBLISH_PYTHON or prepare .venv-gar-publish; --plan does not install dependencies."
 }
 
 validate_version() {
@@ -176,6 +185,10 @@ should_run_phase() {
 
 report_resume_command() {
   local status=$?
+  if [[ "$status" -eq 65 && "$CURRENT_PHASE" == "python" ]]; then
+    printf 'Next: prepare a new aggregate version with %s --plan, then release it without --resume-from.\n' "$0" >&2
+    return
+  fi
   if [[ "$status" -ne 0 && -n "$CURRENT_PHASE" ]]; then
     printf 'Next: fix the error, then run: %s -v %s --resume-from %s\n' \
       "$0" "$VERSION" "$CURRENT_PHASE" >&2
@@ -244,14 +257,14 @@ prepare_release_metadata() {
   local index_file="${SCRIPT_DIR}/package-index/python-packages.toml"
   local pyproject metadata_output
 
-  set_compose_web_ui_version "${SCRIPT_DIR}/docker-compose.yml" "$VERSION"
-
   # The aggregate tag identifies a release set, not every distribution version.
-  python3 \
+  # Solve dependencies before changing installer/Compose pins or freezing them.
+  "$PUBLISH_PYTHON" \
     "${SCRIPT_DIR}/scripts/prepare-python-package-index.py" \
     "$index_file" "$WORKSPACE_ROOT" "$VERSION" --independent \
     --baseline "$MN_RELEASE_BASELINE" >/dev/null
 
+  set_compose_web_ui_version "${SCRIPT_DIR}/docker-compose.yml" "$VERSION"
   update_installer_pins
   prepare_install_support_snapshot
 
@@ -261,7 +274,7 @@ prepare_release_metadata() {
     install.sh package-index/python-packages.toml docker-compose.yml "install_support/${TAG}"
   local repo
   for repo in "${REPOSITORIES[@]}"; do
-    metadata_output="$(python3 - "$index_file" "$repo" <<'PYTHON'
+    metadata_output="$("$PUBLISH_PYTHON" - "$index_file" "$repo" <<'PYTHON'
 import sys, tomllib
 from pathlib import PurePosixPath
 for package in tomllib.loads(open(sys.argv[1]).read())["packages"]:
@@ -384,7 +397,7 @@ update_installer_pins() {
     MN_DEFAULT_INSTALL_VERSION; do
     set_installer_default_version "$setting" "$TAG"
   done
-  package_versions="$(python3 - "${SCRIPT_DIR}/package-index/python-packages.toml" <<'PYTHON'
+  package_versions="$("$PUBLISH_PYTHON" - "${SCRIPT_DIR}/package-index/python-packages.toml" <<'PYTHON'
 import sys, tomllib
 settings = {"mirrorneuron-python-sdk": "MN_DEFAULT_PYTHON_SDK_VERSION",
             "mirrorneuron-cli": "MN_DEFAULT_CLI_VERSION", "mirrorneuron-api": "MN_DEFAULT_API_VERSION"}
@@ -475,8 +488,9 @@ fi
 MN_RELEASE_BASELINE="$(sed -n 's/^MN_DEFAULT_INSTALL_VERSION=.*:-\(v[0-9.]*\)}"/\1/p' "${SCRIPT_DIR}/install.sh")"
 validate_version "$VERSION"
 if [[ "$PLAN" == "Y" ]]; then
+  select_python_plan_environment
   printf 'Next release: v%s (local tags and committed source; publish refreshes remote tags).\n' "$VERSION"
-  python3 "${SCRIPT_DIR}/scripts/prepare-python-package-index.py" \
+  "$PUBLISH_PYTHON" "${SCRIPT_DIR}/scripts/prepare-python-package-index.py" \
     "${SCRIPT_DIR}/package-index/python-packages.toml" "$WORKSPACE_ROOT" "$VERSION" \
     --independent --baseline "$MN_RELEASE_BASELINE" --dry-run >/dev/null
   exit 0

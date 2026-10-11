@@ -134,18 +134,30 @@ finalization changes do not trigger another release. `--plan` uses local tags
 and committed source only; commit changes before relying on that preview.
 An explicit `-v MAJOR.MINOR.PATCH` selects the aggregate release-set tag, not a
 forced version for every Python distribution.
+Preview and preparation use the dedicated publishing Python (or
+`MN_PUBLISH_PYTHON`), with Python 3.11+ and `packaging`. A preview requires an
+already prepared environment and never installs dependencies. A normal release
+prepares the environment with `uv` when needed.
 
 Each package index entry records a source fingerprint. Changes to tracked
 package inputs or shared repository build files increment that package's patch;
-unchanged packages reuse their previous version. Static versions advance
-automatically unless already manually increased. SDK and SDK component wheels
-remain one version group: the runtime catalog currently derives component
+unchanged packages reuse their previous version when dependencies permit it.
+The planner checks all indexed projects' runtime and optional dependencies,
+including platform markers. It selects the lowest compatible final
+`MAJOR.MINOR.PATCH` at or above each proposed version, promoting a dependency
+when consumers require a newer version. For example, `>=1.3.58.dev83` selects
+the final `1.3.58`, never a development version. Upper bounds, exact pins, and
+exclusions remain authoritative; unsatisfiable requirements stop preparation
+before any package index, static metadata, or installer/Compose pins are written.
+Static versions advance automatically unless already manually increased. SDK
+and SDK component wheels remain one version group: the runtime catalog derives component
 defaults from the SDK version. Other Python packages advance independently.
 Core, Membrane images, and Web UI currently retain the aggregate release tag.
 
 The Python publisher rejects dirty or changed sources when a prepared source
-fingerprint is present, verifies wheel metadata against the index, and rejects
-internal dependency conflicts, including optional blueprint capabilities, before
+fingerprint is present and checks the frozen index's declared dependencies
+before building or replacing local artifacts. It verifies wheel metadata against
+the index and rejects internal dependency conflicts, including optional blueprint capabilities, before
 any upload. Binary installation preserves snapshot package pins, applies explicit
 component overrides to the constraints, constrains dependency resolution to the
 release inventory, and runs `pip check` before startup. Constraints pin internal
@@ -156,6 +168,16 @@ Do not use automatic version selection to retry a partially published release.
 Resumes allow committed deployment tooling fixes but reject changed installer,
 Compose, package-index, or release-snapshot inputs. Python resumes also
 require package sources to remain at the prepared tags.
+An incompatible frozen package set cannot be repaired by resuming the Python
+phase. Preserve its tags and immutable snapshot, then prepare a new aggregate
+version with the corrected planner. For the failed `v1.3.58` set:
+
+```bash
+./release_all.sh -v 1.3.59 --plan
+./release_all.sh -v 1.3.59
+```
+
+The SDK group selects `1.3.58`; other package versions remain independent.
 
 Offline verification:
 

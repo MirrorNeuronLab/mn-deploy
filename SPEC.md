@@ -182,8 +182,16 @@ to sibling source checkouts, while blueprints and native response services
 still decide which capabilities to enable or prepare at runtime. A new release
 must publish the indexed packages and refresh its version pins and
 install-support snapshot together. Release preparation compares tracked package inputs with the previous release
-and automatically increments changed packages by one patch. Unchanged packages
-retain their versions; manually advanced static versions are preserved. The SDK
+and automatically increments changed packages by one patch. Before writing
+metadata, preparation selects the lowest compatible final `MAJOR.MINOR.PATCH`
+at or above those proposals using every indexed project's runtime and optional
+requirements, across platforms. Development minimums may promote a package to
+its matching final release; no development versions or downgrades are selected.
+Conflicting constraints fail preparation without changing the release inputs.
+Unchanged packages retain their versions when compatible; manually advanced
+static versions are preserved. Frozen dependency pins are checked before builds,
+and built-wheel dependencies remain a separate gate before upload. An
+incompatible frozen set requires a new aggregate version and snapshot. The SDK
 and its component wheels share one version group because blueprint capability
 defaults derive from SDK identity. CLI, API, skills, agents, and Membrane Python
 projects advance independently. Missing SDK index entries fail preparation;

@@ -64,6 +64,7 @@ python3() {
   fi
   "$TEST_PYTHON" "$@"
 }
+PUBLISH_PYTHON=python3
 set_compose_web_ui_version() { :; }
 prepare_install_support_snapshot() { :; }
 set_installer_default_version() { printf 'PIN:%s=%s\\n' "$1" "$2"; }
@@ -200,6 +201,167 @@ def test_sdk_components_remain_a_runtime_version_group(tmp_path):
     index.write_text('[[packages]]\nname="mirrorneuron-python-sdk"\npath="mn-python-sdk"\nversion = "1.2.3"\n\n[[packages]]\nname="mn-python-sdk-common"\npath="mn-python-sdk/packages/common"\nversion = "1.2.3"\n')
     indexer.synchronize(index, tmp_path, '1.9.0', independent=True, baseline='v1.2.3')
     assert [p['version'] for p in indexer.tomllib.loads(index.read_text())['packages']] == ['1.2.4', '1.2.4']
+
+
+def dependency_workspace(tmp_path, requirements, *, static=False):
+    sdk = repository(tmp_path, 'mn-python-sdk')
+    common = sdk / 'packages/common'
+    common.mkdir(parents=True)
+    version = 'version="1.3.53"' if static else 'dynamic=["version"]'
+    for path, name in [(sdk, 'mirrorneuron-python-sdk'), (common, 'mn-python-sdk-common')]:
+        (path / 'pyproject.toml').write_text(f'[project]\nname="{name}"\n{version}\n')
+    api = repository(tmp_path, 'mn-api')
+    (api / 'pyproject.toml').write_text(
+        '[project]\nname="mirrorneuron-api"\ndynamic=["version"]\n'
+        'dependencies=["external>=99", "mirrorneuron-python-sdk[local-source]>=1.3.58.dev83,<2"]\n'
+        '[project.optional-dependencies]\nblueprint=' + json.dumps(requirements) + '\n'
+    )
+    for repo in (sdk, api):
+        commit(repo)
+        git(repo, 'tag', 'v1.3.58')
+    index = tmp_path / 'index.toml'
+    index.write_text(''.join(
+        f'[[packages]]\nname="{name}"\npath="{path}"\nversion = "1.3.53"\n\n'
+        for name, path in [('mirrorneuron-python-sdk', 'mn-python-sdk'),
+                           ('mn-python-sdk-common', 'mn-python-sdk/packages/common'),
+                           ('mirrorneuron-api', 'mn-api')]
+    ))
+    return index, sdk, common
+
+
+@pytest.mark.parametrize('static', [False, True])
+def test_dependency_floors_promote_entire_sdk_group_and_retry_is_stable(tmp_path, static):
+    # Reproduce the failed release: unchanged 1.3.53 packages need 1.3.58.dev*.
+    index, sdk, common = dependency_workspace(
+        tmp_path, ['MN_python.SDK_common>=1.3.58.dev0,<2; sys_platform == "win32"'], static=static,
+    )
+    indexer.synchronize(index, tmp_path, '1.3.59', independent=True, baseline='v1.3.58')
+    records = indexer.tomllib.loads(index.read_text())['packages']
+    assert [p['version'] for p in records] == ['1.3.58', '1.3.58', '1.3.53']
+    assert records[0]['source_hash'] == records[1]['source_hash']
+    if static:
+        assert all('version = "1.3.58"' in (p / 'pyproject.toml').read_text() for p in (sdk, common))
+        commit(sdk)
+    before = index.read_text()
+    indexer.synchronize(index, tmp_path, '1.3.59', independent=True)
+    assert index.read_text() == before
+
+
+def test_incompatible_group_requirements_fail_before_any_metadata_write(tmp_path):
+    index, sdk, common = dependency_workspace(tmp_path, ['mn-python-sdk-common<1.3.58'], static=True)
+    paths = [index, sdk / 'pyproject.toml', common / 'pyproject.toml']
+    before = [p.read_text() for p in paths]
+    with pytest.raises(SystemExit, match='No compatible stable version'):
+        indexer.synchronize(index, tmp_path, '1.3.59', independent=True, baseline='v1.3.58')
+    assert [p.read_text() for p in paths] == before
+
+
+def test_dependency_promotion_preview_is_read_only(tmp_path, capsys):
+    index, sdk, common = dependency_workspace(tmp_path, [], static=True)
+    paths = [index, sdk / 'pyproject.toml', common / 'pyproject.toml']
+    before = [p.read_text() for p in paths]
+    indexer.synchronize(index, tmp_path, '1.3.59', independent=True, baseline='v1.3.58', dry_run=True)
+    assert [p.read_text() for p in paths] == before
+    assert 'mirrorneuron-python-sdk: 1.3.53 -> 1.3.58' in capsys.readouterr().err
+
+
+def test_manual_sdk_static_version_is_preserved_for_every_component(tmp_path):
+    index, sdk, _ = dependency_workspace(tmp_path, [], static=True)
+    project = sdk / 'pyproject.toml'
+    project.write_text(project.read_text().replace('version="1.3.53"', 'version="1.3.60"'))
+    commit(sdk)
+    indexer.synchronize(index, tmp_path, '1.3.59', independent=True, baseline='v1.3.58')
+    assert [p['version'] for p in indexer.tomllib.loads(index.read_text())['packages']] == ['1.3.60', '1.3.60', '1.3.53']
+
+
+@pytest.mark.parametrize(('constraint', 'expected'), [
+    ('>=1.3.58.dev0,<2', '1.3.58'),
+    ('>1.3.58,<2', '1.3.59'),
+    ('~=1.4.2', '1.4.2'),
+    ('==1.4.*', '1.4.0'),
+    ('>=1.3.58,!=1.3.58,!=1.3.59', '1.3.60'),
+    ('>=1.3.58,!=1.3.*', '1.4.0'),
+    ('>=1.3.58,!=1.*', '2.0.0'),
+    ('==1.3.58', '1.3.58'),
+])
+def test_stable_dependency_selection_respects_pep440_boundaries(constraint, expected):
+    packages = [{'name': 'one', 'path': 'repo/one'}, {'name': 'two', 'path': 'repo/two'}]
+    projects = {'one': {'dependencies': ['two' + constraint]}, 'two': {}}
+    versions = {'one': '1.0.0', 'two': '1.3.53'}
+    assert indexer.compatible_versions(packages, projects, versions, independent=True)['two'] == expected
+
+
+@pytest.mark.parametrize('constraint', ['<1.3.53', '==1.3.52', '>1.3.58,<1.3.59', '==1.3.58.dev83', '@ https://example.invalid/two.whl'])
+def test_stable_dependency_selection_rejects_conflicts_without_downgrades(constraint):
+    packages = [{'name': 'one', 'path': 'repo/one'}, {'name': 'two', 'path': 'repo/two'}]
+    projects = {'one': {'dependencies': ['two' + constraint]}, 'two': {}}
+    with pytest.raises(SystemExit, match='No compatible stable version'):
+        indexer.compatible_versions(packages, projects, {'one': '1.0.0', 'two': '1.3.53'}, independent=True)
+
+
+def test_frozen_release_dependencies_are_verified_without_reselection(tmp_path):
+    index, _, _ = dependency_workspace(tmp_path, [])
+    before = index.read_text()
+    with pytest.raises(SystemExit, match='prepare a new release'):
+        indexer.verify_dependencies(index, tmp_path)
+    assert index.read_text() == before
+
+
+def test_planning_never_selects_a_development_version():
+    packages = [{'name': 'one', 'path': 'repo'}]
+    with pytest.raises(SystemExit, match='final MAJOR.MINOR.PATCH'):
+        indexer.compatible_versions(packages, {'one': {}}, {'one': '1.3.58.dev83'}, independent=True)
+
+
+def test_incompatible_frozen_index_has_a_distinct_failure_status(tmp_path):
+    index, _, _ = dependency_workspace(tmp_path, [])
+    result = subprocess.run(
+        [sys.executable, str(Path(__file__).with_name('prepare-python-package-index.py')),
+         str(index), str(tmp_path), 'unused', '--verify-dependencies'],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 65
+    assert 'prepare a new release' in result.stderr
+
+
+def test_publisher_rejects_frozen_conflict_before_builds_or_artifact_cleanup(tmp_path):
+    index, _, _ = dependency_workspace(tmp_path, [])
+    # Absolute fixture paths keep every project lookup inside the temporary workspace.
+    source = index.read_text()
+    for relative in ('mn-python-sdk/packages/common', 'mn-python-sdk', 'mn-api'):
+        source = source.replace(f'path="{relative}"', f'path="{tmp_path / relative}"')
+    index.write_text(source)
+    dist = tmp_path / 'dist'
+    dist.mkdir()
+    sentinel = dist / 'preserve-existing-artifacts'
+    sentinel.write_text('unchanged')
+    gcloud = tmp_path / 'gcloud'
+    gcloud.write_text('#!/bin/sh\nexit 99\n')
+    gcloud.chmod(0o755)
+    publisher = Path(__file__).resolve().parents[1] / 'publish_python_packages_to_google_artifact_registry.sh'
+    result = subprocess.run(
+        ['bash', str(publisher), '--index-file', str(index), '--dist-dir', str(dist),
+         '--local-index-dir', str(tmp_path / 'simple'), '--project', 'test-project', '--python', sys.executable],
+        capture_output=True, text=True, env={**os.environ, 'MN_GCLOUD_BIN': str(gcloud)},
+    )
+    assert result.returncode == 65, result.stdout + result.stderr
+    assert 'prepare a new release' in result.stderr
+    assert 'Building indexed Python packages' not in result.stdout
+    assert sentinel.read_text() == 'unchanged'
+
+
+def test_frozen_conflict_does_not_recommend_resuming_python(tmp_path):
+    release = Path(__file__).resolve().parents[1] / 'release_all.sh'
+    source, _, _ = release.read_text().partition('\nwhile [[ "$#" -gt 0 ]]')
+    functions = tmp_path / 'release-functions.sh'
+    functions.write_text(source)
+    result = subprocess.run(
+        ['bash', '-c', 'source "$FUNCTIONS_FILE"; VERSION=1.3.58; CURRENT_PHASE=python; exit 65'],
+        capture_output=True, text=True, env={**os.environ, 'FUNCTIONS_FILE': str(functions)},
+    )
+    assert result.returncode == 65
+    assert 'prepare a new aggregate version' in result.stderr
+    assert '--resume-from python' not in result.stderr
 
 
 def test_gar_records_update_without_relabeling_payload_sources(tmp_path):

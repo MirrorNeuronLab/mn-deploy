@@ -405,8 +405,13 @@ to sibling source checkouts, while blueprints and native response services
 still decide which capabilities to enable or prepare at runtime. A new release
 must publish the indexed packages and refresh its version pins and
 install-support snapshot together. Release preparation compares tracked package inputs with the previous release
-and automatically increments changed packages by one patch. Unchanged packages
-retain their versions; manually advanced static versions are preserved. The SDK
+and automatically increments changed packages by one patch. The planner then
+checks all internal runtime and optional dependencies and promotes packages to
+the lowest compatible final `MAJOR.MINOR.PATCH`, including when a requirement
+uses a development minimum such as `>=1.3.58.dev83`. It never selects development
+versions or lowers existing versions. Conflicting requirements stop preparation
+before metadata changes. Unchanged packages retain their versions when compatible;
+manually advanced static versions are preserved. The SDK
 and its component wheels share one version group because blueprint capability
 defaults derive from SDK identity. CLI, API, skills, agents, and Membrane Python
 projects advance independently. Missing SDK index entries fail preparation;
@@ -430,6 +435,10 @@ also use their tagged source, so those repositories may advance without changing
 the release inputs. Resuming at the Python phase additionally requires package
 source checkouts to remain at their tagged commits. Earlier phases are skipped.
 Source and wheel tests do not require a live runtime installation.
+The Python publisher validates frozen dependency pins before building and keeps
+the built-wheel compatibility gate before upload. An incompatible frozen set
+requires a new aggregate release version, rather than a Python-phase resume;
+see [release recovery](./HOW_TO_RELEASE.md#automatic-and-independent-versions).
 
 
 The current Compose template starts the authenticated Membrane v2 service with

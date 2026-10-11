@@ -11,9 +11,14 @@ import sys
 import tomllib
 from pathlib import Path
 
+from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
+from packaging.version import InvalidVersion, Version
+
 
 PACKAGE_BLOCK = re.compile(r"(?ms)^\[\[packages\]\]\n.*?(?=^\[\[packages\]\]\n|\Z)")
 VERSION_LINE = re.compile(r'(?m)^version = "[^"]+"$')
+FINAL_VERSION = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
 
 
 def project_release_version(
@@ -93,10 +98,106 @@ def source_matches(workspace: Path, relative: str, expected: str, *, include_nes
 
 
 def patch_version(version: str) -> str:
-    if not re.fullmatch(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", version):
+    if not FINAL_VERSION.fullmatch(version):
         raise SystemExit(f"Automatic versioning requires MAJOR.MINOR.PATCH: {version}")
     major, minor, patch = map(int, version.split("."))
     return f"{major}.{minor}.{patch + 1}"
+
+
+def stable_candidates(minimum: str, requirements: list[tuple[str, Requirement]]) -> list[str]:
+    """Stable versions at constraint boundaries, without an unbounded patch search.
+
+    On the MAJOR.MINOR.PATCH lattice, a permitted interval starts at a bound
+    or immediately after an excluded version/prefix. Packaging evaluates the
+    full specifiers, including prereleases, upper bounds, and exclusions.
+    """
+    candidates = {minimum}
+    for _, requirement in requirements:
+        for specifier in requirement.specifier:
+            raw = specifier.version.removesuffix(".*")
+            try:
+                release = Version(raw).release
+            except InvalidVersion:
+                continue  # Arbitrary equality is checked against candidates below.
+            parts = list((release + (0, 0, 0))[:3])
+            if any(release[3:]):
+                parts[2] += 1
+            candidates.add(".".join(map(str, parts)))
+            candidates.add(f"{parts[0]}.{parts[1]}.{parts[2] + 1}")
+            if specifier.version.endswith(".*") and len(release) <= 3:
+                parts[len(release) - 1] += 1
+                parts[len(release):] = [0] * (3 - len(release))
+                candidates.add(".".join(map(str, parts)))
+    return sorted((v for v in candidates if Version(v) >= Version(minimum)), key=Version)
+
+
+def compatible_versions(packages: list[dict], projects: dict[str, dict], versions: dict[str, str], *, independent: bool) -> dict[str, str]:
+    """Plan compatible versions for the whole inventory before changing files."""
+    for name, version in versions.items():
+        if not FINAL_VERSION.fullmatch(version):
+            raise SystemExit(f"Release versions must use final MAJOR.MINOR.PATCH, without dev/prerelease suffixes: {name}=={version}")
+    incoming: dict[str, list[tuple[str, Requirement]]] = {name: [] for name in versions}
+    for name, project in projects.items():
+        if {"dependencies", "optional-dependencies"}.intersection(project.get("dynamic", [])):
+            raise SystemExit(f"Cannot plan dynamic dependencies for {name}; declare release requirements in pyproject.toml.")
+        sections = [(name, project.get("dependencies", []))]
+        sections += [(f"{name}[{extra}]", requirements) for extra, requirements in project.get("optional-dependencies", {}).items()]
+        for owner, requirements in sections:
+            for raw in requirements:
+                requirement = Requirement(raw)
+                dependency = canonicalize_name(requirement.name)
+                if dependency in incoming:
+                    # All platforms and extras must work in the same release set.
+                    incoming[dependency].append((owner, requirement))
+
+    groups: dict[str, list[str]] = {}
+    for package in packages:
+        name = canonicalize_name(package["name"])
+        group = "mn-python-sdk" if independent and Path(package["path"]).parts[0] == "mn-python-sdk" else name
+        groups.setdefault(group, []).append(name)
+
+    selected = dict(versions)
+    errors = []
+    for names in groups.values():
+        minimum = max((versions[name] for name in names), key=Version)
+        requirements = [entry for name in names for entry in incoming[name]]
+        candidates = stable_candidates(minimum, requirements) if independent else [minimum]
+        version = next((candidate for candidate in candidates if all(
+            not requirement.url and Version(candidate) in requirement.specifier
+            for _, requirement in requirements
+        )), None)
+        if version is None:
+            detail = "\n".join(f"  {owner} requires {requirement}" for owner, requirement in requirements)
+            errors.append(f"No compatible stable version for {', '.join(names)} at or above {minimum}:\n{detail}")
+        else:
+            selected.update(dict.fromkeys(names, version))
+    if errors:
+        raise SystemExit("Incompatible Python release plan:\n" + "\n".join(errors))
+    return selected
+
+
+def load_projects(packages: list[dict], workspace_root: Path) -> dict[str, dict]:
+    projects = {}
+    for package in packages:
+        name = canonicalize_name(package["name"])
+        pyproject = workspace_root / package["path"] / "pyproject.toml"
+        if not pyproject.is_file():
+            raise SystemExit(f"Indexed package is missing pyproject.toml: {pyproject}")
+        project = tomllib.loads(pyproject.read_text(encoding="utf-8")).get("project", {})
+        if name in projects or canonicalize_name(project.get("name", "")) != name:
+            raise SystemExit(f"Duplicate or mismatched indexed package: {package['name']} at {pyproject}")
+        projects[name] = project
+    return projects
+
+
+def verify_dependencies(index_file: Path, workspace_root: Path) -> None:
+    packages = tomllib.loads(index_file.read_text(encoding="utf-8"))["packages"]
+    projects = load_projects(packages, workspace_root)
+    versions = {canonicalize_name(p["name"]): str(p["version"]) for p in packages}
+    try:
+        compatible_versions(packages, projects, versions, independent=False)
+    except SystemExit as exc:
+        raise SystemExit(f"{exc}\nNext: prepare a new release with a new aggregate version; do not resume an incompatible frozen package index.") from exc
 
 
 def synchronize(index_file: Path, workspace_root: Path, release_version: str, *, independent: bool = False, baseline: str = "", dry_run: bool = False) -> str:
@@ -124,6 +225,9 @@ def synchronize(index_file: Path, workspace_root: Path, release_version: str, *,
     if len(blocks) != len(packages):
         raise SystemExit(f"Could not match every package block in {index_file}")
 
+    projects = load_projects(packages, workspace_root)
+    versions: dict[str, str] = {}
+    fingerprints: dict[str, str] = {}
     sdk_entries = [p for p in packages if Path(p["path"]).parts[0] == "mn-python-sdk"]
     sdk_version = None
     sdk_hash = None
@@ -136,16 +240,11 @@ def synchronize(index_file: Path, workspace_root: Path, release_version: str, *,
         sdk_changed = any(not h or not source_matches(workspace_root, "mn-python-sdk", h, include_nested=True) for h in previous_hashes)
         sdk_version = patch_version(previous) if sdk_changed else previous
 
-    updates: dict[Path, str] = {}
-    rendered: list[str] = []
-    position = 0
-    for package, block_match in zip(packages, blocks, strict=True):
-        rendered.append(source[position : block_match.start()])
-        block = block_match.group(0)
+    for package in packages:
+        name = canonicalize_name(package["name"])
         pyproject = workspace_root / str(package["path"]) / "pyproject.toml"
-        if not pyproject.is_file():
-            raise SystemExit(f"Indexed package is missing pyproject.toml: {pyproject}")
         version = project_release_version(pyproject, release_version)
+        project = projects[name]
         if independent:
             fingerprint = source_fingerprint(workspace_root, str(package["path"]))
             previous_hash = package.get("source_hash")
@@ -156,7 +255,6 @@ def synchronize(index_file: Path, workspace_root: Path, release_version: str, *,
                     pass  # Newly indexed repositories have no baseline tag.
             previous = str(package["version"])
             changed = not previous_hash or not source_matches(workspace_root, str(package["path"]), previous_hash)
-            project = tomllib.loads(pyproject.read_text())["project"]
             if project.get("version"):
                 declared = str(project["version"])
                 if numeric_version_key(declared) < numeric_version_key(previous):
@@ -166,7 +264,24 @@ def synchronize(index_file: Path, workspace_root: Path, release_version: str, *,
                 version = patch_version(previous) if changed else previous
             if Path(package["path"]).parts[0] == "mn-python-sdk":
                 # Runtime catalog defaults derive component pins from SDK identity.
-                version, fingerprint = sdk_version, sdk_hash
+                version = max((str(project.get("version") or sdk_version), sdk_version), key=numeric_version_key)
+                fingerprint = sdk_hash
+            fingerprints[name] = fingerprint
+        versions[name] = version
+
+    versions = compatible_versions(packages, projects, versions, independent=independent)
+    updates: dict[Path, str] = {}
+    rendered: list[str] = []
+    position = 0
+    for package, block_match in zip(packages, blocks, strict=True):
+        name = canonicalize_name(package["name"])
+        version = versions[name]
+        project = projects[name]
+        pyproject = workspace_root / str(package["path"]) / "pyproject.toml"
+        rendered.append(source[position : block_match.start()])
+        block = block_match.group(0)
+        if independent:
+            fingerprint = fingerprints[name]
             if 'source_hash = ' in block:
                 block = re.sub(r'(?m)^source_hash = "[^"]*"$', f'source_hash = "{fingerprint}"', block)
             else:
@@ -224,10 +339,18 @@ def main() -> None:
     parser.add_argument("--independent", action="store_true")
     parser.add_argument("--baseline", default="")
     parser.add_argument("--verify-source", action="store_true")
+    parser.add_argument("--verify-dependencies", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     if args.verify_source:
         verify_sources(args.index_file, args.workspace_root)
+    if args.verify_dependencies:
+        try:
+            verify_dependencies(args.index_file, args.workspace_root)
+        except SystemExit as exc:
+            print(exc, file=sys.stderr)
+            raise SystemExit(65) from exc  # Invalid frozen release data, not a retryable publishing failure.
+    if args.verify_source or args.verify_dependencies:
         return
     print(
         synchronize(

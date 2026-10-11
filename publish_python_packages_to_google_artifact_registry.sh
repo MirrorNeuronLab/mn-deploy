@@ -235,7 +235,7 @@ PY
 sort -u "$INDEXED_NAMES" -o "$INDEXED_NAMES"
 
 "$PYTHON_BIN" "${SCRIPT_DIR}/scripts/prepare-python-package-index.py" \
-    "$INDEX_FILE" "$WORKSPACE_ROOT" unused --verify-source
+    "$INDEX_FILE" "$WORKSPACE_ROOT" unused --verify-source --verify-dependencies
 
 echo "Building indexed Python packages from $INDEX_FILE."
 rm -rf "$DIST_DIR" "$LOCAL_INDEX_DIR"
