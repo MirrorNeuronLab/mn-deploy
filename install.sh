@@ -757,22 +757,173 @@ function mn_prepare_installer_paths() {
     export UV_PYTHON_BIN_DIR="$INSTALL_DIR/bin"
 }
 
+function mn_shell_quote() {
+    local value="$1" syntax="${2:-posix}" character
+    case "$value" in
+        ''|*[!a-zA-Z0-9_./-]*)
+            printf "'"
+            while [ -n "$value" ]; do
+                character="${value:0:1}"
+                value="${value:1}"
+                if [ "$syntax" = "fish" ] && { [ "$character" = "\\" ] || [ "$character" = "'" ]; }; then
+                    printf '\\%s' "$character"
+                elif [ "$character" = "'" ]; then
+                    printf '%s' "'\\''"
+                else
+                    printf '%s' "$character"
+                fi
+            done
+            printf "'"
+            ;;
+        *) printf '%s' "$value" ;;
+    esac
+}
+
+function mn_shell_environment_content() {
+    local runtime_home="$1" syntax="$2" destination="$3" home_value
+    home_value="$(mn_shell_quote "$runtime_home" "$syntax")"
+    if [ "$destination" = "profile" ] && [ "$runtime_home" = "$HOME/.mn" ]; then
+        home_value='"$HOME/.mn"'
+    fi
+    if [ "$syntax" = "fish" ]; then
+        printf 'set -gx MN_HOME %s\n' "$home_value"
+        cat <<'EOF'
+if not contains -- "$MN_HOME/bin" $PATH
+    set -gx PATH "$MN_HOME/bin" $PATH
+end
+EOF
+    else
+        printf 'export MN_HOME=%s\n' "$home_value"
+        cat <<'EOF'
+case ":${PATH:-}:" in
+    *":$MN_HOME/bin:"*) ;;
+    *) export PATH="$MN_HOME/bin:$PATH" ;;
+esac
+EOF
+    fi
+}
+
+# Resolve the login shell, not Bash running this script (including curl | bash).
+function mn_login_shell() {
+    local login_shell="${SHELL:-}" user_name
+    if [ -z "$login_shell" ]; then
+        user_name="$(id -un)"
+        if command -v getent >/dev/null 2>&1; then
+            login_shell="$(getent passwd "$user_name" 2>/dev/null | awk -F: 'NR == 1 {print $7}' || true)"
+        elif command -v dscl >/dev/null 2>&1; then
+            login_shell="$(dscl . -read "/Users/$user_name" UserShell 2>/dev/null | awk 'NR == 1 {print $2}' || true)"
+        fi
+        if [ -z "$login_shell" ] && [ -r /etc/passwd ]; then
+            login_shell="$(awk -F: -v user="$user_name" '$1 == user {print $7; exit}' /etc/passwd || true)"
+        fi
+    fi
+    printf '%s' "${login_shell##*/}"
+}
+
+# Replace only our marked block. Preserve dotfile symlinks and permissions, and
+# publish the complete file atomically without running any user startup code.
+function mn_update_shell_profile() (
+    local profile="$1" runtime_home="$2" syntax="$3" target hops=0 temporary=""
+    while [ -L "$profile" ]; do
+        hops=$((hops + 1))
+        [ "$hops" -le 40 ] || return 1
+        target="$(readlink "$profile")" || return 1
+        case "$target" in
+            /*) profile="$target" ;;
+            *) profile="$(dirname "$profile")/$target" ;;
+        esac
+    done
+    if [ -e "$profile" ]; then
+        [ -f "$profile" ] && [ -r "$profile" ] && [ -w "$profile" ] || return 1
+    fi
+    mkdir -p "$(dirname "$profile")" || return 1
+    temporary="$(mktemp "${profile}.mn.XXXXXX")" || return 1
+    trap 'rm -f "$temporary"' EXIT
+    if [ -f "$profile" ]; then
+        cp -p "$profile" "$temporary" || return 1
+        awk '
+            $0 == "# >>> MirrorNeuron shell environment >>>" { managed = 1; next }
+            $0 == "# <<< MirrorNeuron shell environment <<<" { managed = 0; next }
+            managed { next }
+            # Older installers wrote this heading and two adjacent exports.
+            $0 == "# MN and OTTERDESK" { legacy = 1; next }
+            legacy && /^export (MN_HOME=|PATH="\$MN_HOME\/bin:\$PATH"$)/ { next }
+            { legacy = 0; print }
+            END { if (managed) exit 1 }
+        ' "$profile" > "$temporary" || return 1
+    fi
+    {
+        printf '# >>> MirrorNeuron shell environment >>>\n'
+        mn_shell_environment_content "$runtime_home" "$syntax" profile
+        printf '# <<< MirrorNeuron shell environment <<<\n'
+    } >> "$temporary" || return 1
+    # Leave an unchanged profile (including its inode) alone on reinstall.
+    if [ -f "$profile" ] && cmp -s "$profile" "$temporary"; then return 0; fi
+    mv -f "$temporary" "$profile" || return 1
+)
+
 function mn_write_shell_environment() {
-    local env_file="$INSTALL_DIR/env"
+    local runtime_home login_shell syntax="posix" profile login_profile updated="Y"
+    local -a profiles=()
     mkdir -p "$INSTALL_DIR"
-    printf 'export MN_HOME=%q\n' "$INSTALL_DIR" > "$env_file"
-    printf 'export PATH="$MN_HOME/bin:$PATH"\n' >> "$env_file"
-    export PATH="$BIN_DIR:$PATH"
+    runtime_home="$(cd "$INSTALL_DIR" && pwd)"
+    mn_shell_environment_content "$runtime_home" posix env > "$INSTALL_DIR/env"
+    export MN_HOME="$runtime_home"
+    case ":$PATH:" in
+        *":$runtime_home/bin:"*) ;;
+        *) export PATH="$runtime_home/bin:$PATH" ;;
+    esac
     MN_SHELL_PROFILE_RELOAD_REQUIRED="Y"
-    MN_SHELL_PROFILE_PATH="$env_file"
-    print_warning "Load the commands with: source $(shell_escape_value "$env_file")"
+    MN_SHELL_PROFILE_PATH="$runtime_home/env"
+    MN_SHELL_PROFILE_SYNTAX="posix"
+    MN_SHELL_PROFILE_SOURCE_COMMAND="."
+    login_shell="$(mn_login_shell)"
+    case "$login_shell" in
+        bash)
+            # Bash reads only the first existing login file, plus .bashrc for
+            # non-login terminals. Do not create .bash_profile over .profile.
+            login_profile="$HOME/.bash_profile"
+            for profile in "$HOME/.bash_profile" "$HOME/.bash_login" "$HOME/.profile"; do
+                if [ -e "$profile" ] || [ -L "$profile" ]; then login_profile="$profile"; break; fi
+            done
+            profiles=("$HOME/.bashrc" "$login_profile")
+            MN_SHELL_PROFILE_SOURCE_COMMAND="source"
+            ;;
+        zsh)
+            profiles=("${ZDOTDIR:-$HOME}/.zshrc" "${ZDOTDIR:-$HOME}/.zprofile")
+            MN_SHELL_PROFILE_SOURCE_COMMAND="source"
+            ;;
+        fish)
+            syntax="fish"
+            MN_SHELL_PROFILE_SYNTAX="fish"
+            profiles=("${XDG_CONFIG_HOME:-$HOME/.config}/fish/conf.d/mirrorneuron.fish")
+            mn_shell_environment_content "$runtime_home" fish env > "$INSTALL_DIR/env.fish"
+            MN_SHELL_PROFILE_PATH="$runtime_home/env.fish"
+            MN_SHELL_PROFILE_SOURCE_COMMAND="source"
+            ;;
+        sh|dash|ash|ksh|ksh93) profiles=("$HOME/.profile") ;;
+        *)
+            print_warning "Could not configure startup for shell '${login_shell:-unknown}'. Add MN_HOME and its bin directory to your shell profile."
+            updated="N"
+            ;;
+    esac
+    for profile in ${profiles[@]+"${profiles[@]}"}; do
+        if ! mn_update_shell_profile "$profile" "$runtime_home" "$syntax"; then
+            print_warning "Could not update shell profile: $profile. Check its permissions and rerun the installer."
+            updated="N"
+        fi
+    done
+    if [ "$updated" = "Y" ]; then
+        print_success "Shell startup configured. Open a new terminal to use mn directly."
+    fi
+    printf 'For this terminal: %s %s\n' "$MN_SHELL_PROFILE_SOURCE_COMMAND" "$(mn_shell_quote "$MN_SHELL_PROFILE_PATH" "$syntax")" >&3
 }
 
 function mn_print_next_shell_command() {
     local command_text="$1"
 
     if [ "${MN_SHELL_PROFILE_RELOAD_REQUIRED:-N}" = "Y" ]; then
-        printf 'Next: source %q && %s\n' "$MN_SHELL_PROFILE_PATH" "$command_text" >&3
+        printf 'Next: %s %s && %s\n' "${MN_SHELL_PROFILE_SOURCE_COMMAND:-source}" "$(mn_shell_quote "$MN_SHELL_PROFILE_PATH" "${MN_SHELL_PROFILE_SYNTAX:-posix}")" "$command_text" >&3
     else
         printf 'Next: %s\n' "$command_text" >&3
     fi

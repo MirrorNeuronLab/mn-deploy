@@ -50,9 +50,22 @@ this tree. Existing tools under `~/.local` are left untouched; installation
 creates the new environment instead of moving a virtual environment with stale
 absolute paths. Explicit tool-directory overrides remain supported.
 
-The installer writes shell setup to `~/.mn/env` without editing shell profiles.
-Run `source ~/.mn/env` to use the commands in your current terminal. You can add
-that command to your shell profile yourself for future terminals.
+All install modes automatically add `MN_HOME` and `MN_HOME/bin` to shell startup,
+so a new terminal can run `mn` directly. Bash setup covers `.bashrc` and the first
+existing login file (`.bash_profile`, `.bash_login`, or `.profile`); a new home
+gets `.bash_profile`. Zsh setup covers `.zshrc` and `.zprofile` under `ZDOTDIR`
+when exported, otherwise under `HOME`. Fish uses
+`${XDG_CONFIG_HOME:-$HOME/.config}/fish/conf.d/mirrorneuron.fish`. POSIX login
+shells (sh, dash, ash, ksh) use `.profile`. The installer uses `SHELL`, or the
+account's login shell when `SHELL` is absent, rather than the Bash process
+running `curl | bash`.
+
+Setup replaces one marked block on reinstall, preserves other profile content,
+symlinks, and permissions, and avoids duplicate PATH entries. A custom `MN_HOME`
+is retained. Unsupported shells or unwritable profiles produce an actionable
+warning. For an already-open terminal, run the printed one-time reload command:
+`source ~/.mn/env` for Bash/Zsh, `. ~/.mn/env` for POSIX shells, or
+`source ~/.mn/env.fish` for Fish. Subsequent terminals load the setup automatically.
 
 OpenShell runs through the managed containers in every install mode; the
 installer does not run the upstream host package installer.
@@ -225,7 +238,8 @@ Run its isolated Git regression test with:
   upgrade checks, and crash reporting are disabled; configured LAN or VPN peer
   addresses continue to work.
 - In binary mode, the `mn` and `mn-api` commands are linked under `~/.mn/bin`.
-  Run `source ~/.mn/env` to add that directory to your current shell.
+  Shell startup adds that directory automatically. Open a new terminal, or use
+  the installer's printed reload command in your current terminal.
 - Redis defaults to the Docker Official Image `redis:8`, which includes Redis
   Query Engine support for vector search. Set `MN_REDIS_IMAGE` before install
   or in `~/.mn/docker-compose.env` to pin a specific Redis 8+ tag or digest.

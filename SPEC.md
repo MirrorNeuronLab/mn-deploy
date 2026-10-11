@@ -71,8 +71,15 @@ restores the previous virtual environment.
 
 Runtime state and generated configuration live below the configured
 `MN_HOME` (documented default `~/.mn`), including private Python tools,
-commands, downloads, caches, and generated OpenShell configuration. Shell setup
-is written to `MN_HOME/env`; the installer does not edit shell profiles. Ordinary
+commands, downloads, caches, and generated OpenShell configuration. All modes
+write `MN_HOME/env` and automatically maintain a marked shell startup block for
+the login shell: Bash interactive and selected login profiles, Zsh interactive
+and login profiles (honoring exported `ZDOTDIR`), Fish `conf.d` (honoring
+`XDG_CONFIG_HOME`), or `.profile` for POSIX login shells. Fish also gets
+`MN_HOME/env.fish`. New terminals can run `mn` directly; existing terminals get
+a shell-appropriate one-time reload command. Reinstall preserves unrelated
+profile content, symlinks and permissions and does not duplicate PATH entries.
+Unsupported shells and profile-write failures are reported explicitly. Ordinary
 reinstall preserves durable state in place rather than copying and deleting it. Generated Compose environment belongs in installed state, not in
 this checkout. Binary and GitHub installs default `MN_ENV` to `prod` and
 disable local skill sources; local source installs enable them explicitly. An
