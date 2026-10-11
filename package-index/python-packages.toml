@@ -5,91 +5,91 @@
 name = "mn-python-sdk-common"
 path = "mn-python-sdk/packages/common"
 publish_group = "runtime"
-version = "1.3.58"
+version = "1.3.59"
 installer_groups = ["sdk"]
 binary_default = true
-source_hash = "v2:915eae90b27d6bcc4f7e141cb1bb2a59fa9e6a096bc595737f30bd9adc931f3a"
+source_hash = "v2:3ca6f3ddb5cabfde266416ffbac1f5fa71ba3cf21a0e6fd1742dd1b437487be4"
 
 [[packages]]
 name = "mn-python-sdk-web-ui"
 path = "mn-python-sdk/packages/web-ui"
 publish_group = "runtime"
-version = "1.3.58"
+version = "1.3.59"
 installer_groups = ["sdk"]
 binary_default = true
-source_hash = "v2:915eae90b27d6bcc4f7e141cb1bb2a59fa9e6a096bc595737f30bd9adc931f3a"
+source_hash = "v2:3ca6f3ddb5cabfde266416ffbac1f5fa71ba3cf21a0e6fd1742dd1b437487be4"
 
 [[packages]]
 name = "mn-python-sdk-models"
 path = "mn-python-sdk/packages/models"
 publish_group = "runtime"
-version = "1.3.58"
+version = "1.3.59"
 installer_groups = []
 binary_default = false
-source_hash = "v2:915eae90b27d6bcc4f7e141cb1bb2a59fa9e6a096bc595737f30bd9adc931f3a"
+source_hash = "v2:3ca6f3ddb5cabfde266416ffbac1f5fa71ba3cf21a0e6fd1742dd1b437487be4"
 
 [[packages]]
 name = "mn-python-sdk-mcp"
 path = "mn-python-sdk/packages/mcp"
 publish_group = "runtime"
-version = "1.3.58"
+version = "1.3.59"
 installer_groups = []
 binary_default = false
-source_hash = "v2:915eae90b27d6bcc4f7e141cb1bb2a59fa9e6a096bc595737f30bd9adc931f3a"
+source_hash = "v2:3ca6f3ddb5cabfde266416ffbac1f5fa71ba3cf21a0e6fd1742dd1b437487be4"
 
 [[packages]]
 name = "mn-python-sdk-collaboration"
 path = "mn-python-sdk/packages/collaboration"
 publish_group = "runtime"
-version = "1.3.58"
+version = "1.3.59"
 installer_groups = []
 binary_default = false
-source_hash = "v2:915eae90b27d6bcc4f7e141cb1bb2a59fa9e6a096bc595737f30bd9adc931f3a"
+source_hash = "v2:3ca6f3ddb5cabfde266416ffbac1f5fa71ba3cf21a0e6fd1742dd1b437487be4"
 
 [[packages]]
 name = "mn-python-sdk-rag"
 path = "mn-python-sdk/packages/rag"
 publish_group = "runtime"
-version = "1.3.58"
+version = "1.3.59"
 installer_groups = []
 binary_default = false
-source_hash = "v2:915eae90b27d6bcc4f7e141cb1bb2a59fa9e6a096bc595737f30bd9adc931f3a"
+source_hash = "v2:3ca6f3ddb5cabfde266416ffbac1f5fa71ba3cf21a0e6fd1742dd1b437487be4"
 
 [[packages]]
 name = "mn-python-sdk-job-response"
 path = "mn-python-sdk/packages/job-response"
 publish_group = "runtime"
-version = "1.3.58"
+version = "1.3.59"
 installer_groups = []
 binary_default = false
-source_hash = "v2:915eae90b27d6bcc4f7e141cb1bb2a59fa9e6a096bc595737f30bd9adc931f3a"
+source_hash = "v2:3ca6f3ddb5cabfde266416ffbac1f5fa71ba3cf21a0e6fd1742dd1b437487be4"
 
 [[packages]]
 name = "mirrorneuron-python-sdk"
 path = "mn-python-sdk"
 publish_group = "runtime"
-version = "1.3.58"
+version = "1.3.59"
 installer_groups = ["sdk"]
 binary_default = true
-source_hash = "v2:915eae90b27d6bcc4f7e141cb1bb2a59fa9e6a096bc595737f30bd9adc931f3a"
+source_hash = "v2:3ca6f3ddb5cabfde266416ffbac1f5fa71ba3cf21a0e6fd1742dd1b437487be4"
 
 [[packages]]
 name = "mirrorneuron-cli"
 path = "mn-cli"
 publish_group = "runtime"
-version = "1.3.53"
+version = "1.3.54"
 installer_groups = ["cli"]
 binary_default = true
-source_hash = "v2:0e1c640f39e7a23b937d1e0009172db313e30b28f43b1af41653679449b71b94"
+source_hash = "v2:dc5a7a9b47a4016e17144c72bc99864441a8b6bd09ba918e1c077f6e34df4295"
 
 [[packages]]
 name = "mirrorneuron-api"
 path = "mn-api"
 publish_group = "runtime"
-version = "1.3.53"
+version = "1.3.54"
 installer_groups = ["api"]
 binary_default = true
-source_hash = "v2:7dc01762e8dd2b5faf057c5b10fe5340e3df4f16eb3781b26c4ff085efb6e2c9"
+source_hash = "v2:3cfe4821df18d3738b734b90437584f65c8c2d55b9bc76950d589832e7690031"
 
 [[packages]]
 name = "mirrorneuron-membrane-python-sdk"
