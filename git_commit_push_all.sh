@@ -134,20 +134,24 @@ for dir in "$TARGET_DIR"/*/; do
             validate_repo_before_commit
 
             if [[ -z $(git status --porcelain) ]]; then
-                echo "No changes after validation cleanup, skipping."
-                cd "$TARGET_DIR"
-                continue
+                echo "No changes after validation cleanup."
+            else
+                echo "Changes detected. Committing..."
+                git add .
+                git commit -m "$COMMIT_MSG"
             fi
+        else
+            echo "No uncommitted changes."
+        fi
 
-            echo "Changes detected. Committing..."
-
-            git add .
-            git commit -m "$COMMIT_MSG"
-
+        # A clean worktree may already contain local commits. The preceding
+        # sync guarantees a fast-forward relationship; a normal push also
+        # rejects concurrent remote changes rather than rewriting history.
+        if [[ $(git rev-parse HEAD) != $(git rev-parse "refs/remotes/origin/$BRANCH") ]]; then
             echo "Pushing to origin/$BRANCH..."
             git push origin "$BRANCH"
         else
-            echo "No changes, skipping."
+            echo "Already synchronized with origin/$BRANCH."
         fi
 
         cd "$TARGET_DIR"

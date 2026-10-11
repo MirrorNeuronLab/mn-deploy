@@ -142,6 +142,9 @@ replaces it. Failures identify the failed component and a recovery action.
   the local branch can fast-forward, and a verified recovery stash protects the
   operation. Unique, untracked, or divergent work must remain untouched and
   produce an actionable error.
+- The bulk commit/push helper publishes existing local commits even when the
+  working tree is clean. Remote updates are fast-forwarded before local work
+  is committed; pushes never force-update remote history.
 
 ## Portability and Output
 

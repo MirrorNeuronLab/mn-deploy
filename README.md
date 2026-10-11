@@ -175,6 +175,9 @@ Commit and push changes across sibling development repositories:
 ```
 
 The bulk helper fetches the current branch and all remote tags before updating.
+It commits uncommitted changes and pushes unpublished commits, including when
+the working tree is already clean. Pushes use fast-forward history; divergent
+branches stop for explicit reconciliation.
 If a checkout contains uncommitted tracked files that are already
 byte-identical to the fetched remote tip, it uses a recovery stash,
 fast-forwards, verifies the trees match, and removes the redundant stash. It
