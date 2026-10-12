@@ -80,7 +80,7 @@ publish_group = "runtime"
 version = "1.3.54"
 installer_groups = ["cli"]
 binary_default = true
-source_hash = "v2:dc5a7a9b47a4016e17144c72bc99864441a8b6bd09ba918e1c077f6e34df4295"
+source_hash = "v2:2cd8f2ebab0c17f4c1b6aa37091e5a585e51543a427e695157dacf9bb9d89b48"
 
 [[packages]]
 name = "mirrorneuron-api"

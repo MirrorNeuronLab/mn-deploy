@@ -192,3 +192,18 @@ runtime.
     c552a8e30acaa4a73e0eb6b95d49ca95894466cf517fb1d932d28defe55a2138
 - Package version, dependency requirements, and installer pins are unchanged.
   Existing installations require a forced reinstall to receive the replacement.
+
+## mirrorneuron-cli 1.3.54 replacement -- 2026-10-11
+
+- GAR Python: replaced only the mirrorneuron-cli==1.3.54 wheel and source
+  archive in mirrorneuron-public-packages/us-central1/agent-skills.
+- API-only sidecar restart preserves the Docker Compose Web UI endpoint in
+  runtime-endpoints.json, keeping registered Job UIs on the existing iframe proxy.
+- Source commit: 5d05f3220c36f9364a7ef62db779914501583102 in mn-cli.
+- Verified GAR checksums and fresh public downloads for both artifacts:
+  - mirrorneuron_cli-1.3.54-py3-none-any.whl:
+    da4d2408d6b349c62ea833dee20a4ecd28079b71da6f012923c726deb9b8459f
+  - mirrorneuron_cli-1.3.54.tar.gz:
+    583b1f904d2a4512010e2ef2b13afa93ea890cf2db5ac11cdb30ef853b6f8fd2
+- Package version, dependency requirements, and installer pins are unchanged.
+  Existing installations require a forced reinstall to receive the replacement.
