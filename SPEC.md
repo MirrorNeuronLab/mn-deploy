@@ -312,3 +312,22 @@ a new immutable install-support snapshot.
 Include the existing code-search and BEAM-analysis skill packages in the optional
 skill inventory; neither becomes a binary default or an automatically enabled
 runtime capability.
+
+## Catalog-declared Docker Model Runner preparation
+
+The Python SDK owns native DMR customization through catalog `preparation`
+recipes. Normal model installation and first use prepare/reuse the pinned
+runner/backend bundle on the selected owner and automatically select its control
+and gateway endpoints. Backend setup is not duplicated in the installer.
+`scripts/build-prism-dmr.py` delegates to `prepare_dmr_model` for an optional
+backend-cache warmup; it starts the controller without downloading weights.
+The installed SDK and catalog are the recipe source of truth.
+
+Initial preparation requires Git, Go 1.25.8+ and a C toolchain. Bundles, models,
+logs and private runner state reside under `MN_HOME/model-runners`; the SDK uses
+pinned sources, safe archive extraction, atomic build publication and an owned
+HTTP policy. It keeps Docker Desktop's runner and historical support snapshots
+intact. The owner gateway receives generated authentication through an SDK
+Compose override and private env file; operators need no global endpoint exports.
+SDK offline preparation/lifecycle tests and the deploy adapter contract cover
+this boundary. Live Metal/Windows/Linux model inference remains an opt-in check.

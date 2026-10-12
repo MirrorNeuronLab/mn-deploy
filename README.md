@@ -572,3 +572,13 @@ The unreleased skill inventory uses `mirrorneuron-docs-to-markdown-skill` for
 complete document conversion, embedded PDF extraction and lazy OCR. Separate
 document-reading, PDF-extraction and OCR packages are removed from the current
 inventory. Install-support snapshots remain historical release records.
+
+## Prism-backed DMR for Bonsai2 (unreleased)
+
+Model installation and first use execute the SDK-owned catalog `preparation`
+recipe automatically. It builds/caches a native DMR with Prism backend assets,
+starts an owned controller and wires per-model endpoints. Go 1.25.8+, Git,
+Python 3.11+ and a C toolchain are initial-build prerequisites.
+`scripts/build-prism-dmr.py` is a thin SDK adapter for warming that backend cache
+without pulling weights; it starts the controller. See [catalog DMR preparation](../mn-docs/model-runtime.md#bonsai2-on-docker-model-runner)
+for verification and lifecycle details.
