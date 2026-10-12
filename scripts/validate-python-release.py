@@ -11,7 +11,7 @@ from packaging.utils import canonicalize_name
 from packaging.version import Version
 
 
-def validate(index: Path, wheel_dir: Path) -> None:
+def validate(index: Path, wheel_dir: Path, *, required_names: set[str] | None = None) -> None:
     versions = {
         canonicalize_name(p['name']): Version(p['version'])
         for p in tomllib.loads(index.read_text())['packages']
@@ -35,7 +35,8 @@ def validate(index: Path, wheel_dir: Path) -> None:
             dependency = canonicalize_name(requirement.name)
             if dependency in versions and (requirement.url or versions[dependency] not in requirement.specifier):
                 errors.append(f'{name} requires {raw}; release selects {dependency}=={versions[dependency]}')
-    errors += [f'Missing indexed wheel: {name}' for name in sorted(versions.keys() - seen)]
+    required = versions.keys() if required_names is None else {canonicalize_name(name) for name in required_names}
+    errors += [f'Missing indexed wheel: {name}' for name in sorted(required - seen)]
     if errors:
         raise SystemExit('Incompatible Python release:\n' + '\n'.join(errors))
 

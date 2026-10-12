@@ -17,6 +17,12 @@ def canonical(name: str) -> str:
 def next_release(workspace: Path, repositories: list[str]) -> str:
     versions = set()
     changed = False
+    # Component repairs create new immutable support snapshots while retaining
+    # the installer tag. A future full release must not reuse those versions.
+    if "mn-deploy" in repositories:
+        versions.update(tuple(map(int, path.name[1:].split('.')))
+                        for path in (workspace / 'mn-deploy/install_support').glob('v*')
+                        if re.fullmatch(r'v\d+\.\d+\.\d+', path.name))
     for name in repositories:
         repo = workspace / name
         tags = subprocess.check_output(["git", "-C", str(repo), "tag"], text=True).splitlines()

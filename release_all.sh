@@ -394,7 +394,7 @@ update_installer_pins() {
   local setting version package_versions
   for setting in MN_DEFAULT_CORE_VERSION MN_DEFAULT_WEB_UI_VERSION \
     MN_DEFAULT_AGENT_PACKAGE_INDEX_VERSION MN_DEFAULT_MEMBRANE_CONTEXT_ENGINE_VERSION \
-    MN_DEFAULT_INSTALL_VERSION; do
+    MN_DEFAULT_INSTALL_VERSION MN_DEFAULT_INSTALL_SUPPORT_VERSION; do
     set_installer_default_version "$setting" "$TAG"
   done
   package_versions="$("$PUBLISH_PYTHON" - "${SCRIPT_DIR}/package-index/python-packages.toml" <<'PYTHON'

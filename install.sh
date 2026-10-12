@@ -86,6 +86,8 @@ MN_MEMBRANE_BUILD_PREPARED="N"
 # The installer release has its own tag. It selects the versioned support
 # snapshot while the component pins above select each published artifact.
 MN_DEFAULT_INSTALL_VERSION="${MN_DEFAULT_INSTALL_VERSION:-v1.3.60}"
+# Support snapshots can advance independently when repairing component packages.
+MN_DEFAULT_INSTALL_SUPPORT_VERSION="${MN_DEFAULT_INSTALL_SUPPORT_VERSION:-v1.3.60}"
 MN_INSTALL_VERSION="${MN_INSTALL_VERSION:-}"
 MN_INSTALL_SCRIPT_NAME="$(basename "$0")"
 MN_INSTALL_ARGS=()
@@ -435,8 +437,12 @@ function mn_run_uv_installer() {
 
 function mn_install_support_asset_path() {
     local relative_path="$1"
-    if [ -n "${MN_INSTALL_VERSION:-}" ]; then
-        printf 'install_support/%s/%s' "$MN_INSTALL_VERSION" "$relative_path"
+    local support_version="${MN_INSTALL_SUPPORT_VERSION:-${MN_INSTALL_VERSION:-}}"
+    if [ "$relative_path" = "package-index/python-packages.toml" ]; then
+        support_version="${PACKAGE_INDEX_VERSION:-$support_version}"
+    fi
+    if [ -n "$support_version" ]; then
+        printf 'install_support/%s/%s' "$support_version" "$relative_path"
     else
         printf '%s' "$relative_path"
     fi
@@ -5975,6 +5981,7 @@ function finalize_binary_install_version() {
         API_INSTALL_VERSION="${API_INSTALL_VERSION:-$DEFAULT_API_INSTALL_VERSION}"
         WEB_UI_INSTALL_VERSION="${WEB_UI_INSTALL_VERSION:-$DEFAULT_WEB_UI_INSTALL_VERSION}"
         PACKAGE_INDEX_VERSION="${PACKAGE_INDEX_VERSION:-$MN_DEFAULT_AGENT_PACKAGE_INDEX_VERSION}"
+        MN_INSTALL_SUPPORT_VERSION="${MN_INSTALL_SUPPORT_VERSION:-$MN_DEFAULT_INSTALL_SUPPORT_VERSION}"
     else
         CORE_INSTALL_VERSION="${CORE_INSTALL_VERSION:-$INSTALL_VERSION}"
         PYTHON_SDK_INSTALL_VERSION="${PYTHON_SDK_INSTALL_VERSION:-$INSTALL_VERSION}"
@@ -5982,6 +5989,7 @@ function finalize_binary_install_version() {
         API_INSTALL_VERSION="${API_INSTALL_VERSION:-$INSTALL_VERSION}"
         WEB_UI_INSTALL_VERSION="${WEB_UI_INSTALL_VERSION:-$INSTALL_VERSION}"
         PACKAGE_INDEX_VERSION="${PACKAGE_INDEX_VERSION:-$INSTALL_VERSION}"
+        MN_INSTALL_SUPPORT_VERSION="${MN_INSTALL_SUPPORT_VERSION:-$INSTALL_VERSION}"
     fi
     mn_validate_version_tag_or_exit "$CORE_INSTALL_VERSION"
     mn_validate_version_tag_or_exit "$PYTHON_SDK_INSTALL_VERSION"
@@ -5989,6 +5997,7 @@ function finalize_binary_install_version() {
     mn_validate_version_tag_or_exit "$API_INSTALL_VERSION"
     mn_validate_version_tag_or_exit "$WEB_UI_INSTALL_VERSION"
     mn_validate_version_tag_or_exit "$PACKAGE_INDEX_VERSION"
+    mn_validate_version_tag_or_exit "$MN_INSTALL_SUPPORT_VERSION"
     MN_INSTALL_VERSION="$INSTALL_VERSION"
     CORE_RELEASE_TAG="$CORE_INSTALL_VERSION"
     MN_PYTHON_SDK_PACKAGE_VERSION="$(mn_package_version_from_tag "$PYTHON_SDK_INSTALL_VERSION")"
@@ -5996,7 +6005,7 @@ function finalize_binary_install_version() {
     MN_API_PACKAGE_VERSION="$(mn_package_version_from_tag "$API_INSTALL_VERSION")"
     MN_PACKAGE_VERSION="$MN_PYTHON_SDK_PACKAGE_VERSION"
     MN_WEB_UI_PACKAGE_VERSION="${MN_WEB_UI_PACKAGE_VERSION:-$(mn_web_ui_package_version_from_tag "$WEB_UI_INSTALL_VERSION")}"
-    RUNTIME_COMPOSE_TEMPLATE="${RUNTIME_COMPOSE_TEMPLATE:-${SCRIPT_DIR}/install_support/${INSTALL_VERSION}/docker-compose.yml}"
+    RUNTIME_COMPOSE_TEMPLATE="${RUNTIME_COMPOSE_TEMPLATE:-${SCRIPT_DIR}/install_support/${MN_INSTALL_SUPPORT_VERSION}/docker-compose.yml}"
     PACKAGE_INDEX_FILE="${PACKAGE_INDEX_FILE:-${SCRIPT_DIR}/install_support/${PACKAGE_INDEX_VERSION}/package-index/python-packages.toml}"
     export MN_INSTALL_VERSION
 }

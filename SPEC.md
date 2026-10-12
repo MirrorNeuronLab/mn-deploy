@@ -125,6 +125,19 @@ replaces it. Failures identify the failed component and a recovery action.
 
 ## Safety and Security
 
+`scripts/update-changed-components.sh` is an explicit component repair flow.
+Its default local preview is read-only. Apply advances changed Python/npm
+versions, keeps Core and the aggregate installer version fixed, and repairs
+changed Docker images under their current tags in a mutable-tag repository.
+It validates compatible Python pins and built wheels, verifies GAR publication,
+then writes reviewed component metadata and a new immutable support snapshot.
+Support and package-index defaults advance independently of the installer/Core
+version; URL downloads honor those respective pins. Historical explicit
+installer versions continue selecting their historical support and inventory.
+No package deletion, Git tag replacement, commit/push or installed-runtime
+mutation is part of this helper. Source repositories must be clean for apply.
+Full automatic releases skip version numbers already used by support snapshots.
+
 - Installation, removal, service control, state clearing, registry setup, and
   publishing are state-changing operations and require explicit invocation.
 - Destructive targets must be resolved to known installed roots before removal.
@@ -323,11 +336,29 @@ and gateway endpoints. Backend setup is not duplicated in the installer.
 backend-cache warmup; it starts the controller without downloading weights.
 The installed SDK and catalog are the recipe source of truth.
 
-Initial preparation requires Git, Go 1.25.8+ and a C toolchain. Bundles, models,
+Normal preparation downloads checksum-pinned native runners from public GAR;
+users need no Go, Git, compiler or Google Cloud credentials. Bundles, models,
 logs and private runner state reside under `MN_HOME/model-runners`; the SDK uses
-pinned sources, safe archive extraction, atomic build publication and an owned
+pinned artifacts, safe archive extraction, atomic bundle publication and an owned
 HTTP policy. It keeps Docker Desktop's runner and historical support snapshots
 intact. The owner gateway receives generated authentication through an SDK
 Compose override and private env file; operators need no global endpoint exports.
 SDK offline preparation/lifecycle tests and the deploy adapter contract cover
 this boundary. Live Metal/Windows/Linux model inference remains an opt-in check.
+
+`scripts/publish-prepared-dmr.py --output <empty-directory>` builds the catalog's
+native runner platforms from its full source revision and SDK-owned patches.
+Only release builders need Git and Go 1.25.8+. Archives contain the executable,
+upstream license and source/policy/build provenance. Add `--apply` to publish
+them to the existing public `mirrorneuron-binaries` generic repository as the
+immutable `managed-dmr:<source-prefix>-policy<SDK-policy>` version. The generated
+`runner-assets.json` is the catalog's runner definition. Publish and verify
+anonymous downloads before shipping its URLs and checksums in the SDK catalog.
+
+The prepared Spark Prism backend is an independent native archive, pinned to
+`adfffbe41b2cabcd51fff326ab045662265062bb` and published under
+`prism-llama-backend:prism-b10743-adfffbe-cuda13-sm121-arm64-v1`. Its catalog
+backend object requires a public HTTPS URL and SHA-256. It includes CUDA 13
+runtime libraries and license/provenance files; its support boundary is Ubuntu
+24.04 ARM64, GB10/SM 12.1 and NVIDIA driver 580+. Native Metal and native CUDA
+packages preserve hardware acceleration without requiring end-user compilers.

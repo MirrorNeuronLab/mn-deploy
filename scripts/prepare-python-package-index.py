@@ -200,7 +200,7 @@ def verify_dependencies(index_file: Path, workspace_root: Path) -> None:
         raise SystemExit(f"{exc}\nNext: prepare a new release with a new aggregate version; do not resume an incompatible frozen package index.") from exc
 
 
-def synchronize(index_file: Path, workspace_root: Path, release_version: str, *, independent: bool = False, baseline: str = "", dry_run: bool = False) -> str:
+def synchronize(index_file: Path, workspace_root: Path, release_version: str, *, independent: bool = False, baseline: str = "", dry_run: bool = False, write_projects: bool = True) -> str:
     source = index_file.read_text(encoding="utf-8")
     data = tomllib.loads(source)
     packages = data.get("packages") or []
@@ -303,8 +303,9 @@ def synchronize(index_file: Path, workspace_root: Path, release_version: str, *,
         position = block_match.end()
     rendered.append(source[position:])
     if not dry_run:
-        for path, content in updates.items():
-            path.write_text(content, encoding="utf-8")
+        if write_projects:
+            for path, content in updates.items():
+                path.write_text(content, encoding="utf-8")
         index_file.write_text("".join(rendered), encoding="utf-8")
 
     comparable = [

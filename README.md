@@ -214,6 +214,48 @@ Run its isolated Git regression test with:
 - [Docker and OpenShell for Blueprints](../mn-docs/docker_and_openshell_for_blueprints.md)
 - [Security Model](../mn-docs/security.md)
 
+## Publish changed components without advancing the runtime release
+
+```bash
+./scripts/update-changed-components.sh --plan
+./scripts/update-changed-components.sh --apply
+# Limit the update, if needed:
+./scripts/update-changed-components.sh --apply --only python web-ui
+```
+
+This helper keeps `MN_DEFAULT_CORE_VERSION` and `MN_DEFAULT_INSTALL_VERSION`
+unchanged (currently `v1.3.60`). Changed Python projects receive independent
+patch versions using the existing source fingerprints and dependency planner;
+the SDK and its components remain one version group. Changed Web UI source
+receives the next npm patch version. Unchanged packages retain their pins.
+Changed Core and Membrane images are rebuilt from committed HEAD and published
+under their existing numeric/`v` tags. Docker `latest` is updated only with
+`--update-latest`; Docker repositories with immutable tags reject repairs.
+Existing Python/npm versions are never deleted or overwritten.
+
+The default preview uses local Git history and writes no release metadata.
+It reports uncommitted work; commit or stash it before `--apply`. Fetch tags
+yourself if the locally pinned Docker/Web UI release tags are missing.
+Builds use isolated committed sources. Python builds are cached under
+`dist/component-updates/` for identical upload retries, and uploads are verified
+against GAR file hashes. Web UI and Docker publishers verify integrity/digests.
+Requires the same publishing tools as `release_all.sh`; set `MN_PUBLISH_PYTHON`
+or prepare `.venv-gar-publish` with Python 3.11+, packaging, build and twine.
+Use `--help` for registry, platform and component selection options.
+
+After successful publication, the helper updates component defaults, the current
+Python inventory, static Python project versions and the current Compose
+template. It creates a **new** immutable support snapshot and advances only
+`MN_DEFAULT_INSTALL_SUPPORT_VERSION` and
+`MN_DEFAULT_AGENT_PACKAGE_INDEX_VERSION` to that snapshot. The runtime/Core
+release remains unchanged, and old snapshots and Git tags are preserved.
+Review, commit and push these generated source/installer changes so URL installs
+can fetch them. The helper does not commit, push, install or restart a runtime;
+existing installations must reinstall/restart to use the fixes.
+
+GAR npm cannot republish an existing name/version, even after deletion;
+see [Google's npm package contract](https://docs.cloud.google.com/artifact-registry/docs/nodejs/manage-packages).
+
 ## Notes
 
 - Default runtime state is stored under `~/.mn`. The installer also keeps a shell
@@ -576,9 +618,23 @@ inventory. Install-support snapshots remain historical release records.
 ## Prism-backed DMR for Bonsai2 (unreleased)
 
 Model installation and first use execute the SDK-owned catalog `preparation`
-recipe automatically. It builds/caches a native DMR with Prism backend assets,
-starts an owned controller and wires per-model endpoints. Go 1.25.8+, Git,
-Python 3.11+ and a C toolchain are initial-build prerequisites.
+recipe automatically. It downloads/caches a prepared native DMR from public GAR
+with pinned archive checksums and Prism backend assets, starts an owned controller
+and wires per-model endpoints. Users need no Go, Git, compiler or Google Cloud
+credentials; the installed Python SDK handles preparation.
 `scripts/build-prism-dmr.py` is a thin SDK adapter for warming that backend cache
 without pulling weights; it starts the controller. See [catalog DMR preparation](../mn-docs/model-runtime.md#bonsai2-on-docker-model-runner)
 for verification and lifecycle details.
+
+Release builders use `scripts/publish-prepared-dmr.py --output <empty-directory>`
+to compile the pinned runner with the SDK's HTTP, native transport and Prism
+version-parser patches. Add `--apply` to publish the immutable native archives
+to public GAR. The output's `runner-assets.json` supplies catalog URLs and hashes.
+Go and Git are release-build dependencies only.
+
+The Spark ARM64 CUDA backend is published separately as
+`prism-llama-backend:prism-b10743-adfffbe-cuda13-sm121-arm64-v1` in the same generic
+repository. It targets Ubuntu 24.04, GB10/SM 12.1 and driver 580+, and includes
+CUDA 13 runtime libraries, upstream/NVIDIA licenses and build provenance.
+The SDK catalog selects its public URL and SHA-256. macOS selects native Metal;
+a Linux Docker image cannot accelerate inference through Apple Metal.
