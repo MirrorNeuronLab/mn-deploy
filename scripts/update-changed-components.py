@@ -215,6 +215,20 @@ def build_python(workspace, planned, directory):
                                 for p in files}, indent=2) + '\n')
 
 
+def verify_python_artifact(package, artifact, remote):
+    item = remote.get(artifact.name)
+    if item is None:
+        raise RuntimeError(f'GAR content verification failed: {package}/{artifact.name} (file missing).')
+    # gcloud's artifacts files surface formats hash bytes as hexadecimal,
+    # unlike the base64 encoding in the raw Artifact Registry REST response.
+    expected = hashlib.sha256(artifact.read_bytes()).hexdigest()
+    actual = [h.get('value') for h in item.get('hashes', []) if h.get('type') == 'SHA256']
+    if expected not in actual:
+        reported = ', '.join(str(value) for value in actual) if actual else 'unavailable'
+        raise RuntimeError(f'GAR content verification failed: {package}/{artifact.name} '
+                           f'(SHA-256 expected {expected}, reported {reported}).')
+
+
 def publish_python(args, planned, directory):
     from packaging.utils import canonicalize_name, parse_sdist_filename, parse_wheel_filename
     scope = [f'--project={args.project}', f'--location={args.location}', f'--repository={args.python_repository}']
@@ -231,17 +245,16 @@ def publish_python(args, planned, directory):
                                   f'--package={name}', f'--version={package["version"]}', '--format=json', capture=True))
             return {unquote(row['name'].rsplit('/', 1)[-1]).rsplit('/', 1)[-1]: row for row in data}
         remote = remote_files()
+        for path in artifacts:
+            if path.name in remote:
+                verify_python_artifact(name, path, remote)
         missing = [path for path in artifacts if path.name not in remote]
         if missing:
             run(sys.executable, '-m', 'twine', 'upload', '--non-interactive', '--repository-url', url,
                 *missing, env={**os.environ, 'GOOGLE_CLOUD_PROJECT': args.project})
         remote = remote_files()
-        import base64
         for path in artifacts:
-            item = remote.get(path.name)
-            digest = base64.b64encode(hashlib.sha256(path.read_bytes()).digest()).decode()
-            if not item or not any(h['type'] == 'SHA256' and h['value'] == digest for h in item.get('hashes', [])):
-                raise RuntimeError(f'GAR content verification failed: {name}/{path.name}')
+            verify_python_artifact(name, path, remote)
         print(f'✓ Published {name}=={package["version"]}', flush=True)
 
 

@@ -1,6 +1,5 @@
 """Offline component repair contracts; all repositories and registry calls are isolated."""
 import argparse
-import base64
 import hashlib
 import importlib.util
 import json
@@ -170,9 +169,10 @@ def test_python_upload_scope_hash_verification_and_retry(tmp_path, monkeypatch):
     artifacts.mkdir(parents=True)
     wheel = artifacts / 'mirrorneuron_api-1.0.1-py3-none-any.whl'
     wheel.write_bytes(b'validated fixture artifact')
+    sdist = artifacts / 'mirrorneuron_api-1.0.1.tar.gz'
+    sdist.write_bytes(b'validated fixture source distribution')
     calls = []
     remote = []
-    digest = base64.b64encode(hashlib.sha256(wheel.read_bytes()).digest()).decode()
     args = argparse.Namespace(gcloud='fake-gcloud', project='project', location='us-central1', python_repository='python')
     planned = {'packages': [{'name': 'mirrorneuron-api', 'version': '1.0.1'}]}
     def fake_run(*command, **kwargs):
@@ -181,17 +181,47 @@ def test_python_upload_scope_hash_verification_and_retry(tmp_path, monkeypatch):
             assert '--version=1.0.1' in command and '--package=mirrorneuron-api' in command
             return json.dumps(remote)
         assert command[1:4] == ('-m', 'twine', 'upload')
-        assert wheel in command
-        remote.append({'name': 'projects/project/locations/us-central1/repositories/python/files/pkg%2F' + wheel.name,
-                       'hashes': [{'type': 'SHA256', 'value': digest}]})
+        assert wheel in command and sdist in command
+        for artifact in (wheel, sdist):
+            remote.append({'name': 'projects/project/locations/us-central1/repositories/python/files/pkg%2F' + artifact.name,
+                           'hashes': [{'type': 'SHA256', 'value': hashlib.sha256(artifact.read_bytes()).hexdigest()}]})
     monkeypatch.setattr(repair, 'run', fake_run)
     repair.publish_python(args, planned, directory)
     repair.publish_python(args, planned, directory)
     assert sum(c[1:4] == ('-m', 'twine', 'upload') for c in calls) == 1
     assert all('delete' not in c for c in calls)
     remote[0]['hashes'][0]['value'] = 'different-content'
-    with pytest.raises(RuntimeError, match='content verification failed'):
+    with pytest.raises(RuntimeError, match='SHA-256 expected .*reported different-content'):
         repair.publish_python(args, planned, directory)
+
+
+@pytest.mark.parametrize('missing', ['file', 'hash'])
+def test_python_verification_reports_missing_file_or_checksum(tmp_path, missing):
+    artifact = tmp_path / 'fixture.tar.gz'
+    artifact.write_bytes(b'fixture')
+    remote = {} if missing == 'file' else {artifact.name: {'hashes': [{'type': 'MD5', 'value': 'unused'}]}}
+    with pytest.raises(RuntimeError, match='file missing' if missing == 'file' else 'reported unavailable'):
+        repair.verify_python_artifact('fixture', artifact, remote)
+
+
+def test_conflicting_existing_artifact_stops_before_uploading_missing_file(tmp_path, monkeypatch):
+    artifacts = tmp_path / 'python'
+    artifacts.mkdir()
+    wheel = artifacts / 'mirrorneuron_api-1.0.1-py3-none-any.whl'
+    wheel.write_bytes(b'local build')
+    (artifacts / 'mirrorneuron_api-1.0.1.tar.gz').write_bytes(b'missing distribution')
+    args = argparse.Namespace(gcloud='fake-gcloud', project='project', location='us-central1', python_repository='python')
+    planned = {'packages': [{'name': 'mirrorneuron-api', 'version': '1.0.1'}]}
+    calls = []
+    def fake_run(*command, **kwargs):
+        calls.append(command)
+        assert command[1:4] == ('artifacts', 'files', 'list')
+        return json.dumps([{'name': 'pkg%2F' + wheel.name,
+                            'hashes': [{'type': 'SHA256', 'value': '0' * 64}]}])
+    monkeypatch.setattr(repair, 'run', fake_run)
+    with pytest.raises(RuntimeError, match='SHA-256 expected'):
+        repair.publish_python(args, planned, tmp_path)
+    assert len(calls) == 1
 
 
 @pytest.mark.parametrize('kind, repo', [('core', 'MirrorNeuron'), ('membrane', 'Membrane')])
