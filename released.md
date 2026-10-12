@@ -177,3 +177,18 @@ runtime.
 - GAR Docker: mirror-neuron-core and membrane-context-engine each published
   v1.3.60, 1.3.60, and latest (pointing to this release at confirmation).
 - GitHub tag: v1.3.60 across the release repositories.
+
+## mirrorneuron-api 1.3.54 replacement -- 2026-10-11
+
+- GAR Python: replaced only the mirrorneuron-api==1.3.54 wheel and source
+  archive in mirrorneuron-public-packages/us-central1/agent-skills.
+- Job UI discovery now queries the Job owner's service registry for its latest
+  execution. The registered Web UI continues to use the existing iframe proxy.
+- Source commit: 33352ca53e168b3f18e92fb4571ca82ad8d832c2 in mn-api.
+- Verified GAR checksums and fresh public downloads for both artifacts:
+  - mirrorneuron_api-1.3.54-py3-none-any.whl:
+    53f9d7104ce499b6069c8fa145757b7e37599d1c37a6ae6151db807f44e3e56e
+  - mirrorneuron_api-1.3.54.tar.gz:
+    c552a8e30acaa4a73e0eb6b95d49ca95894466cf517fb1d932d28defe55a2138
+- Package version, dependency requirements, and installer pins are unchanged.
+  Existing installations require a forced reinstall to receive the replacement.
