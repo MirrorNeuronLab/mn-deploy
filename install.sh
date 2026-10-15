@@ -66,7 +66,7 @@ MN_DEFAULT_NVIDIA_MODEL_RUNNER_BUILD_VERSION="${MN_DEFAULT_NVIDIA_MODEL_RUNNER_B
 
 # Python toolchain. Leave MN_DEFAULT_UV_VERSION empty to preserve the upstream
 # installer’s current-release behavior; set it to a uv release to pin it.
-MN_DEFAULT_MANAGED_PYTHON_VERSION="${MN_DEFAULT_MANAGED_PYTHON_VERSION:-3.11}"
+MN_DEFAULT_MANAGED_PYTHON_VERSION="${MN_DEFAULT_MANAGED_PYTHON_VERSION:-3.12}"
 MN_MANAGED_PYTHON_VERSION="${MN_MANAGED_PYTHON_VERSION:-$MN_DEFAULT_MANAGED_PYTHON_VERSION}"
 MN_DEFAULT_UV_VERSION="${MN_DEFAULT_UV_VERSION:-}"
 
@@ -123,7 +123,7 @@ Common options:
   --openshell / --no-openshell  Enable or skip OpenShell gateway setup.
   --syncthing / --no-syncthing  Enable or skip Syncthing shared-storage replication.
   --start / --no-start          Start or skip starting MirrorNeuron after install.
-  --python PATH                 Same as MN_PYTHON. Must be Python 3.11.x.
+  --python PATH                 Same as MN_PYTHON. Must match Python ${MN_MANAGED_PYTHON_VERSION}.x.
   --no-managed-python           Do not use uv to install a private Python runtime.
   --python-components LIST      Install only these Python components where supported.
   --core-version TAG            Binary mode: pin the MirrorNeuron core release.
@@ -1816,6 +1816,17 @@ function generate_openshell_jwt_keys() (
     done
 )
 
+# A PATH entry can belong to the runtime venv being replaced. Resolve its base
+# interpreter and symlinks while it still exists; never build from a moved venv.
+function mn_base_python_executable() {
+    "$1" -c 'import os, sys
+base = os.path.realpath(sys._base_executable)
+venv = os.path.realpath(sys.argv[1])
+if not os.path.isabs(base) or not os.access(base, os.X_OK) or os.path.commonpath([base, venv]) == venv:
+    raise SystemExit(1)
+print(base)' "$VENV_DIR"
+}
+
 run_install_github() {
 #!/usr/bin/env bash
 
@@ -2055,7 +2066,7 @@ function python_version() {
 }
 
 function python_is_supported() {
-    "$1" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)' >/dev/null 2>&1
+    "$1" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 12) else 1)' >/dev/null 2>&1
 }
 
 function python_minor_version() {
@@ -2086,7 +2097,7 @@ function managed_python_enabled() {
 
 function validate_managed_python_version() {
     if [[ ! "$MN_MANAGED_PYTHON_VERSION" =~ ^[0-9]+[.][0-9]+$ ]]; then
-        print_error "MN_MANAGED_PYTHON_VERSION must be a Python minor version like 3.11."
+        print_error "MN_MANAGED_PYTHON_VERSION must be a Python minor version like 3.12."
         exit 1
     fi
 }
@@ -2099,7 +2110,7 @@ function install_uv() {
         Darwin|Linux) ;;
         *)
             print_error "Unsupported platform for uv-managed Python: ${os}."
-            print_error "Set MN_PYTHON=/path/to/python3.11 and rerun."
+            print_error "Set MN_PYTHON=/path/to/python${MN_MANAGED_PYTHON_VERSION} and rerun."
             exit 1
             ;;
     esac
@@ -2117,14 +2128,14 @@ function install_uv() {
     if ! curl_github -fsSL "https://astral.sh/uv/install.sh" -o "$installer"; then
         rm -f "$installer"
         print_error "Could not download the uv installer."
-        print_error "Install uv manually or set MN_PYTHON=/path/to/python3.11."
+        print_error "Install uv manually or set MN_PYTHON=/path/to/python${MN_MANAGED_PYTHON_VERSION}."
         exit 1
     fi
 
     if ! mn_run_uv_installer "$installer" "$uv_bin_dir" >/dev/null 2>&1; then
         rm -f "$installer"
         print_error "Could not install uv."
-        print_error "Install uv manually or set MN_PYTHON=/path/to/python3.11."
+        print_error "Install uv manually or set MN_PYTHON=/path/to/python${MN_MANAGED_PYTHON_VERSION}."
         exit 1
     fi
     rm -f "$installer"
@@ -2196,7 +2207,10 @@ function install_managed_python() {
         exit 1
     fi
 
-    MN_PYTHON_BIN="$managed_bin"
+    MN_PYTHON_BIN="$(mn_base_python_executable "$managed_bin")" || {
+        print_error "Could not resolve a stable base Python interpreter from $managed_bin."
+        exit 1
+    }
     print_detail "Using uv-managed Python $(python_version "$managed_bin") at $managed_bin."
 }
 
@@ -2241,7 +2255,10 @@ function resolve_python_runtime() {
             continue
         fi
         if python_is_supported "$resolved" && python_is_selected_minor "$resolved"; then
-            MN_PYTHON_BIN="$resolved"
+            MN_PYTHON_BIN="$(mn_base_python_executable "$resolved")" || {
+                print_error "Could not resolve a stable base Python interpreter from $resolved."
+                exit 1
+            }
             print_detail "Using Python $(python_version "$MN_PYTHON_BIN") at $MN_PYTHON_BIN."
             return
         fi
@@ -2359,7 +2376,7 @@ Options:
   MN_AGENTS_REPO=OWNER/REPO     Agent template catalog repo. Default: MirrorNeuronLab/mn-agents.
   MN_AGENTS_GIT_URL=URL         Full agent template catalog Git URL override.
   MN_AGENTS_REF=REF             Agent template catalog ref. Default: --version or repo default branch.
-  --python PATH                 Same as MN_PYTHON. Must be Python 3.11.x.
+  --python PATH                 Same as MN_PYTHON. Must match Python ${MN_MANAGED_PYTHON_VERSION}.x.
   --no-managed-python           Do not use uv to install a private Python runtime.
   MN_HOME=/path                 Override the runtime state directory. Defaults to ${HOME}/.mn.
   GITHUB_TOKEN/GH_TOKEN         Token for private GitHub repositories. An existing gh auth login is also used.
@@ -2370,7 +2387,7 @@ Examples:
   ./$script_name --mode github --version v1.2.31
   ./$script_name --mode github --interactive
   ./$script_name --mode github --python-components sdk,api
-  MN_PYTHON=/opt/homebrew/bin/python3.11 ./$script_name --mode github
+  MN_PYTHON=/opt/homebrew/bin/python${MN_MANAGED_PYTHON_VERSION} ./$script_name --mode github
 EOF
 }
 
@@ -3824,7 +3841,7 @@ function python_version() {
 }
 
 function python_is_supported() {
-    "$1" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)' >/dev/null 2>&1
+    "$1" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 12) else 1)' >/dev/null 2>&1
 }
 
 function python_minor_version() {
@@ -3853,7 +3870,7 @@ function managed_python_enabled() {
 
 function validate_managed_python_version() {
     if [[ ! "$MN_MANAGED_PYTHON_VERSION" =~ ^[0-9]+[.][0-9]+$ ]]; then
-        print_error "MN_MANAGED_PYTHON_VERSION must be a Python minor version like 3.11."
+        print_error "MN_MANAGED_PYTHON_VERSION must be a Python minor version like 3.12."
         exit 1
     fi
 }
@@ -3866,7 +3883,7 @@ function install_uv() {
         Darwin|Linux) ;;
         *)
             print_error "Unsupported platform for uv-managed Python: ${os}."
-            print_error "Set MN_PYTHON=/path/to/python3.11 and rerun."
+            print_error "Set MN_PYTHON=/path/to/python${MN_MANAGED_PYTHON_VERSION} and rerun."
             exit 1
             ;;
     esac
@@ -3884,14 +3901,14 @@ function install_uv() {
     if ! curl_github -fsSL "https://astral.sh/uv/install.sh" -o "$installer"; then
         rm -f "$installer"
         print_error "Could not download the uv installer."
-        print_error "Install uv manually or set MN_PYTHON=/path/to/python3.11."
+        print_error "Install uv manually or set MN_PYTHON=/path/to/python${MN_MANAGED_PYTHON_VERSION}."
         exit 1
     fi
 
     if ! mn_run_uv_installer "$installer" "$uv_bin_dir" >/dev/null 2>&1; then
         rm -f "$installer"
         print_error "Could not install uv."
-        print_error "Install uv manually or set MN_PYTHON=/path/to/python3.11."
+        print_error "Install uv manually or set MN_PYTHON=/path/to/python${MN_MANAGED_PYTHON_VERSION}."
         exit 1
     fi
     rm -f "$installer"
@@ -3963,7 +3980,10 @@ function install_managed_python() {
         exit 1
     fi
 
-    MN_PYTHON_BIN="$managed_bin"
+    MN_PYTHON_BIN="$(mn_base_python_executable "$managed_bin")" || {
+        print_error "Could not resolve a stable base Python interpreter from $managed_bin."
+        exit 1
+    }
     print_detail "Using uv-managed Python $(python_version "$managed_bin") at $managed_bin."
 }
 
@@ -4008,7 +4028,10 @@ function resolve_python_runtime() {
             continue
         fi
         if python_is_supported "$resolved" && python_is_selected_minor "$resolved"; then
-            MN_PYTHON_BIN="$resolved"
+            MN_PYTHON_BIN="$(mn_base_python_executable "$resolved")" || {
+                print_error "Could not resolve a stable base Python interpreter from $resolved."
+                exit 1
+            }
             print_detail "Using Python $(python_version "$MN_PYTHON_BIN") at $MN_PYTHON_BIN."
             return
         fi
@@ -4057,9 +4080,9 @@ Options:
                         by local runtime packages are still installed locally.
   --start               Start MirrorNeuron after install.
   --no-start            Skip starting MirrorNeuron after install.
-  --python PATH         Same as MN_PYTHON. Must be Python 3.11.x.
+  --python PATH         Same as MN_PYTHON. Must match Python ${MN_MANAGED_PYTHON_VERSION}.x.
   --no-managed-python   Do not use uv to install a private Python runtime.
-  MN_PYTHON=/path       Use a specific Python 3.11.x interpreter.
+  MN_PYTHON=/path       Use a specific Python ${MN_MANAGED_PYTHON_VERSION}.x interpreter.
   MN_HOME=/path         Override the runtime state directory. Defaults to ${HOME}/.mn.
   MN_AGENTS_ROOT=/path  Override the local agent template catalog. Defaults to ${WORKSPACE_DIR}/mn-agents.
   MN_MANAGED_PYTHON=0   Disable uv-managed private Python fallback.
@@ -5697,7 +5720,7 @@ Release/source options:
   --gar-repository NAME         Same as MN_GAR_REPOSITORY. Default: agent-skills.
   --python-index-url URL        Same as MN_PIP_INDEX_URL. Default: ${MN_DEFAULT_PIP_INDEX_URL}
   --python-extra-index-url URL  Additional dependency index. Default: https://pypi.org/simple.
-  --python PATH                 Same as MN_PYTHON. Must be Python 3.11+.
+  --python PATH                 Same as MN_PYTHON. Must match Python ${MN_MANAGED_PYTHON_VERSION}.x.
   --no-managed-python           Do not use uv to install a private Python runtime.
   MN_HOME=/path                 Override the runtime state directory. Defaults to ${HOME}/.mn.
   MN_AGENTS_ROOT=/path          Optional local development override for packaged agent discovery.
@@ -5710,7 +5733,7 @@ Examples:
   ./$script_name --no-web-ui --python-components sdk,api
   ./$script_name --gar-project my-gcp-project --gar-repository agent-skills
   ./$script_name --python-index-url https://us-central1-python.pkg.dev/my-gcp-project/agent-skills/simple/
-  MN_PYTHON=/opt/homebrew/bin/python3.11 ./$script_name
+  MN_PYTHON=/opt/homebrew/bin/python${MN_MANAGED_PYTHON_VERSION} ./$script_name
   ./$script_name --version v1.2.31 --no-web-ui
   ./$script_name --core-version v1.2.31 --python-sdk-version v1.2.31 --cli-version v1.2.31 --api-version v1.2.31 --web-ui-version v1.2.31
 EOF
@@ -6145,7 +6168,7 @@ function python_version() {
 }
 
 function python_is_supported() {
-    "$1" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)' >/dev/null 2>&1
+    "$1" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 12) else 1)' >/dev/null 2>&1
 }
 
 function python_minor_version() {
@@ -6174,7 +6197,7 @@ function managed_python_enabled() {
 
 function validate_managed_python_version() {
     if [[ ! "$MN_MANAGED_PYTHON_VERSION" =~ ^[0-9]+[.][0-9]+$ ]]; then
-        print_error "MN_MANAGED_PYTHON_VERSION must be a Python minor version like 3.11."
+        print_error "MN_MANAGED_PYTHON_VERSION must be a Python minor version like 3.12."
         exit 1
     fi
 }
@@ -6187,7 +6210,7 @@ function install_uv() {
         Darwin|Linux) ;;
         *)
             print_error "Unsupported platform for uv-managed Python: ${os}."
-            print_error "Set MN_PYTHON=/path/to/python3.11 and rerun."
+            print_error "Set MN_PYTHON=/path/to/python${MN_MANAGED_PYTHON_VERSION} and rerun."
             exit 1
             ;;
     esac
@@ -6205,14 +6228,14 @@ function install_uv() {
     if ! curl_github -fsSL "https://astral.sh/uv/install.sh" -o "$installer"; then
         rm -f "$installer"
         print_error "Could not download the uv installer."
-        print_error "Install uv manually or set MN_PYTHON=/path/to/python3.11."
+        print_error "Install uv manually or set MN_PYTHON=/path/to/python${MN_MANAGED_PYTHON_VERSION}."
         exit 1
     fi
 
     if ! mn_run_uv_installer "$installer" "$uv_bin_dir" >/dev/null 2>&1; then
         rm -f "$installer"
         print_error "Could not install uv."
-        print_error "Install uv manually or set MN_PYTHON=/path/to/python3.11."
+        print_error "Install uv manually or set MN_PYTHON=/path/to/python${MN_MANAGED_PYTHON_VERSION}."
         exit 1
     fi
     rm -f "$installer"
@@ -6284,7 +6307,10 @@ function install_managed_python() {
         exit 1
     fi
 
-    MN_PYTHON_BIN="$managed_bin"
+    MN_PYTHON_BIN="$(mn_base_python_executable "$managed_bin")" || {
+        print_error "Could not resolve a stable base Python interpreter from $managed_bin."
+        exit 1
+    }
     print_detail "Using uv-managed Python $(python_version "$managed_bin") at $managed_bin."
 }
 
@@ -6330,7 +6356,10 @@ function resolve_python_runtime() {
             continue
         fi
         if python_is_supported "$resolved" && python_is_selected_minor "$resolved"; then
-            MN_PYTHON_BIN="$resolved"
+            MN_PYTHON_BIN="$(mn_base_python_executable "$resolved")" || {
+                print_error "Could not resolve a stable base Python interpreter from $resolved."
+                exit 1
+            }
             print_detail "Using Python $(python_version "$MN_PYTHON_BIN") at $MN_PYTHON_BIN."
             return
         fi

@@ -6,7 +6,7 @@ cd "$DIR"
 
 VENV_DIR="${HOME}/.local/share/mn_venv"
 BIN_DIR="${HOME}/.local/bin"
-PYTHON_BIN="${MN_PYTHON:-python3.11}"
+PYTHON_BIN="${MN_PYTHON:-python3.12}"
 FORCE_REINSTALL=false
 REPO_ROOT="$(cd "$DIR/.." && pwd)"
 MN_HOME_DIR="\$HOME/.mn"

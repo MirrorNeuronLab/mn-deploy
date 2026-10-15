@@ -9,7 +9,7 @@ import tarfile
 
 def stage_sources(rows_file: Path, build_root: Path) -> None:
     if not hasattr(tarfile, 'data_filter'):
-        raise SystemExit('Python publishing requires a current Python 3.11+ with tarfile.data_filter.')
+        raise SystemExit('Python publishing requires a current Python 3.12+ with tarfile.data_filter.')
     repositories = {}
     rows = []
     for line in rows_file.read_text().splitlines():

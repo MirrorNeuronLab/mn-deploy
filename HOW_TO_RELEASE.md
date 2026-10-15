@@ -135,7 +135,7 @@ and committed source only; commit changes before relying on that preview.
 An explicit `-v MAJOR.MINOR.PATCH` selects the aggregate release-set tag, not a
 forced version for every Python distribution.
 Preview and preparation use the dedicated publishing Python (or
-`MN_PUBLISH_PYTHON`), with Python 3.11+ and `packaging`. A preview requires an
+`MN_PUBLISH_PYTHON`), with Python 3.12+ and `packaging`. A preview requires an
 already prepared environment and never installs dependencies. A normal release
 prepares the environment with `uv` when needed.
 
@@ -167,7 +167,7 @@ shared build configuration and SDK component layout. Standalone projects in a
 custom index are copied to temporary sources. Backend-generated `build/` and
 `.egg-info` changes remain there and never dirty the release checkouts; temporary
 sources are removed on success or failure.
-Archive extraction requires a current Python 3.11+ with `tarfile.data_filter`.
+Archive extraction requires a current Python 3.12+ with `tarfile.data_filter`.
 
 After a failure, use the printed explicit version and `--resume-from` phase.
 Do not use automatic version selection to retry a partially published release.

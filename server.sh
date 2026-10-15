@@ -14,7 +14,7 @@ RUNTIME_ENDPOINTS_FILE="${DIR}/runtime-endpoints.json"
 MN_BLUEPRINT_SOURCE="${MN_BLUEPRINT_SOURCE:-github}"
 MN_BLUEPRINT_REPO="${MN_BLUEPRINT_REPO:-https://github.com/MirrorNeuronLab/mn-blueprints.git}"
 MN_BLUEPRINT_LOCAL="${MN_BLUEPRINT_LOCAL:-}"
-MN_MANAGED_PYTHON_VERSION="${MN_MANAGED_PYTHON_VERSION:-3.11}"
+MN_MANAGED_PYTHON_VERSION="${MN_MANAGED_PYTHON_VERSION:-3.12}"
 MN_VERBOSE="${MN_VERBOSE:-N}"
 
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-dumb}" != "dumb" ]; then

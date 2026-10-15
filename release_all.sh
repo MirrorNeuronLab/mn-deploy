@@ -78,7 +78,7 @@ prepare_python_publish_environment() {
     PUBLISH_PYTHON="${publish_venv}/bin/python"
     if [[ ! -x "$PUBLISH_PYTHON" ]]; then
       printf 'Preparing Python publishing environment with uv: %s\n' "$publish_venv"
-      uv venv "$publish_venv"
+      uv venv --python 3.12 "$publish_venv"
     fi
     if ! "$PUBLISH_PYTHON" -c 'import build, packaging, tomllib, twine' >/dev/null 2>&1; then
       printf 'Installing Python publishing dependencies with uv.\n'
@@ -93,16 +93,16 @@ prepare_python_publish_environment() {
 
   command -v "$PUBLISH_PYTHON" >/dev/null 2>&1 ||
     die "Python publishing command was not found: ${PUBLISH_PYTHON}."
-  if ! "$PUBLISH_PYTHON" -c 'import build, packaging, tomllib, twine' >/dev/null 2>&1; then
-    die "Python publishing requires Python 3.11+ with build, packaging, and twine: ${PUBLISH_PYTHON}."
+  if ! "$PUBLISH_PYTHON" -c 'import sys; assert sys.version_info[:2] == (3, 12); import build, packaging, tomllib, twine' >/dev/null 2>&1; then
+    die "Python publishing requires Python 3.12 with build, packaging, and twine: ${PUBLISH_PYTHON}."
   fi
 }
 
 select_python_plan_environment() {
   PUBLISH_PYTHON="${MN_PUBLISH_PYTHON:-${MN_GAR_PUBLISH_VENV:-${SCRIPT_DIR}/.venv-gar-publish}/bin/python}"
   command -v "$PUBLISH_PYTHON" >/dev/null 2>&1 &&
-    "$PUBLISH_PYTHON" -c 'import packaging, tomllib' >/dev/null 2>&1 ||
-    die "Release preview requires a prepared Python 3.11+ publishing environment with packaging. Set MN_PUBLISH_PYTHON or prepare .venv-gar-publish; --plan does not install dependencies."
+    "$PUBLISH_PYTHON" -c 'import sys; assert sys.version_info[:2] == (3, 12); import packaging, tomllib' >/dev/null 2>&1 ||
+    die "Release preview requires a prepared Python 3.12 publishing environment with packaging. Set MN_PUBLISH_PYTHON or prepare .venv-gar-publish; --plan does not install dependencies."
 }
 
 validate_version() {
@@ -504,7 +504,7 @@ for command in git perl python3 cmp; do
   require_command "$command"
 done
 python3 -c 'import tomllib' >/dev/null 2>&1 ||
-  die "Python 3.11 or newer is required to read the package index."
+  die "Python 3.12 or newer is required to read the package index."
 if should_run_phase python; then
   require_command gcloud
   prepare_python_publish_environment

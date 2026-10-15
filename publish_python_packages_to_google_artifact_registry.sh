@@ -12,7 +12,7 @@ PUBLISH_VENV="${MN_GAR_PUBLISH_VENV:-${SCRIPT_DIR}/.venv-gar-publish}"
 if [ -x "${PUBLISH_VENV}/bin/python" ]; then
     PYTHON_BIN="${MN_PUBLISH_PYTHON:-${PUBLISH_VENV}/bin/python}"
 else
-    PYTHON_BIN="${MN_PUBLISH_PYTHON:-python3}"
+    PYTHON_BIN="${MN_PUBLISH_PYTHON:-python3.12}"
 fi
 GCLOUD_BIN="${MN_GCLOUD_BIN:-gcloud}"
 DIST_DIR="${MN_PYTHON_DIST_DIR:-${SCRIPT_DIR}/dist/python-packages}"
@@ -112,6 +112,10 @@ if [ ! -f "$INDEX_FILE" ]; then
 fi
 if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
     echo "Python command '$PYTHON_BIN' was not found." >&2
+    exit 1
+fi
+if ! "$PYTHON_BIN" -c 'import sys; assert sys.version_info[:2] == (3, 12)' >/dev/null 2>&1; then
+    echo "Python publishing requires Python 3.12. Set MN_PUBLISH_PYTHON to a Python 3.12 environment." >&2
     exit 1
 fi
 if ! command -v "$GCLOUD_BIN" >/dev/null 2>&1; then

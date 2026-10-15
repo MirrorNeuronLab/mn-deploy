@@ -9,6 +9,19 @@ published installer defaults remain unchanged until the coordinated release.
 `mn-deploy` contains the unified installer and local service scripts for MirrorNeuron.
 By default, `install.sh` installs released artifacts and Python packages.
 
+Current source uses Python 3.12 across the runtime, SDK components, CLI, API,
+agents, skills, and Membrane Python packages. Each install mode selects a native
+Python 3.12 interpreter or provisions the existing uv-managed private runtime.
+`--python` / `MN_PYTHON` selects an explicit interpreter; it must match
+`MN_MANAGED_PYTHON_VERSION` (default `3.12`). Package metadata requires Python
+3.12 or newer. Historical release support snapshots retain their original pins.
+
+Reinstall resolves the base interpreter before replacing the virtual environment,
+so an active runtime virtual environment cannot invalidate the Python used by
+editable builds. A local-source install restores its previous environment if
+package installation or import validation fails. Ordinary reinstall preserves
+Job data; upgrading Python does not require `--reset`.
+
 ## Uninstall worker cleanup (unreleased)
 
 Uninstall now removes the SDK worker Compose project (`mirror-neuron-workers`,
@@ -240,7 +253,7 @@ Builds use isolated committed sources. Python builds are cached under
 `dist/component-updates/` for identical upload retries, and uploads are verified
 against GAR file hashes. Web UI and Docker publishers verify integrity/digests.
 Requires the same publishing tools as `release_all.sh`; set `MN_PUBLISH_PYTHON`
-or prepare `.venv-gar-publish` with Python 3.11+, packaging, build and twine.
+or prepare `.venv-gar-publish` with Python 3.12+, packaging, build and twine.
 Use `--help` for registry, platform and component selection options.
 
 After successful publication, the helper updates component defaults, the current

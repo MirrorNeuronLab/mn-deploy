@@ -54,6 +54,15 @@ component.
 All modes use the single `mn runtime start` contract. There is no worker-only
 runtime, and worker-only installer flags are rejected.
 
+Python 3.12 is the standard runtime minor version across native services,
+HostLocal workers, Python containers, SDK components, agents, and skills.
+Python distributions require `>=3.12`; contributor selectors and CI use 3.12.
+The installer selects exactly `MN_MANAGED_PYTHON_VERSION` (default `3.12`) and
+retains explicit interpreter and uv-managed provisioning options. It resolves
+the executable's base interpreter and symlinks before moving or deleting an
+existing virtual environment. A base interpreter inside the replacement
+directory is rejected before replacement.
+
 Local-mode Python resolution presents the SDK, every sibling SDK component,
 the CLI, the API, and all other selected sibling projects to pip in one
 editable install transaction. Dependencies between MirrorNeuron packages must

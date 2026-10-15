@@ -329,7 +329,7 @@ def finish(workspace, planned):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, epilog=(
         'Default is a local preview; no builds, Git fetches, version edits or uploads. '
-        'Requires Python 3.11+ with packaging (plus build/twine for --apply), clean committed '
+        'Requires Python 3.12+ with packaging (plus build/twine for --apply), clean committed '
         'component repositories, gcloud, npm/Node for Web UI, and Docker Buildx for images. '
         'Apply leaves generated version metadata uncommitted for review.'))
     parser.add_argument('--apply', action='store_true', help='Build, publish, verify, then update component pins/support.')
