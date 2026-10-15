@@ -255,6 +255,14 @@ binary_default = false
 source_hash = "v2:75bcd83057c096b1e8c68f0f8c676c890f1b8171993b9b342ae03aed3c94d7d4"
 
 [[packages]]
+name = "mirrorneuron-macos-logs-skill"
+path = "mn-skills/macos_logs_skill"
+publish_group = "skill"
+version = "1.3.61"
+installer_groups = ["skill"]
+binary_default = false
+
+[[packages]]
 name = "mirrorneuron-market-research-skill"
 path = "mn-skills/market_research_skill"
 publish_group = "skill"
@@ -334,6 +342,14 @@ version = "1.3.49"
 installer_groups = ["skill"]
 binary_default = false
 source_hash = "v2:b77b95fa79b412c7731235ec1bfd54189f3145dfa440acad1f3fdfb954ee70e6"
+
+[[packages]]
+name = "mirrorneuron-temporal-graph-skill"
+path = "mn-skills/temporal_graph_skill"
+publish_group = "skill"
+version = "1.3.61"
+installer_groups = ["skill"]
+binary_default = false
 
 [[packages]]
 name = "mirrorneuron-vendor-comparison-skill"

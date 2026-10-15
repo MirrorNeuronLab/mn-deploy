@@ -6,6 +6,11 @@ Core changes: persistent `MN_HOME/node-identity.json`, startup validation, and
 or mismatched runtime identity fails readiness. Historical release snapshots and
 published installer defaults remain unchanged until the coordinated release.
 
+The current Python release inventory includes the macOS logs and temporal graph
+skills required by Mac security investigator. These new inventory entries use
+the skills checkout's next final version, `1.3.61`; publishing and a new support
+snapshot remain part of the coordinated release. Existing snapshots are immutable.
+
 `mn-deploy` contains the unified installer and local service scripts for MirrorNeuron.
 By default, `install.sh` installs released artifacts and Python packages.
 
