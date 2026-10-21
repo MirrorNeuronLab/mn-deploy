@@ -5402,7 +5402,8 @@ function validate_local_python_component_imports() {
 
 function install_local_editable_python_packages() {
     local -a editable_requirements=(-e "${PY_SDK_DIR}")
-    local component_pyproject skill_pyproject
+    local component_pyproject skill_pyproject agent_pyproject
+    local agents_root="${MN_AGENTS_ROOT:-$AGENTS_DIR}"
     # Local mode must keep the complete SDK component family on source paths.
     # Otherwise pip can resolve a CLI/API dependency (for example MCP) from GAR
     # even though its sibling checkout is present, or fail when it is unpublished.
@@ -5414,6 +5415,12 @@ function install_local_editable_python_packages() {
     if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
         editable_requirements+=(-e "$MEMBRANE_DIR/mn-context-engine-python-sdk")
     fi
+    # Block compilation fingerprints its selected default implementations before
+    # isolated worker preparation, including the supervised-service agent.
+    for agent_pyproject in "$agents_root"/*/pyproject.toml; do
+        [ -f "$agent_pyproject" ] || continue
+        editable_requirements+=(-e "$(dirname "$agent_pyproject")")
+    done
     if [ "$INSTALL_SKILLS" = "Y" ]; then
         for skill_pyproject in "$SKILLS_DIR"/*/pyproject.toml; do
             [ -f "$skill_pyproject" ] || continue

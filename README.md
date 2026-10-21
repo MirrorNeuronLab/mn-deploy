@@ -329,10 +329,13 @@ see [Google's npm package contract](https://docs.cloud.google.com/artifact-regis
   `./install.sh --mode github` for repository installs, or `./install.sh --mode local`
   from a monorepo checkout for editable local installs.
 - Local mode resolves the SDK, every SDK component under
-  `mn-python-sdk/packages/`, the CLI, API, and selected skill projects together
+  `mn-python-sdk/packages/`, the CLI, API, local agent packages, and selected skill projects together
   from sibling repositories. This prevents internal dependencies from falling
   back to GAR and allows local installs to use newly created MirrorNeuron
   packages before they are published to the package registry.
+  Agent packages remain available with `--no-skills`: block compilation needs
+  the selected default implementations before worker preparation, including
+  the supervised-service agent used by CCTV.
   `--no-skills` skips optional skill packages but keeps local skills required by
   runtime services, including the definition-scoped Job response engine and its
   local dependency closure.

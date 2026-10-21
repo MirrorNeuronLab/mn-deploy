@@ -67,7 +67,10 @@ Local-mode Python resolution presents the SDK, every sibling SDK component,
 the CLI, the API, and all other selected sibling projects to pip in one
 editable install transaction. Dependencies between MirrorNeuron packages must
 resolve from those workspace checkouts, including packages that have not yet
-been published. `--no-skills` excludes optional blueprint capabilities but
+been published. Local agent packages participate even with `--no-skills`, so
+block compilation can fingerprint default implementations before isolated worker
+preparation. `MN_AGENTS_ROOT` selects their source checkout when supplied.
+`--no-skills` excludes optional blueprint capabilities but
 retains skills imported by installed runtime services, including the Job
 response engine and its local dependency closure. Package-index resolution
 remains a binary-mode concern.
