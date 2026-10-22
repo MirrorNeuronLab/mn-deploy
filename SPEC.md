@@ -119,6 +119,11 @@ Install operations must be restartable after partial completion. Existing
 valid configuration is preserved unless the selected operation explicitly
 replaces it. Failures identify the failed component and a recovery action.
 
+The current Compose template defaults both `MN_LITELLM_MAX_CONCURRENT_REQUESTS`
+and `MN_LITELLM_MAX_CONCURRENT_EMBEDDINGS` to five. The matching SDK gateway
+routes provide five parallel slots per model owner. Queue bounds and timeouts
+are separate settings; historical support snapshots retain their released defaults.
+
 ## Release Support Contract
 
 - `docker-compose.yml` is the current development/release template.

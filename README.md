@@ -14,6 +14,12 @@ snapshot remain part of the coordinated release. Existing snapshots are immutabl
 `mn-deploy` contains the unified installer and local service scripts for MirrorNeuron.
 By default, `install.sh` installs released artifacts and Python packages.
 
+The current Compose template defaults LLM completion and embedding concurrency
+to five calls per model group (`MN_LITELLM_MAX_CONCURRENT_REQUESTS=5` and
+`MN_LITELLM_MAX_CONCURRENT_EMBEDDINGS=5`). Matching SDK model-owner routes
+also allow five parallel calls. Queue size and timeout settings are unchanged;
+historical installer support snapshots retain their released defaults.
+
 Current source uses Python 3.12 across the runtime, SDK components, CLI, API,
 agents, skills, and Membrane Python packages. Each install mode selects a native
 Python 3.12 interpreter or provisions the existing uv-managed private runtime.
