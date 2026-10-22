@@ -374,3 +374,13 @@ backend object requires a public HTTPS URL and SHA-256. It includes CUDA 13
 runtime libraries and license/provenance files; its support boundary is Ubuntu
 24.04 ARM64, GB10/SM 12.1 and NVIDIA driver 580+. Native Metal and native CUDA
 packages preserve hardware acceleration without requiring end-user compilers.
+
+## Federated live Web UI routing
+
+The Compose Web UI proxy consumes the API's `mn.web_ui.transport.v1` owner route
+for HTTP assets, streams and WebSockets. It forwards the current execution and
+one relay hop using server-side API credentials, and strips those credentials
+from direct worker requests. Private Docker addresses are resolved on their
+hosting computer. Client disconnects dispose upstream connections; handshake
+deadlines do not become idle timeouts on established WebSockets. Keep this
+contract aligned with the Python Web UI server.

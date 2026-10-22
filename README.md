@@ -659,3 +659,8 @@ repository. It targets Ubuntu 24.04, GB10/SM 12.1 and driver 580+, and includes
 CUDA 13 runtime libraries, upstream/NVIDIA licenses and build provenance.
 The SDK catalog selects its public URL and SHA-256. macOS selects native Metal;
 a Linux Docker image cannot accelerate inference through Apple Metal.
+
+The Web UI sidecar supports owner-scoped Job UI forwarding across connected
+computers, including live WebSockets. It requires the matching API relay and SDK
+execution-bound UI handles. `scripts/test_job_ui_proxy.py` exercises the actual
+Compose JavaScript without Docker or a live runtime.

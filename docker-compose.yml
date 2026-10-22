@@ -220,8 +220,34 @@ services:
             return target;
           }
 
+          function relayTarget(webUi, jobId, requestedPort, requestedPath, search, websocket = false) {
+            const transport = webUi && webUi.transport;
+            if (!transport) return undefined;
+            const owner = new URL(transport.owner_api_url);
+            if (transport.schema_version !== "mn.web_ui.transport.v1" || !transport.execution_id
+              || !["http:", "https:"].includes(owner.protocol) || owner.username || owner.password
+              || owner.pathname !== "/api/v1" || owner.search || owner.hash) throw new Error("invalid relay");
+            owner.pathname += "/jobs/" + encodeURIComponent(jobId) + "/ui-proxy/" + requestedPort + "/"
+              + (websocket ? "ws/" : "") + safeRemotePath(requestedPath);
+            owner.search = search || "";
+            if (websocket) owner.protocol = owner.protocol === "https:" ? "wss:" : "ws:";
+            return owner;
+          }
+
+          function relayHeaders(webUi, headers) {
+            const forwarded = remoteRequestHeaders(headers);
+            if (webUi && webUi.transport) {
+              forwarded["x-mn-ui-execution"] = webUi.transport.execution_id;
+              forwarded["x-mn-ui-hop"] = "1";
+              if (apiToken) forwarded.authorization = "Bearer " + apiToken;
+              if (headers["x-mn-job-ui-probe"] === "1"
+                && (!apiToken || headers.authorization === "Bearer " + apiToken)) forwarded["x-mn-job-ui-probe"] = "1";
+            }
+            return forwarded;
+          }
+
           function remoteRequestHeaders(headers) {
-            const excluded = new Set(["host", "authorization", "cookie", "accept-encoding", "connection", "upgrade", "x-mn-job-ui-probe"]);
+            const excluded = new Set(["host", "authorization", "cookie", "accept-encoding", "connection", "upgrade", "x-mn-job-ui-probe", "x-mn-ui-execution", "x-mn-ui-hop"]);
             const forwarded = {};
             for (const [name, value] of Object.entries(headers)) {
               if (!excluded.has(name.toLowerCase()) && value !== undefined) forwarded[name] = value;
@@ -257,6 +283,7 @@ services:
                 && (!apiToken || request.headers.authorization === "Bearer " + apiToken);
               webUi = await loadJobWebUi(details.jobId, !probe);
               target = jobUiTarget(webUi, details.port, details.path, search, false, !probe);
+              target = relayTarget(webUi, details.jobId, details.port, details.path, search) || target;
             } catch (error) {
               proxyError(response, error && [404, 409].includes(error.statusCode) ? error.statusCode : 502,
                 error && error.message === "undeclared port"
@@ -269,12 +296,12 @@ services:
             const transport = target.protocol === "https:" ? https : http;
             const upstream = transport.request(
               target,
-              { method: request.method, headers: remoteRequestHeaders(request.headers) },
+              { method: request.method, headers: relayHeaders(webUi, request.headers), timeout: 15000 },
               (upstreamResponse) => {
                 const headers = remoteResponseHeaders(upstreamResponse.headers);
                 const contentType = String(headers["content-type"] || "").toLowerCase();
                 response.writeHead(upstreamResponse.statusCode || 502, headers);
-                if (!contentType.includes("text/html")) {
+                if (!contentType.includes("text/html") || webUi.transport) {
                   upstreamResponse.pipe(response);
                   return;
                 }
@@ -283,6 +310,8 @@ services:
                 upstreamResponse.on("end", () => response.end(injectProxyConfig(Buffer.concat(chunks), details.jobId)));
               },
             );
+            upstream.on("timeout", () => upstream.destroy());
+            response.on("close", () => upstream.destroy());
             upstream.on("error", () => {
               if (!response.headersSent) proxyError(response, 502, "The job Web UI could not be reached.");
               else response.end();
@@ -290,22 +319,30 @@ services:
             request.pipe(upstream);
           }
 
-          function websocketHeaders(request, target) {
-            const excluded = new Set(["host", "authorization", "cookie"]);
+          function websocketHeaders(request, target, webUi) {
+            const excluded = new Set(["host", "authorization", "cookie", "x-mn-job-ui-probe", "x-mn-ui-execution", "x-mn-ui-hop"]);
             const lines = ["Host: " + target.host];
             for (let index = 0; index < request.rawHeaders.length; index += 2) {
               const name = request.rawHeaders[index];
               const value = request.rawHeaders[index + 1];
               if (!excluded.has(name.toLowerCase())) lines.push(name + ": " + value);
             }
+            if (webUi && webUi.transport) {
+              lines.push("X-MN-UI-Execution: " + webUi.transport.execution_id, "X-MN-UI-Hop: 1");
+              if (apiToken) lines.push("Authorization: Bearer " + apiToken);
+            }
             return lines.join("\r\n");
           }
 
           async function proxyJobUiWebSocket(request, socket, head, details, search) {
             let target;
+            let webUi;
             try {
-              const webUi = await loadJobWebUi(details.jobId);
-              target = jobUiTarget(webUi, details.port, details.path, search, true);
+              const probe = request.headers["x-mn-job-ui-probe"] === "1"
+                && (!apiToken || request.headers.authorization === "Bearer " + apiToken);
+              webUi = await loadJobWebUi(details.jobId, !probe);
+              target = jobUiTarget(webUi, details.port, details.path, search, true, !probe);
+              target = relayTarget(webUi, details.jobId, details.port, details.path, search, true) || target;
             } catch {
               socket.destroy();
               return;
@@ -313,13 +350,23 @@ services:
             const remote = target.protocol === "wss:"
               ? tls.connect({ host: target.hostname, port: Number(target.port || 443), servername: target.hostname })
               : net.connect({ host: target.hostname, port: Number(target.port || 80) });
+            let handshake = Buffer.alloc(0);
+            const handshakeTimer = setTimeout(() => { remote.destroy(); socket.destroy(); }, 15000);
+            remote.on("data", (chunk) => {
+              if (handshake === undefined) return;
+              handshake = Buffer.concat([handshake, chunk]);
+              if (handshake.length > 65536) { remote.destroy(); socket.destroy(); return; }
+              if (handshake.includes("\r\n\r\n")) { clearTimeout(handshakeTimer); handshake = undefined; }
+            });
             remote.once(target.protocol === "wss:" ? "secureConnect" : "connect", () => {
               remote.write("GET " + target.pathname + target.search + " HTTP/1.1\r\n"
-                + websocketHeaders(request, target) + "\r\n\r\n");
+                + websocketHeaders(request, target, webUi) + "\r\n\r\n");
               if (head.length) remote.write(head);
               socket.pipe(remote).pipe(socket);
             });
             remote.on("error", () => socket.destroy());
+            socket.on("close", () => { clearTimeout(handshakeTimer); remote.destroy(); });
+            remote.on("close", () => { clearTimeout(handshakeTimer); socket.destroy(); });
             socket.on("error", () => remote.destroy());
           }
 
