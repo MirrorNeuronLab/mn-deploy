@@ -263,7 +263,7 @@ yourself if the locally pinned Docker/Web UI release tags are missing.
 Builds use isolated committed sources. Python builds are cached under
 `dist/component-updates/` for identical upload retries, and uploads are verified
 against GAR file hashes. Web UI and Docker publishers verify integrity/digests.
-Requires the same publishing tools as `release_all.sh`; set `MN_PUBLISH_PYTHON`
+Requires the same publishing tools as `scripts/release_all.sh`; set `MN_PUBLISH_PYTHON`
 or prepare `.venv-gar-publish` with Python 3.12+, packaging, build and twine.
 Use `--help` for registry, platform and component selection options.
 
@@ -439,7 +439,7 @@ see [Google's npm package contract](https://docs.cloud.google.com/artifact-regis
   ```
 
   On Apple Silicon this automatically registers QEMU for the x64 release
-  image. The standard `./release_all.sh -v 1.2.30` flow runs this local
+  image. The standard `./scripts/release_all.sh -v 1.2.30` flow runs this local
   publisher; the Core GitHub Actions workflow only publishes OTP archives.
 
 - Public Membrane Rust binary and Docker image GAR dry run:
@@ -508,16 +508,24 @@ defaults derive from SDK identity. CLI, API, skills, agents, and Membrane Python
 projects advance independently. Missing SDK index entries fail preparation;
 historical snapshots remain immutable. The aggregate release builds and verifies the complete Python
 inventory and self-contained Web UI package directly from sibling worktrees in
-GAR before it pushes the prepared source tags. `release_all.sh` uses `uv` to
+GAR before it pushes the prepared source tags. `scripts/release_all.sh` uses `uv` to
 create its dedicated Python publishing environment and install the required
 build, Twine, keyring, and GAR authentication packages automatically. GitHub
 release workflows are neither awaited nor used as package sources.
+An existing dedicated publishing environment with another Python minor is
+recreated with Python 3.12 before publishing.
+
+Run `./scripts/release_all.sh -v 1.4.0 --plan` for a read-only preview. Preview
+uses `MN_PUBLISH_PYTHON`, the existing publishing environment (`MN_GAR_PUBLISH_VENV`
+or `.venv-gar-publish` in `mn-deploy`), or `python3` on PATH when that environment
+is absent. Planning needs Python 3.12 with `packaging` and `tomllib`, without
+the publishing dependencies. Preview never installs dependencies.
 
 Each publishing step is a named resume phase. On failure, the script prints the
 exact recovery command, for example:
 
 ```bash
-./release_all.sh -v 1.3.46 --resume-from web-ui
+./scripts/release_all.sh -v 1.3.46 --resume-from web-ui
 ```
 
 A resumed release validates the existing local release tags. Web UI builds run

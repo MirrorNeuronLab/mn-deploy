@@ -56,7 +56,7 @@ for image in mirror-neuron-core membrane-context-engine; do
 done
 ```
 
-The standard `release_all.sh` flow builds and verifies every GAR artifact
+The standard `scripts/release_all.sh` flow builds and verifies every GAR artifact
 from the local workspace before pushing source tags. It does not wait for or
 consume GitHub release workflow artifacts.
 

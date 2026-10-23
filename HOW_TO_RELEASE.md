@@ -10,8 +10,8 @@ process does not wait for or consume packages produced by them.
 Run the orchestrator from `mn-deploy`:
 
 ```bash
-./release_all.sh --plan  # Preview using local tags; no writes or publishing.
-./release_all.sh         # Refresh tags and release changed committed sources.
+./scripts/release_all.sh --plan  # Preview using local tags; no writes or publishing.
+./scripts/release_all.sh         # Refresh tags and release changed committed sources.
 ```
 
 The command:
@@ -109,7 +109,7 @@ The runtime publishers verify the immutable version and `latest` image tags.
 ## Tags and GitHub workflows
 
 Pushing the source tags can still trigger existing GitHub workflows. Those
-workflows are independent side effects: `release_all.sh` does not require
+workflows are independent side effects: `scripts/release_all.sh` does not require
 `gh`, inspect workflow status, download workflow artifacts, or verify packages
 on PyPI or the public npm registry.
 
@@ -134,10 +134,15 @@ finalization changes do not trigger another release. `--plan` uses local tags
 and committed source only; commit changes before relying on that preview.
 An explicit `-v MAJOR.MINOR.PATCH` selects the aggregate release-set tag, not a
 forced version for every Python distribution.
-Preview and preparation use the dedicated publishing Python (or
-`MN_PUBLISH_PYTHON`), with Python 3.12+ and `packaging`. A preview requires an
-already prepared environment and never installs dependencies. A normal release
-prepares the environment with `uv` when needed.
+Preview selects `MN_PUBLISH_PYTHON`, the existing publishing environment
+(`MN_GAR_PUBLISH_VENV` or `.venv-gar-publish` in `mn-deploy`), or `python3` on
+PATH when that environment is absent. It only requires Python 3.12 with
+`packaging` and `tomllib`; it never installs dependencies. Publishing still
+requires Python 3.12 with build and Twine. A normal release prepares its
+dedicated publishing environment with `uv` when needed.
+An existing dedicated environment using another Python minor is recreated with
+Python 3.12 before publishing dependencies are installed. `MN_PUBLISH_PYTHON`
+remains an explicit selection and must already satisfy the publishing requirements.
 
 Each package index entry records a source fingerprint. Changes to tracked
 package inputs or shared repository build files increment that package's patch;
@@ -179,8 +184,8 @@ phase. Preserve its tags and immutable snapshot, then prepare a new aggregate
 version with the corrected planner. For the failed `v1.3.58` set:
 
 ```bash
-./release_all.sh -v 1.3.59 --plan
-./release_all.sh -v 1.3.59
+./scripts/release_all.sh -v 1.3.59 --plan
+./scripts/release_all.sh -v 1.3.59
 ```
 
 The SDK group selects `1.3.58`; other package versions remain independent.

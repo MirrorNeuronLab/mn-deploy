@@ -2,12 +2,13 @@
 
 # Release every tagged MirrorNeuron component from a clean workspace.
 # Run from mn-deploy or the workspace root, for example:
-#   mn-deploy/release_all.sh -v 1.2.30
+#   mn-deploy/scripts/release_all.sh -v 1.2.30
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORKSPACE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+DEPLOY_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+WORKSPACE_ROOT="$(cd "${DEPLOY_DIR}/.." && pwd)"
 VERSION=""
 TAG=""
 PROJECT="mirrorneuron-public-packages"
@@ -34,7 +35,7 @@ REPOSITORIES=(
 
 usage() {
   cat <<'EOF'
-Usage: release_all.sh [-v MAJOR.MINOR.PATCH] [--resume-from PHASE]
+Usage: scripts/release_all.sh [-v MAJOR.MINOR.PATCH] [--plan] [--resume-from PHASE]
 
 Omit -v (or use --auto) to choose the next unused patch when source changed.
 Python distributions advance independently when their tracked inputs change.
@@ -69,16 +70,17 @@ require_command() {
 }
 
 prepare_python_publish_environment() {
-  local publish_venv="${MN_GAR_PUBLISH_VENV:-${SCRIPT_DIR}/.venv-gar-publish}"
+  local publish_venv="${MN_GAR_PUBLISH_VENV:-${DEPLOY_DIR}/.venv-gar-publish}"
 
   if [[ -n "${MN_PUBLISH_PYTHON:-}" ]]; then
     PUBLISH_PYTHON="$MN_PUBLISH_PYTHON"
   else
     require_command uv
     PUBLISH_PYTHON="${publish_venv}/bin/python"
-    if [[ ! -x "$PUBLISH_PYTHON" ]]; then
+    if [[ ! -x "$PUBLISH_PYTHON" ]] ||
+       ! "$PUBLISH_PYTHON" -c 'import sys; assert sys.version_info[:2] == (3, 12)' >/dev/null 2>&1; then
       printf 'Preparing Python publishing environment with uv: %s\n' "$publish_venv"
-      uv venv --python 3.12 "$publish_venv"
+      uv venv --python 3.12 "$publish_venv" --clear
     fi
     if ! "$PUBLISH_PYTHON" -c 'import build, packaging, tomllib, twine' >/dev/null 2>&1; then
       printf 'Installing Python publishing dependencies with uv.\n'
@@ -99,10 +101,13 @@ prepare_python_publish_environment() {
 }
 
 select_python_plan_environment() {
-  PUBLISH_PYTHON="${MN_PUBLISH_PYTHON:-${MN_GAR_PUBLISH_VENV:-${SCRIPT_DIR}/.venv-gar-publish}/bin/python}"
+  PUBLISH_PYTHON="${MN_PUBLISH_PYTHON:-${MN_GAR_PUBLISH_VENV:-${DEPLOY_DIR}/.venv-gar-publish}/bin/python}"
+  if ! command -v "$PUBLISH_PYTHON" >/dev/null 2>&1; then
+    PUBLISH_PYTHON="${MN_PUBLISH_PYTHON:-python3}"
+  fi
   command -v "$PUBLISH_PYTHON" >/dev/null 2>&1 &&
     "$PUBLISH_PYTHON" -c 'import sys; assert sys.version_info[:2] == (3, 12); import packaging, tomllib' >/dev/null 2>&1 ||
-    die "Release preview requires a prepared Python 3.12 publishing environment with packaging. Set MN_PUBLISH_PYTHON or prepare .venv-gar-publish; --plan does not install dependencies."
+    die "Release preview requires Python 3.12 with packaging. Set MN_PUBLISH_PYTHON to a suitable interpreter; --plan does not install dependencies."
 }
 
 validate_version() {
@@ -117,9 +122,9 @@ set_installer_default_version() {
 
   env MN_RELEASE_SETTING="$setting" MN_RELEASE_TAG="$tag" perl -0pi -e \
     's~^(\Q$ENV{MN_RELEASE_SETTING}\E="\$\{\Q$ENV{MN_RELEASE_SETTING}\E:-)[^}]+(\}")~$1$ENV{MN_RELEASE_TAG}$2~m' \
-    "${SCRIPT_DIR}/install.sh"
+    "${DEPLOY_DIR}/install.sh"
   printf -v expected '%s="${%s:-%s}"' "$setting" "$setting" "$tag"
-  grep -Fq "$expected" "${SCRIPT_DIR}/install.sh" ||
+  grep -Fq "$expected" "${DEPLOY_DIR}/install.sh" ||
     die "Could not set ${setting} to ${tag} in install.sh."
 }
 
@@ -136,18 +141,18 @@ set_compose_web_ui_version() {
 }
 
 prepare_install_support_snapshot() {
-  local support_dir="${SCRIPT_DIR}/install_support/${TAG}"
+  local support_dir="${DEPLOY_DIR}/install_support/${TAG}"
 
   if [[ ! -d "$support_dir" ]]; then
-    "${SCRIPT_DIR}/save_install_support.sh" --version "$TAG"
+    "${DEPLOY_DIR}/save_install_support.sh" --version "$TAG"
     return
   fi
 
   [[ -f "${support_dir}/docker-compose.yml" ]] &&
     [[ -f "${support_dir}/package-index/python-packages.toml" ]] &&
-    cmp -s "${SCRIPT_DIR}/docker-compose.yml" "${support_dir}/docker-compose.yml" &&
+    cmp -s "${DEPLOY_DIR}/docker-compose.yml" "${support_dir}/docker-compose.yml" &&
     cmp -s \
-      "${SCRIPT_DIR}/package-index/python-packages.toml" \
+      "${DEPLOY_DIR}/package-index/python-packages.toml" \
       "${support_dir}/package-index/python-packages.toml" ||
     die "Existing install support snapshot ${support_dir} does not match the prepared release metadata; refusing to overwrite an immutable snapshot."
 
@@ -254,17 +259,17 @@ check_resume_workspace() {
 }
 
 prepare_release_metadata() {
-  local index_file="${SCRIPT_DIR}/package-index/python-packages.toml"
+  local index_file="${DEPLOY_DIR}/package-index/python-packages.toml"
   local pyproject metadata_output
 
   # The aggregate tag identifies a release set, not every distribution version.
   # Solve dependencies before changing installer/Compose pins or freezing them.
   "$PUBLISH_PYTHON" \
-    "${SCRIPT_DIR}/scripts/prepare-python-package-index.py" \
+    "${DEPLOY_DIR}/scripts/prepare-python-package-index.py" \
     "$index_file" "$WORKSPACE_ROOT" "$VERSION" --independent \
     --baseline "$MN_RELEASE_BASELINE" >/dev/null
 
-  set_compose_web_ui_version "${SCRIPT_DIR}/docker-compose.yml" "$VERSION"
+  set_compose_web_ui_version "${DEPLOY_DIR}/docker-compose.yml" "$VERSION"
   update_installer_pins
   prepare_install_support_snapshot
 
@@ -317,7 +322,7 @@ publish_and_verify_gar() {
 
   if should_run_phase python; then
     CURRENT_PHASE="python"
-    "${SCRIPT_DIR}/publish_python_packages_to_google_artifact_registry.sh" \
+    "${DEPLOY_DIR}/publish_python_packages_to_google_artifact_registry.sh" \
       --python "$PUBLISH_PYTHON" \
       --project "$PROJECT" \
       --location "$LOCATION" \
@@ -328,7 +333,7 @@ publish_and_verify_gar() {
 
   if should_run_phase web-ui; then
     CURRENT_PHASE="web-ui"
-    "${SCRIPT_DIR}/publish_web_ui_to_google_artifact_registry.sh" \
+    "${DEPLOY_DIR}/publish_web_ui_to_google_artifact_registry.sh" \
       --version "$VERSION" \
       --project "$PROJECT" \
       --location "$LOCATION" \
@@ -351,7 +356,7 @@ publish_and_verify_gar() {
         trap 'git -C "${WORKSPACE_ROOT}/Membrane" worktree remove --force "$membrane_dir" >/dev/null 2>&1 || true; rm -rf "$membrane_worktree_root"' EXIT
         git -C "${WORKSPACE_ROOT}/Membrane" worktree add \
           --detach "$membrane_dir" "refs/tags/${TAG}" >/dev/null
-        "${SCRIPT_DIR}/publish_public_membrane_to_google_artifact_registry.sh" \
+        "${DEPLOY_DIR}/publish_public_membrane_to_google_artifact_registry.sh" \
           --apply \
           --version "$TAG" \
           --membrane-dir "$membrane_dir" \
@@ -375,7 +380,7 @@ publish_and_verify_gar() {
     if ! grep -qx "$VERSION" "$core_tags_file" ||
        ! grep -qx "$TAG" "$core_tags_file" ||
        ! grep -qx latest "$core_tags_file"; then
-      "${SCRIPT_DIR}/publish_public_core_to_google_artifact_registry.sh" \
+      "${DEPLOY_DIR}/publish_public_core_to_google_artifact_registry.sh" \
         --apply \
         --version "$TAG" \
         --project "$PROJECT" \
@@ -397,7 +402,7 @@ update_installer_pins() {
     MN_DEFAULT_INSTALL_VERSION MN_DEFAULT_INSTALL_SUPPORT_VERSION; do
     set_installer_default_version "$setting" "$TAG"
   done
-  package_versions="$("$PUBLISH_PYTHON" - "${SCRIPT_DIR}/package-index/python-packages.toml" <<'PYTHON'
+  package_versions="$("$PUBLISH_PYTHON" - "${DEPLOY_DIR}/package-index/python-packages.toml" <<'PYTHON'
 import sys, tomllib
 settings = {"mirrorneuron-python-sdk": "MN_DEFAULT_PYTHON_SDK_VERSION",
             "mirrorneuron-cli": "MN_DEFAULT_CLI_VERSION", "mirrorneuron-api": "MN_DEFAULT_API_VERSION"}
@@ -413,8 +418,8 @@ PYTHON
 }
 
 update_post_release_pins() {
-  if ! grep -Fq "## ${TAG} " "${SCRIPT_DIR}/released.md"; then
-    cat >> "${SCRIPT_DIR}/released.md" <<EOF
+  if ! grep -Fq "## ${TAG} " "${DEPLOY_DIR}/released.md"; then
+    cat >> "${DEPLOY_DIR}/released.md" <<EOF
 
 ## ${TAG} -- $(date +%F)
 
@@ -441,8 +446,8 @@ EOF
     [[ "$(git -C "${WORKSPACE_ROOT}/otterdesk-blueprints" rev-parse HEAD)" == \
        "$(git -C "${WORKSPACE_ROOT}/otterdesk-blueprints" rev-parse origin/main)" ]] ||
       die "otterdesk-blueprints is not synchronized with origin/main."
-    python3 "${SCRIPT_DIR}/scripts/release-contract.py" blueprints \
-      "${SCRIPT_DIR}/package-index/python-packages.toml" "${WORKSPACE_ROOT}/otterdesk-blueprints"
+    python3 "${DEPLOY_DIR}/scripts/release-contract.py" blueprints \
+      "${DEPLOY_DIR}/package-index/python-packages.toml" "${WORKSPACE_ROOT}/otterdesk-blueprints"
     commit_and_push_if_changed otterdesk-blueprints "Pin blueprint dependencies for ${TAG}" .
   fi
 }
@@ -481,17 +486,17 @@ if [[ -z "$VERSION" ]]; then
       git -C "${WORKSPACE_ROOT}/${repo}" fetch --quiet origin main --tags
     done
   fi
-  VERSION="$(python3 "${SCRIPT_DIR}/scripts/release-contract.py" next-version \
+  VERSION="$(python3 "${DEPLOY_DIR}/scripts/release-contract.py" next-version \
     "$WORKSPACE_ROOT" "${REPOSITORIES[@]}")"
   [[ -n "$VERSION" ]] || { printf 'No source changes since the last release.\n'; exit 0; }
 fi
-MN_RELEASE_BASELINE="$(sed -n 's/^MN_DEFAULT_INSTALL_VERSION=.*:-\(v[0-9.]*\)}"/\1/p' "${SCRIPT_DIR}/install.sh")"
+MN_RELEASE_BASELINE="$(sed -n 's/^MN_DEFAULT_INSTALL_VERSION=.*:-\(v[0-9.]*\)}"/\1/p' "${DEPLOY_DIR}/install.sh")"
 validate_version "$VERSION"
 if [[ "$PLAN" == "Y" ]]; then
   select_python_plan_environment
   printf 'Next release: v%s (local tags and committed source; publish refreshes remote tags).\n' "$VERSION"
-  "$PUBLISH_PYTHON" "${SCRIPT_DIR}/scripts/prepare-python-package-index.py" \
-    "${SCRIPT_DIR}/package-index/python-packages.toml" "$WORKSPACE_ROOT" "$VERSION" \
+  "$PUBLISH_PYTHON" "${DEPLOY_DIR}/scripts/prepare-python-package-index.py" \
+    "${DEPLOY_DIR}/package-index/python-packages.toml" "$WORKSPACE_ROOT" "$VERSION" \
     --independent --baseline "$MN_RELEASE_BASELINE" --dry-run >/dev/null
   exit 0
 fi

@@ -3,6 +3,8 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import shlex
+import shutil
 import subprocess
 import sys
 import zipfile
@@ -24,7 +26,7 @@ stager = module('stage-python-release-sources.py')
 
 
 def test_release_preparation_reads_package_index_with_bash_32(tmp_path):
-    release = Path(__file__).resolve().parents[1] / 'release_all.sh'
+    release = Path(__file__).with_name('release_all.sh')
     source, separator, _ = release.read_text().partition('\nwhile [[ "$#" -gt 0 ]]')
     assert separator
     functions = tmp_path / 'release-functions.sh'
@@ -55,6 +57,7 @@ version = "1.0.0"
 ''')
     shell = '''\
 source "$FUNCTIONS_FILE"
+DEPLOY_DIR="$TEST_DEPLOY_DIR"
 VERSION=1.3.55
 TAG=v1.3.55
 MN_RELEASE_BASELINE=v1.3.54
@@ -81,7 +84,7 @@ prepare_release_metadata
         ['bash', '-c', shell],
         capture_output=True,
         text=True,
-        env={**os.environ, 'FUNCTIONS_FILE': str(functions), 'TEST_PYTHON': sys.executable},
+        env={**os.environ, 'FUNCTIONS_FILE': str(functions), 'TEST_PYTHON': sys.executable, 'TEST_DEPLOY_DIR': str(tmp_path)},
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == [
@@ -116,6 +119,155 @@ def repository(root, name='repo'):
 def commit(repo):
     git(repo, 'add', '.')
     git(repo, 'commit', '-qm', 'fixture')
+
+
+@pytest.mark.parametrize('selection', ['default-venv', 'custom-venv', 'explicit', 'path'])
+@pytest.mark.parametrize('working_directory', ['deploy', 'workspace'])
+def test_release_preview_uses_available_planning_python_without_writes(
+    tmp_path, selection, working_directory,
+):
+    workspace = tmp_path / 'release workspace'
+    deploy = workspace / 'mn-deploy'
+    scripts = deploy / 'scripts'
+    scripts.mkdir(parents=True)
+    for name in ('release_all.sh', 'prepare-python-package-index.py'):
+        shutil.copy2(Path(__file__).with_name(name), scripts / name)
+    (deploy / 'install.sh').write_text('MN_DEFAULT_INSTALL_VERSION="${MN_DEFAULT_INSTALL_VERSION:-v1.2.3}"\n')
+    repo = repository(workspace)
+    project = repo / 'pyproject.toml'
+    project.write_text('[project]\nname="one"\nversion="1.0.0"\n')
+    commit(repo)
+    git(repo, 'tag', 'v1.2.3')
+    (repo / 'code.py').write_text('changed\n')
+    commit(repo)
+    index = deploy / 'package-index/python-packages.toml'
+    index.parent.mkdir()
+    index.write_text('[[packages]]\nname="one"\npath="repo"\nversion = "1.0.0"\n')
+    before = (index.read_bytes(), project.read_bytes())
+
+    # Only allow the read-only commands used by preview. uv, publishers and
+    # network commands cannot run even if preview accidentally reaches them.
+    bin_dir = tmp_path / 'bin'
+    bin_dir.mkdir()
+    for name in ('bash', 'dirname', 'sed', 'git'):
+        (bin_dir / name).symlink_to(shutil.which(name))
+    environment = {'PATH': str(bin_dir), 'PYTHONDONTWRITEBYTECODE': '1'}
+    python = {
+        'default-venv': deploy / '.venv-gar-publish/bin/python',
+        'custom-venv': tmp_path / 'custom publishing venv/bin/python',
+        'explicit': tmp_path / 'explicit python',
+        'path': bin_dir / 'python3',
+    }[selection]
+    python.parent.mkdir(parents=True, exist_ok=True)
+    # Preview must not require build or Twine. Reject checks that ask for them,
+    # then run the actual planner with the test environment's Python 3.12.
+    python.write_text(
+        '#!/bin/sh\nif [ "$1" = "-c" ]; then\n'
+        '  case "$2" in *build*|*twine*) exit 1 ;; esac\nfi\n'
+        f'exec {shlex.quote(sys.executable)} "$@"\n'
+    )
+    python.chmod(0o755)
+    if selection == 'explicit':
+        environment['MN_PUBLISH_PYTHON'] = str(python)
+    elif selection == 'custom-venv':
+        environment['MN_GAR_PUBLISH_VENV'] = str(python.parent.parent)
+    result = subprocess.run(
+        [str(scripts / 'release_all.sh'), '-v', '1.4.0', '--plan'],
+        cwd=deploy if working_directory == 'deploy' else workspace,
+        env=environment, capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'Next release: v1.4.0' in result.stdout
+    assert 'one: 1.0.0 -> 1.0.1' in result.stderr
+    assert (index.read_bytes(), project.read_bytes()) == before
+    assert git(repo, 'status', '--porcelain') == ''
+    assert not (deploy / 'install_support').exists()
+    assert not (deploy / 'dist').exists()
+    if selection != 'default-venv':
+        assert not (deploy / '.venv-gar-publish').exists()
+
+
+@pytest.mark.parametrize('failure', ['missing', 'dependencies'])
+def test_release_preview_preserves_explicit_python_and_never_installs(tmp_path, failure):
+    release = Path(__file__).with_name('release_all.sh')
+    source, _, _ = release.read_text().partition('\nwhile [[ "$#" -gt 0 ]]')
+    functions = tmp_path / 'release-functions.sh'
+    functions.write_text(source)
+    python = tmp_path / 'selected python'
+    if failure == 'dependencies':
+        python.write_text('#!/bin/sh\nexit 1\n')
+        python.chmod(0o755)
+    result = subprocess.run(
+        ['bash', '-c', 'source "$FUNCTIONS_FILE"; select_python_plan_environment'],
+        capture_output=True, text=True, timeout=10,
+        env={'PATH': '/usr/bin:/bin', 'FUNCTIONS_FILE': str(functions),
+             'MN_PUBLISH_PYTHON': str(python)},
+    )
+    assert result.returncode != 0
+    assert 'Release preview requires Python 3.12 with packaging' in result.stderr
+    assert '--plan does not install dependencies' in result.stderr
+
+
+@pytest.mark.parametrize('state', ['missing', 'old-python', 'missing-dependencies', 'ready'])
+def test_publishing_prepares_python_312_and_reuses_ready_environment(tmp_path, state):
+    source, _, _ = Path(__file__).with_name('release_all.sh').read_text().partition('\nwhile [[ "$#" -gt 0 ]]')
+    functions = tmp_path / 'release-functions.sh'
+    functions.write_text(source)
+    deploy = tmp_path / 'mn-deploy'
+    deploy.mkdir()
+    venv = deploy / '.venv-gar-publish'
+    python = venv / 'bin/python'
+    version_ready = tmp_path / 'python-312'
+    dependencies_ready = tmp_path / 'dependencies'
+    template = tmp_path / 'python-template'
+    template.write_text(
+        '#!/bin/sh\ncase "$2" in\n'
+        f'  *sys.version_info*) [ -f {shlex.quote(str(version_ready))} ] || exit 1 ;;\nesac\n'
+        'case "$2" in\n'
+        f'  *"import build"*) [ -f {shlex.quote(str(dependencies_ready))} ] || exit 1 ;;\nesac\n'
+        'exit 0\n'
+    )
+    template.chmod(0o755)
+    if state != 'missing':
+        python.parent.mkdir(parents=True)
+        shutil.copy2(template, python)
+    if state in ('ready', 'missing-dependencies'):
+        version_ready.touch()
+    if state in ('ready', 'old-python'):
+        dependencies_ready.touch()
+    bin_dir = tmp_path / 'bin'
+    bin_dir.mkdir()
+    uv = bin_dir / 'uv'
+    log = tmp_path / 'uv.log'
+    uv.write_text(
+        '#!/bin/sh\nset -eu\n'
+        f'printf "%s\\n" "$*" >> {shlex.quote(str(log))}\n'
+        'if [ "$1" = "venv" ]; then\n'
+        f'  [ "$2" = "--python" ] && [ "$3" = "3.12" ] && [ "$4" = {shlex.quote(str(venv))} ] && [ "$5" = "--clear" ]\n'
+        f'  /bin/mkdir -p {shlex.quote(str(python.parent))}\n'
+        f'  /bin/cp {shlex.quote(str(template))} {shlex.quote(str(python))}\n'
+        f'  /usr/bin/touch {shlex.quote(str(version_ready))}\n'
+        f'  /bin/rm -f {shlex.quote(str(dependencies_ready))}\n'
+        'else\n  [ "$1 $2" = "pip install" ]\n'
+        f'  /usr/bin/touch {shlex.quote(str(dependencies_ready))}\nfi\n'
+    )
+    uv.chmod(0o755)
+    result = subprocess.run(
+        ['bash', '-c', 'source "$FUNCTIONS_FILE"; DEPLOY_DIR="$TEST_DEPLOY_DIR"; '
+         'prepare_python_publish_environment; prepare_python_publish_environment; printf "%s\\n" "$PUBLISH_PYTHON"'],
+        capture_output=True, text=True, timeout=10,
+        env={'PATH': f'{bin_dir}:/usr/bin:/bin', 'FUNCTIONS_FILE': str(functions),
+             'TEST_DEPLOY_DIR': str(deploy)},
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.splitlines()[-1] == str(python)
+    calls = log.read_text().splitlines() if log.exists() else []
+    assert len(calls) == {'missing': 2, 'old-python': 2, 'missing-dependencies': 1, 'ready': 0}[state]
+    if state in ('missing', 'old-python'):
+        assert calls[0] == f'venv --python 3.12 {venv} --clear'
+    if calls:
+        assert calls[-1].startswith(f'pip install --python {python} --upgrade ')
+        assert 'keyrings.google-artifactregistry-auth' in calls[-1]
 
 
 def test_independent_versions_and_retry(tmp_path):
@@ -353,7 +505,7 @@ def test_publisher_rejects_frozen_conflict_before_builds_or_artifact_cleanup(tmp
 
 
 def test_frozen_conflict_does_not_recommend_resuming_python(tmp_path):
-    release = Path(__file__).resolve().parents[1] / 'release_all.sh'
+    release = Path(__file__).with_name('release_all.sh')
     source, _, _ = release.read_text().partition('\nwhile [[ "$#" -gt 0 ]]')
     functions = tmp_path / 'release-functions.sh'
     functions.write_text(source)

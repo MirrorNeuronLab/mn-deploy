@@ -154,6 +154,11 @@ installer versions continue selecting their historical support and inventory.
 No package deletion, Git tag replacement, commit/push or installed-runtime
 mutation is part of this helper. Source repositories must be clean for apply.
 Full automatic releases skip version numbers already used by support snapshots.
+The aggregate release entrypoint is `scripts/release_all.sh`. Its read-only
+`--plan` uses an explicitly selected Python, the existing publishing environment,
+or `python3` on PATH when that environment is absent. Planning requires Python
+3.12 with `packaging` and `tomllib`; publishing retains the Python 3.12 contract.
+Preview never prepares an environment or installs dependencies.
 
 - Installation, removal, service control, state clearing, registry setup, and
   publishing are state-changing operations and require explicit invocation.
