@@ -207,3 +207,12 @@ runtime.
     583b1f904d2a4512010e2ef2b13afa93ea890cf2db5ac11cdb30ef853b6f8fd2
 - Package version, dependency requirements, and installer pins are unchanged.
   Existing installations require a forced reinstall to receive the replacement.
+
+## v1.4.0 -- 2026-10-23
+
+- GAR npm: mirrorneuron-web-ui@1.4.0 in mirrorneuron-npm.
+- GAR Python: all packages in package-index/python-packages.toml, including
+  mirrorneuron-api, mirrorneuron-cli, and mirrorneuron-python-sdk.
+- GAR Docker: mirror-neuron-core and membrane-context-engine each published
+  v1.4.0, 1.4.0, and latest (pointing to this release at confirmation).
+- GitHub tag: v1.4.0 across the release repositories.
