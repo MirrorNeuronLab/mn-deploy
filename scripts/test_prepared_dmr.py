@@ -26,7 +26,7 @@ def test_publisher_builds_pinned_cross_platform_archives(monkeypatch, tmp_path):
     module = publisher()
     recipe = preparation_recipe(resolve_model_entry("small"))
     commands, patches = [], []
-    monkeypatch.setattr(module, "patch_managed_server", patches.append)
+    monkeypatch.setattr("mn_sdk.dmr_build.patch_managed_server", patches.append)
     def run(command, **kwargs):
         commands.append((command, kwargs))
         output = ""
@@ -172,8 +172,7 @@ def test_cli_reuses_saved_archives_without_rebuilding(monkeypatch, tmp_path):
     module = publisher()
     recipe, directory, document = saved_release(module, tmp_path)
     models, published = [], []
-    monkeypatch.setattr(module, "resolve_model_entry", lambda model: models.append(model) or {})
-    monkeypatch.setattr(module, "preparation_recipe", lambda _: recipe)
+    monkeypatch.setattr(module, "catalog_recipe", lambda model: models.append(model) or recipe)
     monkeypatch.setattr(module, "build_archives", lambda *a, **k: pytest.fail("rebuilt saved archives"))
     monkeypatch.setattr(module, "publish_release", lambda *a, **k: published.append((a, k)))
     monkeypatch.setattr(sys, "argv", ["publish-prepared-dmr.py", "--model", "bonsai2:ptq1_0", "--from-directory", str(directory)])
@@ -200,3 +199,25 @@ def test_restore_wrapper_uses_selected_python_and_preserves_arguments(tmp_path):
     assert arguments == [str(wrapper.with_name("publish-prepared-dmr.py")), "--match-catalog",
                          "--from-directory", "archive path with spaces", "--apply"]
     assert cloud_python == str(python)
+
+
+def test_help_does_not_require_sdk_initialization(monkeypatch):
+    module = publisher()
+    monkeypatch.setattr(module, 'catalog_recipe', lambda *_: pytest.fail('initialized SDK for help'))
+    monkeypatch.setattr(sys, 'argv', ['publish-prepared-dmr.py', '--help'])
+    with pytest.raises(SystemExit) as result:
+        module.main()
+    assert result.value.code == 0
+
+
+def test_missing_sdk_reports_the_interpreter_setup_action(monkeypatch):
+    import builtins
+    module = publisher()
+    original = builtins.__import__
+    def without_sdk(name, *args, **kwargs):
+        if name == 'mn_sdk':
+            raise ModuleNotFoundError('mn_sdk')
+        return original(name, *args, **kwargs)
+    monkeypatch.setattr(builtins, '__import__', without_sdk)
+    with pytest.raises(RuntimeError, match='Set MN_PUBLISH_PYTHON'):
+        module.catalog_recipe('small')

@@ -21,11 +21,6 @@ import zipfile
 if sys.version_info < (3, 12):
     raise SystemExit("error: Python 3.12+ with the matching MirrorNeuron SDK is required")
 
-from mn_sdk import resolve_model_entry
-from mn_sdk.dmr_build import patch_managed_server, run_build_command
-from mn_sdk.dmr_recipe import preparation_recipe, managed_runner_version, SDK_NATIVE_POLICY
-
-
 def download_url(project, location, repository, version, name):
     file = quote(f"managed-dmr:{version}:{name}", safe="")
     return (f"https://artifactregistry.googleapis.com/download/v1/projects/{project}/"
@@ -53,7 +48,11 @@ def pack_archive(directory, destination):
                         archive.addfile(item, source)
 
 
-def build_archives(recipe, output, *, project, location, repository, run=run_build_command):
+def build_archives(recipe, output, *, project, location, repository, run=None):
+    from mn_sdk.dmr_build import patch_managed_server, run_build_command
+    from mn_sdk.dmr_recipe import managed_runner_version, SDK_NATIVE_POLICY
+
+    run = run or run_build_command
     output.mkdir(parents=True, exist_ok=True)
     version = managed_runner_version(recipe).removeprefix("mn-managed-")
     runner = recipe.document["runner"]
@@ -102,6 +101,8 @@ def build_archives(recipe, output, *, project, location, repository, run=run_bui
 
 def validate_release(recipe, directory, document, *, project, location, repository, match_catalog=False):
     """Check the exact upload inventory, including untrusted saved metadata."""
+    from mn_sdk.dmr_recipe import managed_runner_version
+
     runner = recipe.document["runner"]
     version = managed_runner_version(recipe).removeprefix("mn-managed-")
     platforms = {target.rsplit("-", 1)[0] for target in recipe.document["backend"]["assets"]}
@@ -164,6 +165,15 @@ def publish_release(directory, document, version, *, project, location, reposito
     verify_public_release(directory, document)
 
 
+def catalog_recipe(model):
+    try:
+        from mn_sdk import resolve_model_entry
+        from mn_sdk.dmr_recipe import preparation_recipe
+    except ImportError as exc:
+        raise RuntimeError("Set MN_PUBLISH_PYTHON to Python 3.12+ with the matching MirrorNeuron SDK installed") from exc
+    return preparation_recipe(resolve_model_entry(model))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     source = parser.add_mutually_exclusive_group(required=True)
@@ -177,7 +187,7 @@ def main():
     parser.add_argument("--match-catalog", action="store_true", help="Require the exact URLs and checksums already pinned in the SDK catalog.")
     args = parser.parse_args()
     try:
-        recipe = preparation_recipe(resolve_model_entry(args.model))
+        recipe = catalog_recipe(args.model)
         if recipe is None:
             raise ValueError("Selected model does not declare a prepared native DMR runner")
         directory = args.from_directory or args.output
