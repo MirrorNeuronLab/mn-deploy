@@ -675,6 +675,29 @@ version-parser patches. Add `--apply` to publish the immutable native archives
 to public GAR. The output's `runner-assets.json` supplies catalog URLs and hashes.
 Go and Git are release-build dependencies only.
 
+Restore these shared runner archives after GAR cleanup with:
+
+```bash
+./scripts/publish-dmr.sh --model bonsai2:ptq1_0 --output /tmp/managed-dmr-release --apply
+# Reuse a saved release without rebuilding:
+./scripts/publish-dmr.sh --model bonsai2:ptq1_0 --from-directory /tmp/managed-dmr-release --apply
+```
+
+The command uses `.venv-gar-publish/bin/python` by default, then `python3.12`;
+set `MN_PUBLISH_PYTHON` to another Python 3.12+ environment with the matching
+MirrorNeuron SDK installed. It also supplies that interpreter to `gcloud` unless
+`CLOUDSDK_PYTHON` is already set. Building needs Git and Go; publishing needs
+authenticated `gcloud` with upload permission. Saved archives need no build tools.
+Omit `--apply` to build/validate only; `--from-directory` then performs only local
+validation. The restore entrypoint requires the SDK catalog's exact URLs and
+checksums before upload. Different build tools may produce different archives;
+retain the original release directory for exact restoration. Upload skips existing
+files, publishes only the validated archives and their manifest, and verifies
+every complete public download anonymously. A conflicting existing file fails
+verification and is never overwritten. Co-workers share these native runner
+archives through their catalog recipe. For a new runner release, the original
+Python builder still produces a new `runner-assets.json` for catalog review.
+
 The Spark ARM64 CUDA backend is published separately as
 `prism-llama-backend:prism-b10743-adfffbe-cuda13-sm121-arm64-v1` in the same generic
 repository. It targets Ubuntu 24.04, GB10/SM 12.1 and driver 580+, and includes

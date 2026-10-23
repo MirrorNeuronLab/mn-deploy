@@ -384,6 +384,23 @@ immutable `managed-dmr:<source-prefix>-policy<SDK-policy>` version. The generate
 `runner-assets.json` is the catalog's runner definition. Publish and verify
 anonymous downloads before shipping its URLs and checksums in the SDK catalog.
 
+`scripts/publish-dmr.sh` restores this shared native runner release after GAR
+cleanup, using the existing builder with `--match-catalog`. `--model` selects the
+SDK catalog recipe; `small` currently selects Bonsai2. Select either `--output`
+for an empty build directory or `--from-directory` for saved archives and their
+manifest. The latter requires no Git or Go. Local validation checks recipe identity,
+the complete platform inventory, filenames, URLs, non-symlink archives and SHA-256.
+The restore entrypoint also requires the exact catalog pins. Without `--apply`,
+saved-release validation has no network or registry side effects. Apply stages
+only verified release files, rechecks their bytes, uploads with `--skip-existing`,
+then anonymously downloads and hashes every public archive. Existing versions are
+never deleted or overwritten, and conflicting remote bytes fail verification.
+The entrypoint selects `MN_PUBLISH_PYTHON`, the existing publishing environment,
+or `python3.12`, and defaults `CLOUDSDK_PYTHON` to that interpreter. Python 3.12+
+with the matching SDK and authenticated `gcloud` are publishing prerequisites.
+The original Python builder retains its new-release mode without catalog-pin
+matching so generated definitions can be reviewed before updating the SDK catalog.
+
 The prepared Spark Prism backend is an independent native archive, pinned to
 `adfffbe41b2cabcd51fff326ab045662265062bb` and published under
 `prism-llama-backend:prism-b10743-adfffbe-cuda13-sm121-arm64-v1`. Its catalog
