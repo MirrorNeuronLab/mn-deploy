@@ -540,8 +540,8 @@ name = "mn-blueprint-blocks"
 path = "mn-python-sdk/packages/blueprint-blocks"
 publish_group = "runtime"
 version = "1.3.65"
-installer_groups = []
-binary_default = false
+installer_groups = ["sdk"]
+binary_default = true
 source_hash = "v2:779800fd8bca05533eaf25560dd58f199ab602eacdf516a962db6fba84c60f62"
 
 [[packages]]

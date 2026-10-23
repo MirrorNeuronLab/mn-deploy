@@ -471,6 +471,14 @@ see [Google's npm package contract](https://docs.cloud.google.com/artifact-regis
 
 ## Optional Python SDK components
 
+The current SDK installer group includes `mn-blueprint-blocks` for binary and
+GitHub installs. GitHub component selection uses the indexed group and source
+path, including distributions without the `mn-python-sdk-` name prefix. Local
+installs already include `packages/blueprint-blocks` through component discovery.
+The release inventory publishes it with the shared SDK version. This installer
+change is unreleased and requires a new install-support snapshot; historical
+snapshots keep their original package selections.
+
 The Python package index includes independently built SDK component projects
 under `mn-python-sdk/packages/`. Local source installation resolves every SDK
 component plus the SDK, CLI, and API projects in one editable transaction, so

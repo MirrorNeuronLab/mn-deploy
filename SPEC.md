@@ -206,6 +206,13 @@ are never implicit test steps.
 
 ## Optional Python SDK components
 
+The SDK installer group includes `mn-blueprint-blocks` in binary and GitHub
+installs. GitHub source selection uses group membership and a validated SDK
+component path, without requiring a distribution-name prefix. Local discovery
+includes the same component. It remains in the runtime publishing inventory and
+shares the SDK version group. Release this selection change with a new immutable
+install-support snapshot; historical snapshots retain their original defaults.
+
 The Python package index includes independently built SDK component projects
 under `mn-python-sdk/packages/`. Local source installation resolves every SDK
 component plus the SDK, CLI, and API projects in one editable transaction, so

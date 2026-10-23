@@ -1754,9 +1754,12 @@ from pathlib import Path
 packages = tomllib.loads(Path(sys.argv[1]).read_text())["packages"]
 for package in packages:
     name = package["name"]
-    if not name.startswith("mn-python-sdk-") or "sdk" not in package.get("installer_groups", []):
+    if "sdk" not in package.get("installer_groups", []):
         continue
     path = package["path"]
+    # Component names need not share a prefix (for example mn-blueprint-blocks).
+    if path == "mn-python-sdk":
+        continue
     if not path.startswith("mn-python-sdk/packages/") or ".." in Path(path).parts:
         raise SystemExit(f"Invalid SDK component source path: {path}")
     extras = package.get("default_extras") or []
