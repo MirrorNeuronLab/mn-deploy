@@ -264,7 +264,7 @@ def publish_component(args, workspace, component, directory):
         target = Path(staging) / 'source'
         stage_repository(workspace / component['repo'], target)
         if kind == 'web-ui':
-            run('bash', SCRIPTS.parent / 'publish_web_ui_to_google_artifact_registry.sh', '--apply',
+            run('bash', SCRIPTS / 'publish_web_ui_to_google_artifact_registry.sh', '--apply',
                 '--version', component['version'], '--web-ui-dir', target,
                 '--dist-dir', directory / 'web-ui', '--project', args.project,
                 '--location', args.location, '--repository', args.npm_repository)

@@ -3,7 +3,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORKSPACE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+DEPLOY_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+WORKSPACE_ROOT="$(cd "${DEPLOY_DIR}/.." && pwd)"
 
 PROJECT="${MN_GAR_PROJECT:-mirrorneuron-public-packages}"
 LOCATION="${MN_GAR_LOCATION:-us-central1}"
@@ -27,7 +28,7 @@ EMULATE_AMD64="N"
 
 usage() {
     cat <<'EOF'
-Usage: ./publish_public_core_to_google_artifact_registry.sh [options]
+Usage: ./scripts/publish_public_core_to_google_artifact_registry.sh [options]
 
 Build and publish the Core Docker image from the exact requested Core Git tag.
 The script defaults to a dry run. Pass --apply to create/configure the GAR
@@ -56,9 +57,9 @@ Options:
   -h, --help                      Show this help.
 
 Examples:
-  ./publish_public_core_to_google_artifact_registry.sh --version v1.2.30
+  ./scripts/publish_public_core_to_google_artifact_registry.sh --version v1.2.30
 
-  ./publish_public_core_to_google_artifact_registry.sh \
+  ./scripts/publish_public_core_to_google_artifact_registry.sh \
     --apply \
     --version v1.2.30
 EOF

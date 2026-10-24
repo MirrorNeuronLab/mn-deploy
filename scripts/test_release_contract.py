@@ -492,7 +492,7 @@ def test_publisher_rejects_frozen_conflict_before_builds_or_artifact_cleanup(tmp
     gcloud = tmp_path / 'gcloud'
     gcloud.write_text('#!/bin/sh\nexit 99\n')
     gcloud.chmod(0o755)
-    publisher = Path(__file__).resolve().parents[1] / 'publish_python_packages_to_google_artifact_registry.sh'
+    publisher = Path(__file__).with_name('publish_python_packages_to_google_artifact_registry.sh')
     result = subprocess.run(
         ['bash', str(publisher), '--index-file', str(index), '--dist-dir', str(dist),
          '--local-index-dir', str(tmp_path / 'simple'), '--project', 'test-project', '--python', sys.executable],

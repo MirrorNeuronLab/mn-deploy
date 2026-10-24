@@ -3,13 +3,14 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+DEPLOY_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+WORKSPACE_ROOT="$(cd "${DEPLOY_DIR}/.." && pwd)"
 
 PROJECT="${MN_GAR_PROJECT:-mirrorneuron-public-packages}"
 LOCATION="${MN_GAR_LOCATION:-us-central1}"
 MEMBRANE_DIR="${MN_MEMBRANE_DIR:-${WORKSPACE_ROOT}/Membrane}"
 VERSION="${MN_MEMBRANE_VERSION:-${MN_PACKAGE_VERSION:-}}"
-DIST_DIR="${MN_MEMBRANE_DIST_DIR:-${SCRIPT_DIR}/dist/membrane}"
+DIST_DIR="${MN_MEMBRANE_DIST_DIR:-${DEPLOY_DIR}/dist/membrane}"
 BINARY_ARTIFACTS_DIR="${MN_MEMBRANE_BINARY_ARTIFACTS_DIR:-}"
 BINARY_REPOSITORY="${MN_MEMBRANE_GAR_BINARY_REPOSITORY:-mirrorneuron-binaries}"
 BINARY_PACKAGE="${MN_MEMBRANE_GAR_BINARY_PACKAGE:-membrane}"
@@ -31,7 +32,7 @@ EMULATE_AMD64="N"
 
 usage() {
     cat <<EOF
-Usage: ./publish_public_membrane_to_google_artifact_registry.sh [options]
+Usage: ./scripts/publish_public_membrane_to_google_artifact_registry.sh [options]
 
 Publish public Membrane Rust binary archives and Docker runtime images to
 Google Artifact Registry using the public MirrorNeuron package project.
@@ -80,13 +81,13 @@ Options:
   -h, --help                      Show this help.
 
 Examples:
-  ./publish_public_membrane_to_google_artifact_registry.sh --version v1.2.24
+  ./scripts/publish_public_membrane_to_google_artifact_registry.sh --version v1.2.24
 
-  ./publish_public_membrane_to_google_artifact_registry.sh \\
+  ./scripts/publish_public_membrane_to_google_artifact_registry.sh \\
     --apply \\
     --version v1.2.24
 
-  ./publish_public_membrane_to_google_artifact_registry.sh \\
+  ./scripts/publish_public_membrane_to_google_artifact_registry.sh \\
     --apply \\
     --version v1.2.24 \\
     --binary-artifacts-dir /tmp/membrane-release-assets

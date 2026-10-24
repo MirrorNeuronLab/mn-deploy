@@ -322,7 +322,7 @@ publish_and_verify_gar() {
 
   if should_run_phase python; then
     CURRENT_PHASE="python"
-    "${DEPLOY_DIR}/publish_python_packages_to_google_artifact_registry.sh" \
+    "${SCRIPT_DIR}/publish_python_packages_to_google_artifact_registry.sh" \
       --python "$PUBLISH_PYTHON" \
       --project "$PROJECT" \
       --location "$LOCATION" \
@@ -333,7 +333,7 @@ publish_and_verify_gar() {
 
   if should_run_phase web-ui; then
     CURRENT_PHASE="web-ui"
-    "${DEPLOY_DIR}/publish_web_ui_to_google_artifact_registry.sh" \
+    "${SCRIPT_DIR}/publish_web_ui_to_google_artifact_registry.sh" \
       --version "$VERSION" \
       --project "$PROJECT" \
       --location "$LOCATION" \
@@ -356,7 +356,7 @@ publish_and_verify_gar() {
         trap 'git -C "${WORKSPACE_ROOT}/Membrane" worktree remove --force "$membrane_dir" >/dev/null 2>&1 || true; rm -rf "$membrane_worktree_root"' EXIT
         git -C "${WORKSPACE_ROOT}/Membrane" worktree add \
           --detach "$membrane_dir" "refs/tags/${TAG}" >/dev/null
-        "${DEPLOY_DIR}/publish_public_membrane_to_google_artifact_registry.sh" \
+        "${SCRIPT_DIR}/publish_public_membrane_to_google_artifact_registry.sh" \
           --apply \
           --version "$TAG" \
           --membrane-dir "$membrane_dir" \
@@ -380,7 +380,7 @@ publish_and_verify_gar() {
     if ! grep -qx "$VERSION" "$core_tags_file" ||
        ! grep -qx "$TAG" "$core_tags_file" ||
        ! grep -qx latest "$core_tags_file"; then
-      "${DEPLOY_DIR}/publish_public_core_to_google_artifact_registry.sh" \
+      "${SCRIPT_DIR}/publish_public_core_to_google_artifact_registry.sh" \
         --apply \
         --version "$TAG" \
         --project "$PROJECT" \

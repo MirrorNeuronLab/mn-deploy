@@ -21,7 +21,7 @@ installation or cleanup.
   versioned/URL installs.
 - `package-index/python-packages.toml`: published Python package inventory.
 - `save_install_support.sh`: creates versioned support snapshots.
-- `publish_*.sh`, `setup_google_artifact_registry.sh`: release publishing.
+- `scripts/publish_*.sh`, `setup_google_artifact_registry.sh`: release publishing.
 - `scripts/`: validation, release packaging, and explicit state cleanup helpers.
 
 ## Installer Rules

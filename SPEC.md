@@ -16,7 +16,7 @@ This specification applies only to deployment assets in this repository.
 - `server.sh`: start, stop, and inspect installed services.
 - `prepare_cluster.sh`: prepare cluster-facing deployment configuration.
 - `save_install_support.sh`: snapshot release support under a version.
-- publishing scripts: build or publish explicitly selected release artifacts.
+- `scripts/publish_*.sh`: build or publish explicitly selected release artifacts.
 
 Flags shown by each script's `--help` are the exact command contract.
 

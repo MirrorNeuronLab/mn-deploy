@@ -3,7 +3,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+DEPLOY_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+WORKSPACE_ROOT="$(cd "${DEPLOY_DIR}/.." && pwd)"
 
 PROJECT="${MN_GAR_PROJECT:-mirrorneuron-public-packages}"
 LOCATION="${MN_GAR_LOCATION:-us-central1}"
@@ -11,7 +12,7 @@ REPOSITORY="${MN_OTTERDESK_GAR_REPOSITORY:-otterdesk-desktop}"
 PACKAGE="${MN_OTTERDESK_GAR_PACKAGE:-otterdesk}"
 OTTERDESK_DIR="${MN_OTTERDESK_DIR:-${WORKSPACE_ROOT}/otterdesk-desktop-app}"
 DIST_DIR="${MN_OTTERDESK_DIST_DIR:-${OTTERDESK_DIR}/dist}"
-STAGING_DIR="${MN_OTTERDESK_STAGING_DIR:-${SCRIPT_DIR}/dist/otterdesk-gar}"
+STAGING_DIR="${MN_OTTERDESK_STAGING_DIR:-${DEPLOY_DIR}/dist/otterdesk-gar}"
 VERSION="${MN_OTTERDESK_VERSION:-${MN_PACKAGE_VERSION:-}}"
 GCLOUD_BIN="${MN_GCLOUD_BIN:-gcloud}"
 NPM_BIN="${MN_NPM_BIN:-npm}"
@@ -21,7 +22,7 @@ BUILD_ARTIFACTS="N"
 
 usage() {
     cat <<EOF
-Usage: ./publish_public_otterdesk_to_google_artifact_registry.sh [options]
+Usage: ./scripts/publish_public_otterdesk_to_google_artifact_registry.sh [options]
 
 Publish public Otterdesk desktop application packages to Google Artifact
 Registry using the public MirrorNeuron package project.
@@ -58,9 +59,9 @@ Options:
   -h, --help                 Show this help.
 
 Examples:
-  ./publish_public_otterdesk_to_google_artifact_registry.sh --version v1.2.24
+  ./scripts/publish_public_otterdesk_to_google_artifact_registry.sh --version v1.2.24
 
-  ./publish_public_otterdesk_to_google_artifact_registry.sh \\
+  ./scripts/publish_public_otterdesk_to_google_artifact_registry.sh \\
     --apply \\
     --build \\
     --version v1.2.24

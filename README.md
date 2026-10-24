@@ -400,7 +400,7 @@ see [Google's npm package contract](https://docs.cloud.google.com/artifact-regis
 - GAR publish/sync dry run:
 
   ```bash
-  ./publish_python_packages_to_google_artifact_registry.sh \
+  ./scripts/publish_python_packages_to_google_artifact_registry.sh \
     --project mirrorneuron-public-packages \
     --location us-central1 \
     --repository agent-skills
@@ -409,7 +409,7 @@ see [Google's npm package contract](https://docs.cloud.google.com/artifact-regis
 - GAR publish/sync apply:
 
   ```bash
-  ./publish_python_packages_to_google_artifact_registry.sh \
+  ./scripts/publish_python_packages_to_google_artifact_registry.sh \
     --apply \
     --project mirrorneuron-public-packages \
     --location us-central1 \
@@ -419,13 +419,13 @@ see [Google's npm package contract](https://docs.cloud.google.com/artifact-regis
 - Web UI GAR npm publish dry run:
 
   ```bash
-  ./publish_web_ui_to_google_artifact_registry.sh --version v1.2.30
+  ./scripts/publish_web_ui_to_google_artifact_registry.sh --version v1.2.30
   ```
 
 - Web UI GAR npm publish apply:
 
   ```bash
-  ./publish_web_ui_to_google_artifact_registry.sh \
+  ./scripts/publish_web_ui_to_google_artifact_registry.sh \
     --apply \
     --version v1.2.30
   ```
@@ -433,7 +433,7 @@ see [Google's npm package contract](https://docs.cloud.google.com/artifact-regis
 - Public Core multi-platform Docker image GAR apply:
 
   ```bash
-  ./publish_public_core_to_google_artifact_registry.sh \
+  ./scripts/publish_public_core_to_google_artifact_registry.sh \
     --apply \
     --version v1.2.30
   ```
@@ -445,14 +445,14 @@ see [Google's npm package contract](https://docs.cloud.google.com/artifact-regis
 - Public Membrane Rust binary and Docker image GAR dry run:
 
   ```bash
-  ./publish_public_membrane_to_google_artifact_registry.sh \
+  ./scripts/publish_public_membrane_to_google_artifact_registry.sh \
     --version v1.2.8
   ```
 
 - Public Membrane Rust binary and Docker image GAR apply:
 
   ```bash
-  ./publish_public_membrane_to_google_artifact_registry.sh \
+  ./scripts/publish_public_membrane_to_google_artifact_registry.sh \
     --apply \
     --version v1.2.8
   ```
@@ -464,7 +464,7 @@ see [Google's npm package contract](https://docs.cloud.google.com/artifact-regis
 - Public Otterdesk desktop app package GAR apply:
 
   ```bash
-  ./publish_public_otterdesk_to_google_artifact_registry.sh \
+  ./scripts/publish_public_otterdesk_to_google_artifact_registry.sh \
     --apply \
     --version v1.2.8
   ```

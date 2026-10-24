@@ -108,7 +108,7 @@ prints stale package names that would be deleted. It does not upload or delete.
 
 ```bash
 PATH="$HOME/google-cloud-sdk/bin:$PATH" \
-./publish_python_packages_to_google_artifact_registry.sh \
+./scripts/publish_python_packages_to_google_artifact_registry.sh \
   --project mirrorneuron-public-packages \
   --location us-central1 \
   --repository agent-skills
@@ -133,7 +133,7 @@ package names that are not present in the local package index.
 
 ```bash
 PATH="$HOME/google-cloud-sdk/bin:$PATH" \
-./publish_python_packages_to_google_artifact_registry.sh \
+./scripts/publish_python_packages_to_google_artifact_registry.sh \
   --apply \
   --project mirrorneuron-public-packages \
   --location us-central1 \
@@ -158,8 +158,8 @@ The Web UI publisher runs `npm ci` and `npm run build` in the local
 uses npmjs for its public build dependencies. Binary installation downloads only the resulting self-contained MirrorNeuron package from GAR.
 
 ```bash
-./publish_web_ui_to_google_artifact_registry.sh --version v1.2.30
-./publish_web_ui_to_google_artifact_registry.sh --apply --version v1.2.30
+./scripts/publish_web_ui_to_google_artifact_registry.sh --version v1.2.30
+./scripts/publish_web_ui_to_google_artifact_registry.sh --apply --version v1.2.30
 ```
 
 Apply mode authenticates with a short-lived `gcloud auth print-access-token`
@@ -175,13 +175,13 @@ Membrane runtime publishing uses the same public GAR project:
 The dedicated publisher is:
 
 ```bash
-./publish_public_membrane_to_google_artifact_registry.sh --version v1.2.8
+./scripts/publish_public_membrane_to_google_artifact_registry.sh --version v1.2.8
 ```
 
 Dry run is the default. To publish:
 
 ```bash
-./publish_public_membrane_to_google_artifact_registry.sh \
+./scripts/publish_public_membrane_to_google_artifact_registry.sh \
   --apply \
   --version v1.2.8
 ```
@@ -201,7 +201,7 @@ If GitHub release assets were already built, upload those instead of building a
 local host-only Rust archive:
 
 ```bash
-./publish_public_membrane_to_google_artifact_registry.sh \
+./scripts/publish_public_membrane_to_google_artifact_registry.sh \
   --apply \
   --version v1.2.8 \
   --binary-artifacts-dir /path/to/membrane-release-assets
@@ -217,7 +217,7 @@ The Core runtime image is published locally from the exact requested Core Git
 tag:
 
 ```bash
-./publish_public_core_to_google_artifact_registry.sh \
+./scripts/publish_public_core_to_google_artifact_registry.sh \
   --apply \
   --version v1.2.30
 ```
@@ -239,7 +239,7 @@ Otterdesk desktop app packages can be published manually to the same public GAR
 project without GitHub Actions:
 
 ```bash
-./publish_public_otterdesk_to_google_artifact_registry.sh \
+./scripts/publish_public_otterdesk_to_google_artifact_registry.sh \
   --apply \
   --version v1.2.8
 ```
@@ -256,7 +256,7 @@ cd ../otterdesk-desktop-app
 npm run build
 npm run dist:mac:all
 cd ../mn-deploy
-./publish_public_otterdesk_to_google_artifact_registry.sh --apply --version v1.2.8
+./scripts/publish_public_otterdesk_to_google_artifact_registry.sh --apply --version v1.2.8
 ```
 
 Download a file through GAR:
@@ -368,7 +368,7 @@ If publishing fails with:
 ERROR UnsupportedConfiguration: ... does not have support for the following features: --skip-existing
 ```
 
-make sure `publish_python_packages_to_google_artifact_registry.sh` does not pass
+make sure `scripts/publish_python_packages_to_google_artifact_registry.sh` does not pass
 `--skip-existing` to `twine upload`.
 
 If publishing fails with:

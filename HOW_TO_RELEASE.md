@@ -76,29 +76,36 @@ is present, finalization also requires it to be clean and synchronized.
 
 ## Component publishers
 
-The aggregate command invokes these local publishers with `--apply`:
+The aggregate command delegates to these component publishers in `scripts/`
+with `--apply`:
 
 ```text
-publish_python_packages_to_google_artifact_registry.sh
-publish_web_ui_to_google_artifact_registry.sh
-publish_public_core_to_google_artifact_registry.sh
-publish_public_membrane_to_google_artifact_registry.sh
+scripts/publish_python_packages_to_google_artifact_registry.sh
+scripts/publish_web_ui_to_google_artifact_registry.sh
+scripts/publish_public_core_to_google_artifact_registry.sh
+scripts/publish_public_membrane_to_google_artifact_registry.sh
 ```
+
+The separate desktop publisher,
+`scripts/publish_public_otterdesk_to_google_artifact_registry.sh`, is run
+explicitly for Otterdesk releases. It is not part of the aggregate release.
+Publishing environments, package indexes, and generated artifacts keep their
+existing locations under `mn-deploy/`.
 
 Each publisher also supports a dry run or focused backfill. For example:
 
 ```bash
-./publish_python_packages_to_google_artifact_registry.sh \
+./scripts/publish_python_packages_to_google_artifact_registry.sh \
   --python ./.venv-gar-publish/bin/python \
   --project mirrorneuron-public-packages \
   --no-prune
 
-./publish_web_ui_to_google_artifact_registry.sh --version v1.3.43
+./scripts/publish_web_ui_to_google_artifact_registry.sh --version v1.3.43
 
-./publish_public_core_to_google_artifact_registry.sh \
+./scripts/publish_public_core_to_google_artifact_registry.sh \
   --apply --version v1.3.43
 
-./publish_public_membrane_to_google_artifact_registry.sh \
+./scripts/publish_public_membrane_to_google_artifact_registry.sh \
   --apply --version v1.3.43 --skip-binary
 ```
 

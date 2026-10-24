@@ -3,26 +3,27 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-INDEX_FILE="${MN_PACKAGE_INDEX_FILE:-${SCRIPT_DIR}/package-index/python-packages.toml}"
+DEPLOY_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+WORKSPACE_ROOT="$(cd "${DEPLOY_DIR}/.." && pwd)"
+INDEX_FILE="${MN_PACKAGE_INDEX_FILE:-${DEPLOY_DIR}/package-index/python-packages.toml}"
 PROJECT="${MN_GAR_PROJECT:-}"
 LOCATION="${MN_GAR_LOCATION:-us-central1}"
 REPOSITORY="${MN_GAR_REPOSITORY:-agent-skills}"
-PUBLISH_VENV="${MN_GAR_PUBLISH_VENV:-${SCRIPT_DIR}/.venv-gar-publish}"
+PUBLISH_VENV="${MN_GAR_PUBLISH_VENV:-${DEPLOY_DIR}/.venv-gar-publish}"
 if [ -x "${PUBLISH_VENV}/bin/python" ]; then
     PYTHON_BIN="${MN_PUBLISH_PYTHON:-${PUBLISH_VENV}/bin/python}"
 else
     PYTHON_BIN="${MN_PUBLISH_PYTHON:-python3.12}"
 fi
 GCLOUD_BIN="${MN_GCLOUD_BIN:-gcloud}"
-DIST_DIR="${MN_PYTHON_DIST_DIR:-${SCRIPT_DIR}/dist/python-packages}"
-LOCAL_INDEX_DIR="${MN_LOCAL_PYTHON_INDEX_DIR:-${SCRIPT_DIR}/local-python-index}"
+DIST_DIR="${MN_PYTHON_DIST_DIR:-${DEPLOY_DIR}/dist/python-packages}"
+LOCAL_INDEX_DIR="${MN_LOCAL_PYTHON_INDEX_DIR:-${DEPLOY_DIR}/local-python-index}"
 APPLY="N"
 PRUNE="Y"
 
 usage() {
     cat <<EOF
-Usage: ./publish_python_packages_to_google_artifact_registry.sh [options]
+Usage: ./scripts/publish_python_packages_to_google_artifact_registry.sh [options]
 
 Build indexed MirrorNeuron Python packages, generate a local simple index, and
 sync package names to Google Artifact Registry.
@@ -242,13 +243,13 @@ for line in package_rows.read_text().splitlines():
 PY
 sort -u "$INDEXED_NAMES" -o "$INDEXED_NAMES"
 
-"$PYTHON_BIN" "${SCRIPT_DIR}/scripts/prepare-python-package-index.py" \
+"$PYTHON_BIN" "${SCRIPT_DIR}/prepare-python-package-index.py" \
     "$INDEX_FILE" "$WORKSPACE_ROOT" unused --verify-source --verify-dependencies
 
 # Backends rewrite egg-info and build trees, including files tracked by some
 # repositories. Build in owned temporary sources so retries keep main clean.
 BUILD_WORKSPACE="$(mktemp -d "${TMPDIR:-/tmp}/mn-python-build.XXXXXX")"
-"$PYTHON_BIN" "${SCRIPT_DIR}/scripts/stage-python-release-sources.py" "$PACKAGE_ROWS" "$BUILD_WORKSPACE"
+"$PYTHON_BIN" "${SCRIPT_DIR}/stage-python-release-sources.py" "$PACKAGE_ROWS" "$BUILD_WORKSPACE"
 
 echo "Building indexed Python packages from $INDEX_FILE."
 rm -rf "$DIST_DIR" "$LOCAL_INDEX_DIR"
@@ -282,7 +283,7 @@ echo "Checking distributions."
 "$PYTHON_BIN" -m twine check "$DIST_DIR"/*
 
 echo "Checking release dependency compatibility (including blueprint extras)."
-"$PYTHON_BIN" "${SCRIPT_DIR}/scripts/validate-python-release.py" "$INDEX_FILE" "$DIST_DIR"
+"$PYTHON_BIN" "${SCRIPT_DIR}/validate-python-release.py" "$INDEX_FILE" "$DIST_DIR"
 
 echo "Indexing local distribution files."
 "$PYTHON_BIN" - "$INDEX_FILE" "$DIST_DIR" > "$LOCAL_ARTIFACTS" <<'PY'

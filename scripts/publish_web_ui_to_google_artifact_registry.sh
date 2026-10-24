@@ -3,12 +3,13 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORKSPACE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+DEPLOY_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+WORKSPACE_ROOT="$(cd "${DEPLOY_DIR}/.." && pwd)"
 PROJECT="${MN_GAR_PROJECT:-mirrorneuron-public-packages}"
 LOCATION="${MN_GAR_LOCATION:-us-central1}"
 REPOSITORY="${MN_GAR_NPM_REPOSITORY:-mirrorneuron-npm}"
 WEB_UI_DIR="${MN_WEB_UI_DIR:-${WORKSPACE_ROOT}/mn-web-ui}"
-DIST_DIR="${MN_WEB_UI_DIST_DIR:-${SCRIPT_DIR}/dist/web-ui}"
+DIST_DIR="${MN_WEB_UI_DIST_DIR:-${DEPLOY_DIR}/dist/web-ui}"
 NPM_BIN="${MN_NPM_BIN:-npm}"
 GCLOUD_BIN="${MN_GCLOUD_BIN:-gcloud}"
 NODE_BIN="${MN_NODE_BIN:-node}"
@@ -18,7 +19,7 @@ SKIP_BUILD="N"
 
 usage() {
   cat <<'EOF'
-Usage: publish_web_ui_to_google_artifact_registry.sh --version VERSION [options]
+Usage: ./scripts/publish_web_ui_to_google_artifact_registry.sh --version VERSION [options]
 
 Build a self-contained mirrorneuron-web-ui npm package from the local checkout
 and publish it to Google Artifact Registry. GitHub workflow artifacts are not inputs. The public npm registry is used only
