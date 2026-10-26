@@ -991,6 +991,14 @@ function mn_run_runtime_compose() {
 }
 
 MN_RUNTIME_START_LOG=""
+function mn_prepare_openshell_gateway_for_start() {
+    [ "$INSTALL_OPENSHELL" = "Y" ] || return 0
+    # Compose creates its network before we resolve the Linux bridge address.
+    # Persist the final endpoint before the host-native watchdog inherits it.
+    mn_run_runtime_compose create --no-deps openshell
+    reconcile_openshell_gateway_bind_host "${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
+}
+
 function mn_run_runtime_start_command() {
     local log_dir="${TMPDIR:-/tmp}/mirror_neuron_install"
     local log_file="${log_dir}/runtime-start.$$.log"
@@ -3696,13 +3704,13 @@ fi
 
 if [ "$START_NOW" = "Y" ]; then
     print_step "Starting MirrorNeuron services"
+    mn_prepare_openshell_gateway_for_start
     if ! mn_run_runtime_start_command "$VENV_DIR/bin/mn" runtime start; then
         [ -n "$MN_RUNTIME_START_LOG" ] && print_warning "CLI startup details: $MN_RUNTIME_START_LOG"
         print_error "Runtime startup failed. Restore the original node identity/configuration, then retry mn runtime start."
         return 1
     fi
     if [ "$INSTALL_OPENSHELL" = "Y" ]; then
-        reconcile_openshell_gateway_bind_host "${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
         wait_for_openshell_worker_service
     fi
     print_success "MirrorNeuron services are running."
@@ -5514,13 +5522,13 @@ ensure_shell_profile_exports
 if [ "$START_NOW" = "Y" ]; then
     print_step "Starting MirrorNeuron services"
     "$VENV_DIR/bin/mn" runtime stop >/dev/null 2>&1 || true
+    mn_prepare_openshell_gateway_for_start
     if ! mn_run_runtime_start_command "$VENV_DIR/bin/mn" runtime start; then
         [ -n "$MN_RUNTIME_START_LOG" ] && print_warning "CLI startup details: $MN_RUNTIME_START_LOG"
         print_error "Runtime startup failed. Restore the original node identity/configuration, then retry mn runtime start."
         return 1
     fi
     if [ "$INSTALL_OPENSHELL" = "Y" ]; then
-        reconcile_openshell_gateway_bind_host "${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
         wait_for_openshell_worker_service
     fi
     print_success "MirrorNeuron services are running."
@@ -7521,13 +7529,13 @@ fi
 
 if [ "$START_NOW" = "Y" ]; then
     print_step "Starting MirrorNeuron services"
+    mn_prepare_openshell_gateway_for_start
     if ! mn_run_runtime_start_command "$VENV_DIR/bin/mn" runtime start; then
         [ -n "$MN_RUNTIME_START_LOG" ] && print_warning "CLI startup details: $MN_RUNTIME_START_LOG"
         print_error "Runtime startup failed. Restore the original node identity/configuration, then retry mn runtime start."
         return 1
     fi
     if [ "$INSTALL_OPENSHELL" = "Y" ]; then
-        reconcile_openshell_gateway_bind_host "${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
         wait_for_openshell_worker_service
     fi
     print_success "MirrorNeuron services are running."

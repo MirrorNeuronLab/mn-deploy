@@ -54,6 +54,15 @@ component.
 All modes use the single `mn runtime start` contract. There is no worker-only
 runtime, and worker-only installer flags are rejected.
 
+When OpenShell is selected, automatic startup creates its Compose service and
+network before resolving the final host gateway endpoint. The installer
+persists that endpoint before `mn runtime start` launches the native SDK
+watchdog; it must not change the gateway address after the helper inherits it.
+Linux uses the resolved Docker bridge gateway, Docker Desktop uses loopback,
+and explicit bind/endpoint overrides remain authoritative. Preparation failure
+stops startup before the native helper launches. This ordering applies to
+binary, GitHub and local modes without changing immutable support snapshots.
+
 Python 3.12 is the standard runtime minor version across native services,
 HostLocal workers, Python containers, SDK components, agents, and skills.
 Python distributions require `>=3.12`; contributor selectors and CI use 3.12.

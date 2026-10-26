@@ -1,5 +1,13 @@
 # MirrorNeuron Deploy
 
+OpenShell startup resolves the Compose network gateway before launching the
+host-native SDK helper. The installer creates the OpenShell service without
+starting dependencies, records the resolved bind address and endpoint, then
+starts the runtime. Linux native preparation therefore uses the Docker bridge
+address (for example `172.19.0.1:58080`); Docker Desktop retains loopback and
+explicit gateway overrides remain authoritative. All three install modes use
+this ordering. Historical support snapshots remain unchanged.
+
 Desktop node identity fixes are unreleased. They require the matching CLI and
 Core changes: persistent `MN_HOME/node-identity.json`, startup validation, and
 `mn runtime reconnect`. Reinstall preserves existing configured names; missing
