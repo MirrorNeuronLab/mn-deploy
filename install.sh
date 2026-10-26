@@ -995,7 +995,7 @@ function mn_prepare_openshell_gateway_for_start() {
     [ "$INSTALL_OPENSHELL" = "Y" ] || return 0
     # Compose creates its network before we resolve the Linux bridge address.
     # Persist the final endpoint before the host-native watchdog inherits it.
-    mn_run_runtime_compose create --no-deps openshell
+    mn_run_runtime_compose create openshell
     reconcile_openshell_gateway_bind_host "${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
 }
 
