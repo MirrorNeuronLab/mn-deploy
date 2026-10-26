@@ -3,8 +3,8 @@
 OpenShell startup resolves the Compose network gateway before launching the
 host-native SDK helper. The installer uses `docker compose create openshell`
 to create the service without starting it, records the resolved bind address
-and endpoint, then starts the runtime. Linux native preparation uses the Docker bridge
-address (for example `172.19.0.1:58080`); Docker Desktop retains loopback and
+and endpoint, then starts the runtime. Linux native preparation uses the Docker
+bridge address (for example `172.19.0.1:58080`); Docker Desktop retains loopback and
 explicit gateway overrides remain authoritative. All three install modes use
 this ordering. `create` does not support the `--no-deps` option. Historical
 support snapshots remain unchanged.
