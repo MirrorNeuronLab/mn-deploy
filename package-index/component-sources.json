@@ -12,6 +12,9 @@
     "tree": "2bb89b129085ff6bf83fba2157330075f66db42d"
   },
   "core:v1.4.0": {
-    "tree": "98b98a68e28f8056d7e8600c508dee3e7818d0bf"
+    "tree": "6a9bbf948253633750c69598871a323c7c316351"
+  },
+  "membrane:v1.4.0": {
+    "tree": "870ecb05299bd2a6f38c0e4c9223a7c09d7814d7"
   }
 }
