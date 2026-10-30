@@ -192,7 +192,17 @@ Reset is destructive and always asks you to type the exact uppercase text
 (default `~/.mn`), removes the managed Python virtual environment at
 `~/.mn/venv`, clears Redis, and removes the MirrorNeuron Docker
 Compose containers and persistent volumes before the selected install mode
-runs.
+runs. Before deletion, reset stops owned detached host observers, watchdogs,
+model runners and native helpers. Cleanup uses installation ownership and process
+birth evidence, and aborts if verification fails. It also removes co-worker
+containers and owned model cache volumes, rotates generated Core credentials,
+and removes managed downloads. Ordinary restart preserves credentials and data.
+Concurrent runtime startup is blocked during reset.
+
+For a fresh runtime and desktop, close OtterDesk, complete `install.sh --reset`,
+then launch OtterDesk with `--reset`. Desktop state is cleared only by that second
+command. Source repositories, unrelated processes and external documents/outputs
+are preserved.
 
 Install from GitHub repositories:
 

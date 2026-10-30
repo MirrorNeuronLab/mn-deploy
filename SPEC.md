@@ -1,5 +1,23 @@
 # MirrorNeuron Deployment Specification
 
+## Full reset isolation
+
+`install.sh --reset` retains the exact `YES` confirmation and separate desktop
+reset boundary. Before deleting data it holds an installation lifecycle/reset
+lock, stops and verifies owned host relays, watchdogs, model runners and native
+helpers, and removes owned Docker runtime/worker/model resources. Legacy host
+processes can be identified without PID metadata by exact runtime command and
+installation path. PID metadata also requires birth-time evidence; unrelated
+processes and other installations are preserved. Cleanup failure aborts reset.
+
+Reset deletes managed downloads and model caches with runtime state, rotates
+Core auth/admin credentials, and discards inherited generated credentials,
+identity and storage paths. Normal restarts reuse private credential files.
+Fresh Compose and direct Docker Core launches receive these same generated
+credentials. Source checkouts, user documents and external outputs are preserved.
+Only the reset owner may start services while installation is in progress.
+
+
 ## Purpose
 
 `mn-deploy` is the installation, service-management, release-support, and

@@ -1516,10 +1516,278 @@ fi'
     printf '✓ Removed MirrorNeuron Docker runtime and persistent Redis data.\n' >&3
 }
 
+function mn_reset_release_lock() {
+    local lock_directory record
+    if [ "${MN_RESET_OWNER_PID:-}" != "$$" ]; then return; fi
+    for lock_directory in "${MN_RESET_LOCK:-}" "${MN_RUNTIME_LIFECYCLE_LOCK:-}"; do
+        [ -n "$lock_directory" ] && [ -f "$lock_directory/owner" ] || continue
+        record="$(cat "$lock_directory/owner")"
+        case "$record" in
+            "$$|"*) rm -f "$lock_directory/owner"; rmdir "$lock_directory" 2>/dev/null || true ;;
+        esac
+    done
+}
+
+function mn_reset_acquire_lock_directory() {
+    local lock_directory="$1"
+    local owner_pid owner_started current_started
+    if ! mkdir "$lock_directory" 2>/dev/null; then
+        if [ ! -f "$lock_directory/owner" ] || [ -L "$lock_directory" ]; then
+            mn_reset_error "Runtime reset lock is incomplete; inspect ${lock_directory} before retrying."
+            exit 1
+        fi
+        IFS='|' read -r owner_pid owner_started < "$lock_directory/owner"
+        case "$owner_pid" in ''|*[!0-9]*) mn_reset_error "Invalid runtime reset lock."; exit 1 ;; esac
+        current_started="$(LC_ALL=C ps -p "$owner_pid" -o lstart= 2>/dev/null || true)"
+        if [ -n "$current_started" ] && [ "$current_started" = "$owner_started" ]; then
+            mn_reset_error "Another runtime start, install, or reset is in progress."
+            exit 1
+        fi
+        rm -f "$lock_directory/owner"
+        rmdir "$lock_directory" || exit 1
+        mkdir "$lock_directory" || exit 1
+    fi
+    chmod 700 "$lock_directory"
+    printf '%s|%s\n' "$$" "$(LC_ALL=C ps -p "$$" -o lstart=)" > "$lock_directory/owner"
+}
+
+function mn_reset_acquire_lock() {
+    MN_RESET_LOCK="$(dirname "$MN_RESET_HOME")/.$(basename "$MN_RESET_HOME").reset.lock"
+    MN_RUNTIME_LIFECYCLE_LOCK="$(dirname "$MN_RESET_HOME")/.$(basename "$MN_RESET_HOME").lifecycle.lock"
+    mn_reset_acquire_lock_directory "$MN_RUNTIME_LIFECYCLE_LOCK"
+    MN_RESET_OWNER_PID="$$"
+    export MN_RESET_OWNER_PID MN_RESET_LOCK
+    trap mn_reset_release_lock EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    mn_reset_acquire_lock_directory "$MN_RESET_LOCK"
+}
+
+function mn_reset_verify_container_home_or_exit() {
+    local reset_python
+    reset_python="$(command -v python3 || command -v python || true)"
+    if [ -z "$reset_python" ]; then mn_reset_error "Python is required to verify runtime ownership."; exit 1; fi
+    if ! "$reset_python" - "$MN_RESET_HOME" <<'MN_RESET_CONTAINER_HOME'
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+
+result = subprocess.run(["docker", "container", "inspect", "--format", "{{json .Mounts}}", "mirror-neuron-core"],
+                        capture_output=True, text=True, timeout=10)
+if result.returncode:
+    existing = subprocess.run(["docker", "ps", "-aq", "--filter", "name=^mirror-neuron-core$"],
+                              check=True, capture_output=True, text=True, timeout=10)
+    if existing.stdout.strip():
+        raise SystemExit("Could not verify the existing Core container; reset stopped.")
+else:
+    home = Path(sys.argv[1]).resolve()
+    destination = os.environ.get("MN_CONTAINER_HOME_DIR", "/root/.mn")
+    mounts = json.loads(result.stdout)
+    homes = [Path(mount["Source"]).resolve() for mount in mounts if mount.get("Destination") == destination]
+    if homes != [home]:
+        raise SystemExit("The existing Core belongs to a different or unverified installation; reset stopped.")
+MN_RESET_CONTAINER_HOME
+    then
+        mn_reset_error "Runtime container ownership could not be verified; data was preserved."
+        exit 1
+    fi
+}
+
+function mn_reset_host_processes_or_exit() {
+    local reset_python
+    reset_python="$(command -v python3 || command -v python || true)"
+    if [ -z "$reset_python" ]; then
+        mn_reset_error "Python is required to verify runtime host-process cleanup."
+        exit 1
+    fi
+    if ! "$reset_python" - "$MN_RESET_HOME" <<'MN_RESET_PROCESSES'
+import datetime
+import json
+import os
+from pathlib import Path
+import signal
+import shlex
+import subprocess
+import sys
+import time
+
+home = Path(sys.argv[1]).resolve()
+metadata = {}
+helper_commands = {}
+for pattern in ("pids/*.pid", "runs/*/event_relay.json", "runs/*/pre_launch_process.json"):
+    for path in home.glob(pattern):
+        try:
+            if path.is_symlink() or path.stat().st_size > 65536:
+                continue
+            value = path.read_text().strip()
+            record = {} if path.suffix == ".pid" else json.loads(value)
+            if not isinstance(record, dict):
+                continue
+            pid = int(value if path.suffix == ".pid" else record.get("pid", 0))
+            if pid > 1:
+                metadata[pid] = path.stat().st_mtime
+                command = record.get("command")
+                if path.name == "pre_launch_process.json" and isinstance(command, list) and all(isinstance(part, str) for part in command):
+                    helper_commands[pid] = command
+        except (OSError, ValueError, TypeError):
+            continue
+
+modules = ("mn_sdk.blueprint_support.event_relay", "mn_sdk_rag.shared_service",
+           "mn_cli.runtime.watchdog", "mn_cli.runtime.model_sync_monitor",
+           "mn_cli.runtime.storage_sync_monitor", "mn_sdk.native_runtime_service")
+executables = ("mn-api", "mn-native-sdk-grpc", "mn-web-ui-server", "model-runner", "llama-server")
+
+def processes():
+    result = subprocess.run(["ps", "-axo", "pid=,uid=,stat=,lstart=,args="],
+                            check=True, capture_output=True, text=True,
+                            env={**os.environ, "LC_ALL": "C"}, timeout=5)
+    matches = {}
+    for line in result.stdout.splitlines():
+        fields = line.split(None, 8)
+        if len(fields) != 9:
+            continue
+        pid, uid = int(fields[0]), int(fields[1])
+        if pid in (os.getpid(), os.getppid()) or uid != os.getuid() or "Z" in fields[2]:
+            continue
+        started = " ".join(fields[3:8])
+        command = fields[8]
+        try:
+            arguments = shlex.split(command)
+        except ValueError:
+            continue
+        known = any(value == "-m" and arguments[index + 1] in modules
+                    for index, value in enumerate(arguments[:-1]))
+        known = known or any(Path(value).name in executables for value in arguments[:2])
+        # Released watchdogs are inline Python followed by a JSON ownership
+        # config. Their PID files may already be gone after an older reset.
+        legacy_watchdog = (len(arguments) > 1 and arguments[1] == "-c" and
+            Path(arguments[0]).name.startswith("python") and
+            "config = json.loads(sys.argv[1])" in command and
+            'pid_file = Path(config["pid_file"])' in command and
+            "watchdog circuit breaker is stopping" in command)
+        expected = helper_commands.get(pid, [])
+        parts = command.split(None, 1)
+        recorded_helper = (len(expected) > 1 and len(parts) == 2 and
+            Path(parts[0]).name == Path(expected[0]).name and parts[1] == " ".join(expected[1:]))
+        known = known or legacy_watchdog or recorded_helper
+        if not known:
+            continue
+        scoped = str(home) + "/" in command
+        if not scoped and pid in metadata:
+            born = datetime.datetime.strptime(started, "%a %b %d %H:%M:%S %Y").timestamp()
+            scoped = born <= metadata[pid] + 1
+        if scoped:
+            matches[pid] = (started, command)
+    return matches
+
+# Re-scan after stopping watchdogs, and verify birth identity immediately before
+# every signal. A stale PID file never authorizes killing a replacement process.
+deadline = time.monotonic() + 30
+first_seen = {}
+while True:
+    remaining = processes()
+    if not remaining:
+        break
+    now = time.monotonic()
+    if now >= deadline:
+        raise SystemExit("Runtime host processes did not stop; reset aborted before deleting data.")
+    for pid, identity in sorted(remaining.items(), key=lambda item: "watchdog" not in item[1][1]):
+        first_seen.setdefault((pid, identity), now)
+        if processes().get(pid) != identity:
+            continue
+        try:
+            os.kill(pid, signal.SIGKILL if now - first_seen[(pid, identity)] >= 2 else signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+    time.sleep(0.1)
+MN_RESET_PROCESSES
+    then
+        mn_reset_error "Owned runtime host-process cleanup failed; data was preserved."
+        exit 1
+    fi
+}
+
+function mn_reset_additional_docker_state_or_exit() {
+    local reset_python
+    reset_python="$(command -v python3 || command -v python)"
+    if ! "$reset_python" - "$MN_RESET_HOME" <<'MN_RESET_DOCKER_OWNERS'
+import hashlib
+import json
+from pathlib import Path
+import subprocess
+import sys
+
+home = Path(sys.argv[1]).resolve()
+
+def docker(*args):
+    return subprocess.run(["docker", *args], check=True, capture_output=True, text=True, timeout=60).stdout.strip()
+
+# Worker Compose uses a separate project. Bind mounts establish installation
+# ownership even when its ledger was lost; a shared project label alone cannot.
+project = "mirror-neuron-workers"
+env = home / "docker-compose.env"
+if env.exists():
+    for line in env.read_text().splitlines():
+        if line.startswith("MN_DOCKER_WORKER_COMPOSE_PROJECT="):
+            project = line.split("=", 1)[1]
+for container in docker("ps", "-aq", "--filter", f"label=com.docker.compose.project={project}").splitlines():
+    mounts = json.loads(docker("inspect", "--format", "{{json .Mounts}}", container))
+    if any(str(mount.get("Source", "")) == str(home) or
+           str(mount.get("Source", "")).startswith(str(home) + "/") for mount in mounts):
+        docker("rm", "-f", container)
+
+# Docker-backed models own labeled cache volumes outside MN_HOME. Only remove
+# the exact model identities recorded by this installation, never shared images.
+registry = home / "models/registry.json"
+if registry.exists():
+    models = json.loads(registry.read_text()).get("models", {})
+    for model_id, model in models.items():
+        if not isinstance(model, dict) or model.get("kind") != "docker":
+            continue
+        digest = hashlib.sha256(model_id.encode()).hexdigest()[:20]
+        container = f"mn-model-{digest}"
+        volume = container + "-cache"
+        for kind, name in (("container", container), ("volume", volume)):
+            found = subprocess.run(["docker", kind, "inspect", "--format", "{{json .Config.Labels}}" if kind == "container" else "{{json .Labels}}", name],
+                                   capture_output=True, text=True, timeout=10)
+            if found.returncode:
+                continue
+            labels = json.loads(found.stdout)
+            if not isinstance(labels, dict) or labels.get("io.mirrorneuron.model.id") != model_id:
+                raise SystemExit("Model resource ownership could not be verified; reset stopped.")
+            docker("rm", "-f", name) if kind == "container" else docker("volume", "rm", name)
+MN_RESET_DOCKER_OWNERS
+    then
+        mn_reset_error "Additional runtime Docker resources could not be cleared; data was preserved."
+        exit 1
+    fi
+}
+
 function mn_reset_install_state() {
     mn_reset_resolve_home_or_exit
     mn_reset_confirm_or_exit
+    if ! command -v docker >/dev/null 2>&1; then
+        mn_reset_error "docker is required to clear Redis and MirrorNeuron runtime volumes."
+        exit 1
+    fi
+    if ! docker info >/dev/null 2>&1; then
+        mn_reset_error "Docker is not running; reset stopped before host cleanup."
+        exit 1
+    fi
+    mn_reset_acquire_lock
+    mn_reset_verify_container_home_or_exit
+    mn_reset_host_processes_or_exit
     mn_reset_docker_state_or_exit
+    mn_reset_additional_docker_state_or_exit
+    # An inherited environment from a previous sourced installation must not
+    # restore its credentials, identity, endpoints, or old storage roots.
+    unset MN_NODE_NAME MN_CLUSTER_NODES MN_GRPC_AUTH_TOKEN MN_GRPC_ADMIN_TOKEN
+    unset MN_GRPC_AUTH_TOKEN_FILE MN_GRPC_ADMIN_TOKEN_FILE MN_API_TOKEN
+    unset MN_COOKIE MN_NETWORK_JOIN_TOKEN MN_CONTEXT_AUTH_TOKEN MN_REDIS_PASSWORD MN_REDIS_URL
+    unset MN_RUNS_ROOT MN_SHARED_STORAGE_ROOT MN_HOST_SHARED_STORAGE_ROOT
+    unset MN_RUNTIME_SHARED_STORAGE_ROOT MN_CONTAINER_SHARED_STORAGE_ROOT MN_BUNDLE_CACHE_DIR
 
     if [ -n "${VENV_DIR:-}" ] && { [ -e "$VENV_DIR" ] || [ -L "$VENV_DIR" ]; }; then
         printf '==> Clearing MirrorNeuron Python virtual environment\n' >&3
@@ -2848,6 +3116,9 @@ function resolve_secret_file() {
     local label="$3"
     local value
 
+    case "$label:$env_value" in
+        MN_GRPC_AUTH_TOKEN:mirror_neuron_password|MN_GRPC_ADMIN_TOKEN:mirror_neuron_password_admin) env_value="" ;;
+    esac
     if [ -n "$env_value" ] && [ "$env_value" != "mirrorneuron" ]; then
         printf '%s\n' "$env_value" > "$file"
         chmod 600 "$file" 2>/dev/null || true
@@ -2858,6 +3129,9 @@ function resolve_secret_file() {
     mkdir -p "$INSTALL_DIR"
     if [ -s "$file" ]; then
         value="$(tr -d '[:space:]' < "$file")"
+        case "$label:$value" in
+            MN_GRPC_AUTH_TOKEN:mirror_neuron_password|MN_GRPC_ADMIN_TOKEN:mirror_neuron_password_admin) value="" ;;
+        esac
         if [ -n "$value" ] && [ "$value" != "mirrorneuron" ]; then
             chmod 600 "$file" 2>/dev/null || true
             printf '%s\n' "$value"
@@ -3166,6 +3440,9 @@ function prepare_litellm_gateway_config() {
 
 function write_runtime_compose_files() {
     local context_auth_token profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_agents_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image litellm_gateway_bind_host openshell_gateway_bind_host openshell_gateway_endpoint api_host
+    local grpc_auth_token grpc_admin_token
+    grpc_auth_token="$(resolve_secret_file "${MN_GRPC_AUTH_TOKEN:-}" "${INSTALL_DIR}/grpc_auth.token" "MN_GRPC_AUTH_TOKEN")"
+    grpc_admin_token="$(resolve_secret_file "${MN_GRPC_ADMIN_TOKEN:-}" "${INSTALL_DIR}/grpc_admin.token" "MN_GRPC_ADMIN_TOKEN")"
     context_auth_token="$(resolve_secret_file "${MN_CONTEXT_AUTH_TOKEN:-}" "${INSTALL_DIR}/context_auth.token" "MN_CONTEXT_AUTH_TOKEN")"
     profiles="$(compose_profiles)"
     api_host="${MN_API_HOST:-}"
@@ -3184,9 +3461,6 @@ function write_runtime_compose_files() {
     network_token="$(resolve_network_token)"
     redis_password="$(resolve_redis_password "mirror_neuron_password_admin")"
     mn_cookie="$(resolve_mn_cookie)"
-    printf '%s\n' "mirror_neuron_password" > "${INSTALL_DIR}/grpc_auth.token"
-    printf '%s\n' "mirror_neuron_password_admin" > "${INSTALL_DIR}/grpc_admin.token"
-    chmod 600 "${INSTALL_DIR}/grpc_auth.token" "${INSTALL_DIR}/grpc_admin.token" 2>/dev/null || true
     runtime_skills_root="${MN_SKILLS_ROOT:-${MN_HOST_HOME_DIR}/skills}"
     runtime_agents_root="$(ensure_agent_catalog_root)"
     runtime_package_index="${MN_PACKAGE_INDEX_FILE:-}"
@@ -3334,8 +3608,8 @@ OPENSHELL_GATEWAY_IMAGE=${OPENSHELL_GATEWAY_IMAGE:-$MN_DEFAULT_OPENSHELL_GATEWAY
 DOCKER_HOST_SOCKET=${DOCKER_HOST_SOCKET}
 COMPOSE_PARALLEL_LIMIT=${COMPOSE_PARALLEL_LIMIT:-1}
 MN_COOKIE=${mn_cookie}
-MN_GRPC_AUTH_TOKEN=mirror_neuron_password
-MN_GRPC_ADMIN_TOKEN=mirror_neuron_password_admin
+MN_GRPC_AUTH_TOKEN=${grpc_auth_token}
+MN_GRPC_ADMIN_TOKEN=${grpc_admin_token}
 EOF
     chmod 600 "$RUNTIME_COMPOSE_ENV" 2>/dev/null || true
 }
@@ -4421,9 +4695,15 @@ function generate_mn_cookie() {
 
 function resolve_secret_file() {
     local value="${1:-}" file="$2" label="$3"
+    case "$label:$value" in
+        MN_GRPC_AUTH_TOKEN:mirror_neuron_password|MN_GRPC_ADMIN_TOKEN:mirror_neuron_password_admin) value="" ;;
+    esac
     mkdir -p "$INSTALL_DIR"
     if [ -z "$value" ] && [ -s "$file" ]; then
         value="$(tr -d '[:space:]' < "$file")"
+        case "$label:$value" in
+            MN_GRPC_AUTH_TOKEN:mirror_neuron_password|MN_GRPC_ADMIN_TOKEN:mirror_neuron_password_admin) value="" ;;
+        esac
     fi
     if [ -z "$value" ]; then
         value="$(generate_mn_cookie)" || return 1
@@ -4675,9 +4955,12 @@ function start_core_container() {
     [ "$epmd_publish_host" = "localhost" ] && epmd_publish_host="127.0.0.1"
     [ "$dist_publish_host" = "localhost" ] && dist_publish_host="127.0.0.1"
 
+    local grpc_auth_token grpc_admin_token
+    grpc_auth_token="$(resolve_secret_file "${MN_GRPC_AUTH_TOKEN:-}" "${INSTALL_DIR}/grpc_auth.token" "MN_GRPC_AUTH_TOKEN")"
+    grpc_admin_token="$(resolve_secret_file "${MN_GRPC_ADMIN_TOKEN:-}" "${INSTALL_DIR}/grpc_admin.token" "MN_GRPC_ADMIN_TOKEN")"
     cmd+=("-e" "MN_COOKIE=${mn_cookie}")
-    cmd+=("-e" "MN_GRPC_AUTH_TOKEN=mirror_neuron_password")
-    cmd+=("-e" "MN_GRPC_ADMIN_TOKEN=mirror_neuron_password_admin")
+    cmd+=("-e" "MN_GRPC_AUTH_TOKEN=${grpc_auth_token}")
+    cmd+=("-e" "MN_GRPC_ADMIN_TOKEN=${grpc_admin_token}")
     cmd+=("-e" "MN_GRPC_PORT=${grpc_port}")
     if [ -n "${MN_NODE_NAME:-}" ]; then
         cmd+=("-e" "MN_NODE_NAME=${MN_NODE_NAME}")
@@ -4968,6 +5251,9 @@ function prepare_litellm_gateway_config() {
 
 function write_runtime_compose_files() {
     local context_auth_token profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_agents_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image litellm_gateway_bind_host openshell_gateway_bind_host openshell_gateway_endpoint api_host blueprint_web_ui_port_start blueprint_web_ui_port_end
+    local grpc_auth_token grpc_admin_token
+    grpc_auth_token="$(resolve_secret_file "${MN_GRPC_AUTH_TOKEN:-}" "${INSTALL_DIR}/grpc_auth.token" "MN_GRPC_AUTH_TOKEN")"
+    grpc_admin_token="$(resolve_secret_file "${MN_GRPC_ADMIN_TOKEN:-}" "${INSTALL_DIR}/grpc_admin.token" "MN_GRPC_ADMIN_TOKEN")"
     context_auth_token="$(resolve_secret_file "${MN_CONTEXT_AUTH_TOKEN:-}" "${INSTALL_DIR}/context_auth.token" "MN_CONTEXT_AUTH_TOKEN")"
     profiles="$(compose_profiles)"
     api_host="${MN_API_HOST:-}"
@@ -4986,9 +5272,6 @@ function write_runtime_compose_files() {
     network_token="$(resolve_network_token)"
     redis_password="$(resolve_redis_password "mirror_neuron_password_admin")"
     mn_cookie="$(resolve_mn_cookie)"
-    printf '%s\n' "mirror_neuron_password" > "${INSTALL_DIR}/grpc_auth.token"
-    printf '%s\n' "mirror_neuron_password_admin" > "${INSTALL_DIR}/grpc_admin.token"
-    chmod 600 "${INSTALL_DIR}/grpc_auth.token" "${INSTALL_DIR}/grpc_admin.token" 2>/dev/null || true
     runtime_skills_root="${MN_SKILLS_ROOT:-${MN_HOST_HOME_DIR}/skills}"
     runtime_agents_root="$(ensure_agent_catalog_root)"
     runtime_package_index="${MN_PACKAGE_INDEX_FILE:-}"
@@ -5142,8 +5425,8 @@ OPENSHELL_GATEWAY_IMAGE=${OPENSHELL_GATEWAY_IMAGE:-$MN_DEFAULT_OPENSHELL_GATEWAY
 DOCKER_HOST_SOCKET=${DOCKER_HOST_SOCKET}
 COMPOSE_PARALLEL_LIMIT=${COMPOSE_PARALLEL_LIMIT:-1}
 MN_COOKIE=${mn_cookie}
-MN_GRPC_AUTH_TOKEN=mirror_neuron_password
-MN_GRPC_ADMIN_TOKEN=mirror_neuron_password_admin
+MN_GRPC_AUTH_TOKEN=${grpc_auth_token}
+MN_GRPC_ADMIN_TOKEN=${grpc_admin_token}
 EOF
     chmod 600 "$RUNTIME_COMPOSE_ENV" 2>/dev/null || true
 }
@@ -5464,7 +5747,7 @@ if [ -e "$VENV_DIR" ] || [ -L "$VENV_DIR" ]; then
     rm -rf "$VENV_BACKUP_DIR"
     mv "$VENV_DIR" "$VENV_BACKUP_DIR"
 fi
-trap restore_local_venv_backup_on_failure EXIT
+trap 'restore_local_venv_backup_on_failure; mn_reset_release_lock' EXIT
 
 print_step "Installing Python components from local source"
 (
@@ -5479,7 +5762,7 @@ VENV_INSTALL_OK="Y"
 if [ -n "$VENV_BACKUP_DIR" ]; then
     rm -rf "$VENV_BACKUP_DIR"
 fi
-trap - EXIT
+trap mn_reset_release_lock EXIT
 
 if [ "$INSTALL_WEB_UI" = "Y" ]; then
     print_step "Preparing local Web UI source for Docker Compose"
@@ -6796,6 +7079,9 @@ function resolve_secret_file() {
     local label="$3"
     local value
 
+    case "$label:$env_value" in
+        MN_GRPC_AUTH_TOKEN:mirror_neuron_password|MN_GRPC_ADMIN_TOKEN:mirror_neuron_password_admin) env_value="" ;;
+    esac
     if [ -n "$env_value" ] && [ "$env_value" != "mirrorneuron" ]; then
         printf '%s\n' "$env_value" > "$file"
         chmod 600 "$file" 2>/dev/null || true
@@ -6806,6 +7092,9 @@ function resolve_secret_file() {
     mkdir -p "$INSTALL_DIR"
     if [ -s "$file" ]; then
         value="$(tr -d '[:space:]' < "$file")"
+        case "$label:$value" in
+            MN_GRPC_AUTH_TOKEN:mirror_neuron_password|MN_GRPC_ADMIN_TOKEN:mirror_neuron_password_admin) value="" ;;
+        esac
         if [ -n "$value" ] && [ "$value" != "mirrorneuron" ]; then
             chmod 600 "$file" 2>/dev/null || true
             printf '%s\n' "$value"
@@ -7114,6 +7403,9 @@ function prepare_litellm_gateway_config() {
 
 function write_runtime_compose_files() {
     local context_auth_token profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_agents_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image litellm_gateway_bind_host openshell_gateway_bind_host openshell_gateway_endpoint api_host
+    local grpc_auth_token grpc_admin_token
+    grpc_auth_token="$(resolve_secret_file "${MN_GRPC_AUTH_TOKEN:-}" "${INSTALL_DIR}/grpc_auth.token" "MN_GRPC_AUTH_TOKEN")"
+    grpc_admin_token="$(resolve_secret_file "${MN_GRPC_ADMIN_TOKEN:-}" "${INSTALL_DIR}/grpc_admin.token" "MN_GRPC_ADMIN_TOKEN")"
     context_auth_token="$(resolve_secret_file "${MN_CONTEXT_AUTH_TOKEN:-}" "${INSTALL_DIR}/context_auth.token" "MN_CONTEXT_AUTH_TOKEN")"
     profiles="$(compose_profiles)"
     api_host="${MN_API_HOST:-}"
@@ -7132,9 +7424,6 @@ function write_runtime_compose_files() {
     network_token="$(resolve_network_token)"
     redis_password="$(resolve_redis_password "mirror_neuron_password_admin")"
     mn_cookie="$(resolve_mn_cookie)"
-    printf '%s\n' "mirror_neuron_password" > "${INSTALL_DIR}/grpc_auth.token"
-    printf '%s\n' "mirror_neuron_password_admin" > "${INSTALL_DIR}/grpc_admin.token"
-    chmod 600 "${INSTALL_DIR}/grpc_auth.token" "${INSTALL_DIR}/grpc_admin.token" 2>/dev/null || true
     runtime_skills_root="${MN_SKILLS_ROOT:-${MN_HOST_HOME_DIR}/skills}"
     runtime_agents_root="${MN_AGENTS_ROOT:-}"
     runtime_package_index="${MN_PACKAGE_INDEX_FILE:-}"
@@ -7282,8 +7571,8 @@ OPENSHELL_GATEWAY_IMAGE=${OPENSHELL_GATEWAY_IMAGE:-$MN_DEFAULT_OPENSHELL_GATEWAY
 DOCKER_HOST_SOCKET=${DOCKER_HOST_SOCKET}
 COMPOSE_PARALLEL_LIMIT=${COMPOSE_PARALLEL_LIMIT:-1}
 MN_COOKIE=${mn_cookie}
-MN_GRPC_AUTH_TOKEN=mirror_neuron_password
-MN_GRPC_ADMIN_TOKEN=mirror_neuron_password_admin
+MN_GRPC_AUTH_TOKEN=${grpc_auth_token}
+MN_GRPC_ADMIN_TOKEN=${grpc_admin_token}
 EOF
     chmod 600 "$RUNTIME_COMPOSE_ENV" 2>/dev/null || true
 }
@@ -7562,6 +7851,18 @@ if [ "$INSTALL_CLI" = "Y" ]; then
 fi
 mn_print_cli_verification_prompt
 }
+
+# Ordinary installers and CLI starts share the same lock as reset. The owner
+# stamp remains outside MN_HOME so deleting that tree cannot release the fence.
+if [ "$MN_INSTALL_HELP_REQUESTED" != "Y" ] && [ "$MN_INSTALL_RESET" != "Y" ]; then
+    mkdir -p "$(dirname "$MN_HOME")"
+    MN_RUNTIME_LIFECYCLE_LOCK="$(cd "$(dirname "$MN_HOME")" && pwd -P)/.$(basename "$MN_HOME").lifecycle.lock"
+    mn_reset_acquire_lock_directory "$MN_RUNTIME_LIFECYCLE_LOCK"
+    MN_RESET_OWNER_PID="$$"
+    MN_INSTALL_OWNER_PID="$$"
+    export MN_INSTALL_OWNER_PID
+    trap mn_reset_release_lock EXIT
+fi
 
 if [ "$MN_INSTALL_HELP_REQUESTED" != "Y" ]; then
     mn_validate_membrane_build
