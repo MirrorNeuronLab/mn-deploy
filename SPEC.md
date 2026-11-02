@@ -158,6 +158,8 @@ are separate settings; historical support snapshots retain their released defaul
   installer version.
 - `package-index/python-packages.toml` defines the Python packages included in
   publishing/install flows.
+- Computer Use is indexed as the optional `mirrorneuron-computer-use-skill`
+  distribution; declaring it does not enable native desktop control at install.
 - The configured GAR project is the sole binary artifact authority. Its Python,
   npm, and Docker artifacts use format-specific repositories.
 - Version changes across scripts, snapshots, package metadata, and artifacts

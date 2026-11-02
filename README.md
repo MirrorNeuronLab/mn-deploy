@@ -396,6 +396,8 @@ see [Google's npm package contract](https://docs.cloud.google.com/artifact-regis
   install.
 - Python packages published to Google Artifact Registry are controlled by
   `package-index/python-packages.toml`.
+  The inventory includes the optional `mirrorneuron-computer-use-skill`; it is
+  not a binary installer default and requires separate native OS grants to run.
 - Binary mode uses one GAR project as its artifact authority. Python packages
   come from
   `https://us-central1-python.pkg.dev/mirrorneuron-public-packages/agent-skills/simple/`, with public dependencies resolved directly from PyPI; the Web UI comes from `https://us-central1-npm.pkg.dev/mirrorneuron-public-packages/mirrorneuron-npm/`, while its public build dependencies come directly from npmjs;

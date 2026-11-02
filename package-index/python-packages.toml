@@ -561,3 +561,12 @@ version = "1.3.62"
 installer_groups = ["skill"]
 binary_default = false
 source_hash = "v2:0ee9be908e8912c396ed4022c95776828ef061071f7695e1ccf984d7a3319c9a"
+
+[[packages]]
+name = "mirrorneuron-computer-use-skill"
+path = "mn-skills/computer_use_skill"
+publish_group = "skill"
+version = "1.4.1"
+installer_groups = ["skill"]
+binary_default = false
+source_hash = "v2:26cd42b54bb6212b02bd8a48c253e19a1607d02e347d78aef58f18e830f9b414"
