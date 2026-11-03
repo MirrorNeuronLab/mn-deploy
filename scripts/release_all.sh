@@ -45,18 +45,21 @@ Create a complete multi-repository release:
   1. verify all release worktrees are clean and synchronized with main;
   2. update package versions and installer defaults, then snapshot support;
   3. create local annotated release tags, then build, publish, and verify all
-     Python, Web UI, Core, and Membrane artifacts in Google Artifact Registry;
+     notarized mn computer use, Python, Web UI, Core, and Membrane artifacts in Google Artifact Registry;
   4. push the prepared tags only after GAR verification succeeds, without
      consuming or waiting for GitHub release workflow artifacts;
   5. update named blueprint pins and record the completed release.
 
-Resume phases: prepare, python, web-ui, membrane, core, tags, or finalize.
+Resume phases: prepare, computer-use, python, web-ui, membrane, core, tags, or finalize.
 Resume only while the prepared package set remains compatible. An incompatible
 frozen package index requires a new aggregate release version.
 
 Prerequisites: authenticated git and gcloud, npm, Docker with Buildx, uv (or a
 prepared MN_PUBLISH_PYTHON), and publishing authority for the configured GAR
-Python, npm, and Docker repositories.
+Python, npm, Docker, and public mirrorneuron-binaries generic repositories.
+Native app verification requires macOS and Xcode Command Line Tools; new builds
+also require Developer ID signing and Apple notarization credentials
+(MN_NOTARY_KEYCHAIN_PROFILE or KEY/KEY_ID/ISSUER).
 EOF
 }
 
@@ -174,12 +177,13 @@ commit_and_push_if_changed() {
 phase_rank() {
   case "$1" in
     prepare) printf '0' ;;
-    python) printf '1' ;;
-    web-ui) printf '2' ;;
-    membrane) printf '3' ;;
-    core) printf '4' ;;
-    tags) printf '5' ;;
-    finalize) printf '6' ;;
+    computer-use) printf '1' ;;
+    python) printf '2' ;;
+    web-ui) printf '3' ;;
+    membrane) printf '4' ;;
+    core) printf '5' ;;
+    tags) printf '6' ;;
+    finalize) printf '7' ;;
     *) die "Unknown release phase: $1" ;;
   esac
 }
@@ -251,7 +255,7 @@ check_resume_workspace() {
       git -C "$path" diff --quiet "$TAG" HEAD -- install.sh docker-compose.yml \
         package-index "install_support/${TAG}" ||
         die "Release metadata changed since ${TAG}; restore the prepared release inputs before resuming."
-    elif [[ "$RESUME_FROM" == "python" ]]; then
+    elif [[ "$RESUME_FROM" == "python" || "$RESUME_FROM" == "computer-use" ]]; then
       [[ "$(git -C "$path" rev-list -n 1 "$TAG")" == "$(git -C "$path" rev-parse HEAD)" ]] ||
         die "${repo} advanced after ${TAG}; Python publishing cannot safely resume from changed source. Resume from the first incomplete later phase instead."
     fi
@@ -319,6 +323,12 @@ push_release_tags() {
 publish_and_verify_gar() {
   local image tags_file core_image core_tags_file
   local membrane_worktree_root membrane_dir
+
+  if should_run_phase computer-use; then
+    CURRENT_PHASE="computer-use"
+    "$PUBLISH_PYTHON" "${SCRIPT_DIR}/publish_computer_use_to_google_artifact_registry.py" \
+      --skills-dir "${WORKSPACE_ROOT}/mn-skills" --project "$PROJECT" --location "$LOCATION" --apply
+  fi
 
   if should_run_phase python; then
     CURRENT_PHASE="python"
@@ -426,6 +436,8 @@ update_post_release_pins() {
 - GAR npm: mirrorneuron-web-ui@${VERSION} in ${NPM_REPOSITORY}.
 - GAR Python: all packages in package-index/python-packages.toml, including
   mirrorneuron-api, mirrorneuron-cli, and mirrorneuron-python-sdk.
+- GAR generic: signed, notarized mn computer use for macOS arm64 and x86_64;
+  immutable native-source versions in mirrorneuron-binaries/mn-computer-use.
 - GAR Docker: mirror-neuron-core and membrane-context-engine each published
   ${TAG}, ${VERSION}, and latest (pointing to this release at confirmation).
 - GitHub tag: ${TAG} across the release repositories.
@@ -498,6 +510,7 @@ if [[ "$PLAN" == "Y" ]]; then
   "$PUBLISH_PYTHON" "${DEPLOY_DIR}/scripts/prepare-python-package-index.py" \
     "${DEPLOY_DIR}/package-index/python-packages.toml" "$WORKSPACE_ROOT" "$VERSION" \
     --independent --baseline "$MN_RELEASE_BASELINE" --dry-run >/dev/null
+  "$PUBLISH_PYTHON" "${SCRIPT_DIR}/publish_computer_use_to_google_artifact_registry.py"
   exit 0
 fi
 TAG="v${VERSION}"
@@ -536,7 +549,7 @@ else
   check_resume_workspace
 fi
 
-if should_run_phase python || should_run_phase web-ui ||
+if should_run_phase computer-use || should_run_phase python || should_run_phase web-ui ||
    should_run_phase membrane || should_run_phase core; then
   publish_and_verify_gar
 fi

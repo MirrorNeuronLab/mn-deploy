@@ -211,3 +211,30 @@ commit only when the parent's legacy hash matches the recorded hash and the
 normalized package inputs are identical. This permits resuming `v1.3.48`
 without changing its tags, package versions, or immutable support snapshot.
 Commit and push release-tooling fixes before retrying the printed resume command.
+
+
+## mn computer use
+
+The aggregate release publishes the native app before its Python skill. For an
+independent app release from the checked source, use Python 3.12+ on macOS:
+
+```bash
+python3.12 scripts/publish_computer_use_to_google_artifact_registry.py
+MN_NOTARY_KEYCHAIN_PROFILE=release python3.12 scripts/publish_computer_use_to_google_artifact_registry.py --apply
+```
+
+The default targets are arm64 and x86_64; `--architectures arm64` selects one.
+`--skills-dir` selects the owning checkout and `--output-dir` holds reusable ZIPs
+and notarization receipts. The public generic repository must already exist with
+`allUsers` Artifact Registry Reader access. No repository IAM is changed by this
+command. New native source bytes create a new immutable GAR version; changing only
+Python code reuses the app. Never delete an in-flight notarization directory while
+Apple is processing it. A timeout is resumable with the same command/output path.
+
+Customer installation happens only when adding a co-worker that declares the
+computer-use dependency with `setup: on_install`. Ship the matching SDK, API/CLI
+and blueprint contract together. The runtime package inventory keeps this skill
+optional and does not run its native setup.
+
+The publisher verifies anonymous downloads using Google's documented
+[generic artifact REST download endpoint](https://docs.cloud.google.com/artifact-registry/docs/generic).

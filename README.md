@@ -730,3 +730,29 @@ The Web UI sidecar supports owner-scoped Job UI forwarding across connected
 computers, including live WebSockets. It requires the matching API relay and SDK
 execution-bound UI handles. `scripts/test_job_ui_proxy.py` exercises the actual
 Compose JavaScript without Docker or a live runtime.
+
+
+## Native computer-use app releases
+
+`scripts/publish_computer_use_to_google_artifact_registry.py` plans by default;
+`--apply` builds, Developer ID signs, notarizes, staples and publishes macOS arm64
+and x86_64 ZIPs to public `mirrorneuron-binaries/mn-computer-use` in GAR. The native
+app version plus the SHA-256 of bundled Swift/plist sources identifies an immutable
+release. Per-architecture checksum manifests are uploaded last; existing artifacts
+must match and are verified through anonymous HTTPS downloads. Unchanged releases
+are verified and reused. The tool never changes repository IAM or overwrites files.
+
+`release_all.sh` runs the `computer-use` phase before Python publication;
+`update-changed-components.py` also publishes/verifies native artifacts before a
+changed computer-use skill wheel. New builds require macOS with Xcode Command Line
+Tools, a Developer ID Application identity for team `983M79B224`, and either
+`MN_NOTARY_KEYCHAIN_PROFILE`, `KEY`/`KEY_ID`/`ISSUER`, or
+`APPLE_ID`/`APPLE_APP_SPECIFIC_PASSWORD`/`APPLE_TEAM_ID`.
+`MN_COMPUTER_USE_SIGNING_IDENTITY` optionally selects the signing identity. Keep
+credentials in the release environment/keychain, never in source or command logs.
+
+The helper is not installed by OtterDesk or any runtime installer mode. Its skill
+remains `binary_default = false`. Co-worker dependencies opt in with
+`setup: on_install`; the SDK invokes setup during API hiring or CLI blueprint add.
+Customer setup downloads and verifies the notarized artifact without a compiler,
+Xcode or gcloud. Existing immutable install-support snapshots remain unchanged.

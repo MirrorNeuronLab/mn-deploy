@@ -356,6 +356,9 @@ def main():
     old = {p['name']: p['version'] for p in tomllib.loads(planned['original_index'])['packages']}
     for package in planned['packages']:
         print(f'==> Python {package["name"]}: {old[package["name"]]} -> {package["version"]}', flush=True)
+    native_app = any(p['name'] == 'mirrorneuron-computer-use-skill' for p in planned['packages'])
+    if native_app:
+        print('==> Native mn computer use: verify/publish notarized GAR artifacts before the skill wheel.', flush=True)
     for component in planned['components']:
         action = f'{component["previous"]} -> {component["version"]}' if component['kind'] == 'web-ui' else f'repair {component["version"]} from HEAD'
         print(f'==> {component["kind"]}: {action}', flush=True)
@@ -394,6 +397,10 @@ def main():
     directory.mkdir(parents=True, exist_ok=True)
     build_python(workspace, planned, directory)
     ensure_sources(workspace, planned)
+    if native_app:
+        run(sys.executable, SCRIPTS / 'publish_computer_use_to_google_artifact_registry.py',
+            '--skills-dir', workspace / 'mn-skills', '--project', args.project,
+            '--location', args.location, '--gcloud', args.gcloud, '--apply')
     publish_python(args, planned, directory)
     for component in planned['components']:
         marker = directory / (component['kind'] + '-published.json')
