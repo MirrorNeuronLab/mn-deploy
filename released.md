@@ -216,3 +216,51 @@ runtime.
 - GAR Docker: mirror-neuron-core and membrane-context-engine each published
   v1.4.0, 1.4.0, and latest (pointing to this release at confirmation).
 - GitHub tag: v1.4.0 across the release repositories.
+
+## Python runtime hardening — 2026-11-04
+
+Published to the public Google Artifact Registry repository
+`mirrorneuron-public-packages/us-central1/agent-skills` in prerequisite order.
+Membrane 2.2.0 preceded the SDK 1.4.1 family. API and CLI candidates passed
+verification against fresh public SDK downloads before their publication.
+
+| Distribution | Version |
+| --- | --- |
+| `mirrorneuron-membrane-python-sdk` | `2.2.0` |
+| `mn-python-sdk-common` | `1.4.1` |
+| `mn-python-sdk-web-ui` | `1.4.1` |
+| `mn-python-sdk-models` | `1.4.1` |
+| `mn-python-sdk-mcp` | `1.4.1` |
+| `mn-python-sdk-collaboration` | `1.4.1` |
+| `mn-python-sdk-rag` | `1.4.1` |
+| `mn-python-sdk-job-response` | `1.4.1` |
+| `mirrorneuron-python-sdk` | `1.4.1` |
+| `mn-blueprint-blocks` | `1.4.1` |
+| `mirrorneuron-cli` | `1.3.65` |
+| `mirrorneuron-api` | `1.3.64` |
+
+The release checks passed 312 Membrane tests, 23 cross-component contracts,
+158 focused API tests, 82 focused CLI tests, the complete 660-test API suite,
+and the complete CLI suite with 1,092 passes and one skip.
+The API served the baseline OpenAPI document from its installed executable.
+SDK exports and signatures, CLI command metadata and representative output
+matched the compatibility baseline. Package installation passed `pip check`.
+
+GAR checksums and fresh public downloads matched all 23 staged artifacts.
+Prepared installer pins and support snapshot `v1.4.8` for the published SDK
+and adapter versions. GitHub synchronization of the source and installer commits
+requires separate approval.
+
+| Source repository | Release commit |
+| --- | --- |
+| `Membrane` | `3de199479466a5a0218604a2164abffad164a3f2` |
+| `mn-python-sdk` | `5452c65141b1feb22070da1c0d362ddee6937c0b` |
+| `mn-api` | `f55bbb6694b0142cc3bc1bab99c60f70a6a26a9a` |
+| `mn-cli` | `f4b753852251f6e99987f6cadb8e778f75815696` |
+
+| Main wheel | SHA-256 |
+| --- | --- |
+| `mirrorneuron_membrane_python_sdk-2.2.0-py3-none-any.whl` | `ceb1c662be8ec347bf8b8c3c43e205722874831fcb7640041796d5b19c67ce6d` |
+| `mirrorneuron_python_sdk-1.4.1-py3-none-any.whl` | `91bd42e833094f00eb61b705b81f4f616cd36a943ffb22e109abed061fb29441` |
+| `mirrorneuron_api-1.3.64-py3-none-any.whl` | `1fddcbd531478bc99e9f05719d2ef0ecfa429dbb29549378adae468a0ae2a10c` |
+| `mirrorneuron_cli-1.3.65-py3-none-any.whl` | `870b8dcc5d720bac3da6b5ca61d4f95f9cc853bf7df494a071fb1b38db7aa100` |
