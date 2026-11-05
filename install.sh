@@ -870,10 +870,7 @@ function mn_update_shell_profile() (
             $0 == "# >>> MirrorNeuron shell environment >>>" { managed = 1; next }
             $0 == "# <<< MirrorNeuron shell environment <<<" { managed = 0; next }
             managed { next }
-            # Older installers wrote this heading and two adjacent exports.
-            $0 == "# MN and OTTERDESK" { legacy = 1; next }
-            legacy && /^export (MN_HOME=|PATH="\$MN_HOME\/bin:\$PATH"$)/ { next }
-            { legacy = 0; print }
+            { print }
             END { if (managed) exit 1 }
         ' "$profile" >"$temporary" || return 1
   fi
@@ -1693,18 +1690,11 @@ def processes():
         known = any(value == "-m" and arguments[index + 1] in modules
                     for index, value in enumerate(arguments[:-1]))
         known = known or any(Path(value).name in executables for value in arguments[:2])
-        # Released watchdogs are inline Python followed by a JSON ownership
-        # config. Their PID files may already be gone after an older reset.
-        legacy_watchdog = (len(arguments) > 1 and arguments[1] == "-c" and
-            Path(arguments[0]).name.startswith("python") and
-            "config = json.loads(sys.argv[1])" in command and
-            'pid_file = Path(config["pid_file"])' in command and
-            "watchdog circuit breaker is stopping" in command)
         expected = helper_commands.get(pid, [])
         parts = command.split(None, 1)
         recorded_helper = (len(expected) > 1 and len(parts) == 2 and
             Path(parts[0]).name == Path(expected[0]).name and parts[1] == " ".join(expected[1:]))
-        known = known or legacy_watchdog or recorded_helper
+        known = known or recorded_helper
         if not known:
             continue
         scoped = str(home) + "/" in command
@@ -2646,8 +2636,6 @@ EOF
   INSTALL_CLI="Y"
   INSTALL_API="Y"
   INSTALL_VERSION="${MN_INSTALL_VERSION:-}"
-  INSTALL_VERSION_EXPLICIT="N"
-  [ -n "$INSTALL_VERSION" ] && INSTALL_VERSION_EXPLICIT="Y"
   MN_PACKAGE_VERSION=""
   CORE_REPO="${MN_CORE_REPO:-MirrorNeuronLab/MirrorNeuron}"
   MN_SKILLS_GIT_URL="${MN_SKILLS_GIT_URL:-}"
@@ -2771,11 +2759,9 @@ EOF
         exit 1
       fi
       INSTALL_VERSION="$1"
-      INSTALL_VERSION_EXPLICIT="Y"
       ;;
     --version=*)
       INSTALL_VERSION="${1#*=}"
-      INSTALL_VERSION_EXPLICIT="Y"
       ;;
     --skills-repo)
       shift
@@ -5932,8 +5918,6 @@ run_install_binary() {
   RUNTIME_COMPOSE_ENV="${INSTALL_DIR}/docker-compose.env"
   CORE_REPO="${MN_CORE_REPO:-MirrorNeuronLab/MirrorNeuron}"
   INSTALL_VERSION="${MN_INSTALL_VERSION:-}"
-  INSTALL_VERSION_EXPLICIT="N"
-  [ -n "$INSTALL_VERSION" ] && INSTALL_VERSION_EXPLICIT="Y"
   CORE_RELEASE_TAG=""
   CORE_INSTALL_VERSION="${MN_CORE_VERSION:-}"
   PYTHON_SDK_INSTALL_VERSION="${MN_PYTHON_SDK_VERSION:-}"
@@ -6159,11 +6143,9 @@ EOF
         exit 1
       fi
       INSTALL_VERSION="$1"
-      INSTALL_VERSION_EXPLICIT="Y"
       ;;
     --version=*)
       INSTALL_VERSION="${1#*=}"
-      INSTALL_VERSION_EXPLICIT="Y"
       ;;
     --core-version)
       shift
@@ -6336,26 +6318,14 @@ EOF
     INSTALL_VERSION="${INSTALL_VERSION:-$MN_DEFAULT_INSTALL_VERSION}"
     mn_validate_version_tag_or_exit "$INSTALL_VERSION"
 
-    # The current installer release maps to the individually pinned component
-    # artifacts declared at the top of this file. Historical explicit release
-    # tags preserve the legacy unified-tag behavior.
-    if [ "$INSTALL_VERSION_EXPLICIT" != "Y" ] || [ "$INSTALL_VERSION" = "$MN_DEFAULT_INSTALL_VERSION" ]; then
-      CORE_INSTALL_VERSION="${CORE_INSTALL_VERSION:-$MN_DEFAULT_CORE_VERSION}"
-      PYTHON_SDK_INSTALL_VERSION="${PYTHON_SDK_INSTALL_VERSION:-$DEFAULT_PYTHON_SDK_INSTALL_VERSION}"
-      CLI_INSTALL_VERSION="${CLI_INSTALL_VERSION:-$DEFAULT_CLI_INSTALL_VERSION}"
-      API_INSTALL_VERSION="${API_INSTALL_VERSION:-$DEFAULT_API_INSTALL_VERSION}"
-      WEB_UI_INSTALL_VERSION="${WEB_UI_INSTALL_VERSION:-$DEFAULT_WEB_UI_INSTALL_VERSION}"
-      PACKAGE_INDEX_VERSION="${PACKAGE_INDEX_VERSION:-$MN_DEFAULT_AGENT_PACKAGE_INDEX_VERSION}"
-      MN_INSTALL_SUPPORT_VERSION="${MN_INSTALL_SUPPORT_VERSION:-$MN_DEFAULT_INSTALL_SUPPORT_VERSION}"
-    else
-      CORE_INSTALL_VERSION="${CORE_INSTALL_VERSION:-$INSTALL_VERSION}"
-      PYTHON_SDK_INSTALL_VERSION="${PYTHON_SDK_INSTALL_VERSION:-$INSTALL_VERSION}"
-      CLI_INSTALL_VERSION="${CLI_INSTALL_VERSION:-$INSTALL_VERSION}"
-      API_INSTALL_VERSION="${API_INSTALL_VERSION:-$INSTALL_VERSION}"
-      WEB_UI_INSTALL_VERSION="${WEB_UI_INSTALL_VERSION:-$INSTALL_VERSION}"
-      PACKAGE_INDEX_VERSION="${PACKAGE_INDEX_VERSION:-$INSTALL_VERSION}"
-      MN_INSTALL_SUPPORT_VERSION="${MN_INSTALL_SUPPORT_VERSION:-$INSTALL_VERSION}"
-    fi
+    # Each component uses its explicit pin from the current release contract.
+    CORE_INSTALL_VERSION="${CORE_INSTALL_VERSION:-$MN_DEFAULT_CORE_VERSION}"
+    PYTHON_SDK_INSTALL_VERSION="${PYTHON_SDK_INSTALL_VERSION:-$DEFAULT_PYTHON_SDK_INSTALL_VERSION}"
+    CLI_INSTALL_VERSION="${CLI_INSTALL_VERSION:-$DEFAULT_CLI_INSTALL_VERSION}"
+    API_INSTALL_VERSION="${API_INSTALL_VERSION:-$DEFAULT_API_INSTALL_VERSION}"
+    WEB_UI_INSTALL_VERSION="${WEB_UI_INSTALL_VERSION:-$DEFAULT_WEB_UI_INSTALL_VERSION}"
+    PACKAGE_INDEX_VERSION="${PACKAGE_INDEX_VERSION:-$MN_DEFAULT_AGENT_PACKAGE_INDEX_VERSION}"
+    MN_INSTALL_SUPPORT_VERSION="${MN_INSTALL_SUPPORT_VERSION:-$MN_DEFAULT_INSTALL_SUPPORT_VERSION}"
     mn_validate_version_tag_or_exit "$CORE_INSTALL_VERSION"
     mn_validate_version_tag_or_exit "$PYTHON_SDK_INSTALL_VERSION"
     mn_validate_version_tag_or_exit "$CLI_INSTALL_VERSION"

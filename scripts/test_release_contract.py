@@ -778,16 +778,16 @@ def test_static_metadata_commit_does_not_reorder_fingerprint_inputs(tmp_path):
     (project / "pyproject.toml").write_text(old)
     (project / "code.py").write_text(code)
     commit(repo)
-    legacy = indexer.source_fingerprint(tmp_path, "repo/optimizer", legacy=True)
     stable = indexer.source_fingerprint(tmp_path, "repo/optimizer")
     (project / "pyproject.toml").write_text(new)
     commit(repo)
-    assert indexer.source_fingerprint(tmp_path, "repo/optimizer", legacy=True) != legacy
     assert indexer.source_fingerprint(tmp_path, "repo/optimizer") == stable
-    assert indexer.source_matches(tmp_path, "repo/optimizer", legacy)
+    assert not indexer.source_matches(
+        tmp_path, "repo/optimizer", stable.removeprefix("v2:")
+    )
     index = tmp_path / "index.toml"
     index.write_text(
-        f'[[packages]]\nname="optimizer"\npath="repo/optimizer"\nversion = "1.3.48"\nsource_hash = "{legacy}"\n'
+        f'[[packages]]\nname="optimizer"\npath="repo/optimizer"\nversion = "1.3.48"\nsource_hash = "{stable}"\n'
     )
     indexer.verify_sources(index, tmp_path)
     indexer.synchronize(index, tmp_path, "1.3.49", independent=True)
@@ -796,5 +796,4 @@ def test_static_metadata_commit_does_not_reorder_fingerprint_inputs(tmp_path):
     assert record["source_hash"] == stable
     (project / "code.py").write_text("actual new behavior\n")
     commit(repo)
-    assert not indexer.source_matches(tmp_path, "repo/optimizer", legacy)
     assert not indexer.source_matches(tmp_path, "repo/optimizer", stable)

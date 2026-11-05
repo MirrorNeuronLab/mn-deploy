@@ -31,6 +31,8 @@ git --git-dir="$REMOTE" symbolic-ref HEAD refs/heads/main
 
 mkdir -p "$WORKSPACE" "$HELPER_DIR"
 cp "$SOURCE_HELPER" "$HELPER_DIR/git_commit_push_all.sh"
+mkdir -p "$HELPER_DIR/scripts"
+cp "$SCRIPT_DIR/format-prettier.py" "$HELPER_DIR/scripts/format-prettier.py"
 git clone "$REMOTE" "$TARGET" >/dev/null
 git -C "$TARGET" config user.name "mn-deploy test"
 git -C "$TARGET" config user.email "mn-deploy-test@example.invalid"
@@ -87,6 +89,64 @@ printf '%s\n' "new local work" >"$TARGET/value.txt"
 "$HELPER_DIR/git_commit_push_all.sh" -m "new local work" >"$OUTPUT" 2>&1
 test "$(git --git-dir="$REMOTE" rev-parse main)" = "$(git -C "$TARGET" rev-parse HEAD)"
 test "$(git -C "$TARGET" log -1 --format=%s)" = "new local work"
+test -z "$(git -C "$TARGET" status --porcelain)"
+
+# Formatting is opt-in and runs before the formatted content is committed.
+# Stub only the tool runner; all Git synchronization uses isolated real repos.
+mkdir -p "$TEST_ROOT/bin"
+cat >"$TEST_ROOT/bin/uvx" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+test "$1" = "--from"
+test "$2" = "pre-commit==4.5.1"
+test "$3" = "python"
+test -f "$4"
+test "${4##*/}" = "format-prettier.py"
+test "$5" = "refs/remotes/origin/main"
+printf '%s\n' "$PWD" >>"$UVX_LOG"
+if [ "${FORMAT_SHOULD_FAIL:-N}" = "Y" ]; then
+  echo "formatter failed" >&2
+  exit 1
+fi
+printf '%s\n' '# Formatted' >README.md
+SH
+chmod +x "$TEST_ROOT/bin/uvx"
+export UVX_LOG="$TEST_ROOT/uvx.log"
+export PATH="$TEST_ROOT/bin:$PATH"
+
+printf '%s\n' '#   Unformatted' >"$TARGET/README.md"
+"$HELPER_DIR/git_commit_push_all.sh" -m "without formatter" >"$OUTPUT" 2>&1
+test ! -f "$UVX_LOG"
+test "$(cat "$TARGET/README.md")" = '#   Unformatted'
+
+printf '%s\n' '#    Pending format' >"$TARGET/README.md"
+"$HELPER_DIR/git_commit_push_all.sh" --prettier -m "formatted work" >"$OUTPUT" 2>&1
+test "$(cat "$TARGET/README.md")" = '# Formatted'
+test "$(git -C "$TARGET" log -1 --format=%s)" = "formatted work"
+test "$(git --git-dir="$REMOTE" show main:README.md)" = '# Formatted'
+test -z "$(git -C "$TARGET" status --porcelain)"
+
+# A formatting failure must leave both histories and the dirty work untouched.
+printf '%s\n' 'broken formatting' >"$TARGET/README.md"
+LOCAL_COMMIT="$(git -C "$TARGET" rev-parse HEAD)"
+REMOTE_COMMIT="$(git --git-dir="$REMOTE" rev-parse main)"
+if FORMAT_SHOULD_FAIL=Y "$HELPER_DIR/git_commit_push_all.sh" -m "must not commit" --prettier >"$OUTPUT" 2>&1; then
+  echo "expected formatting failure to stop before commit/push" >&2
+  exit 1
+fi
+grep -q "formatter failed" "$OUTPUT"
+test "$(git -C "$TARGET" rev-parse HEAD)" = "$LOCAL_COMMIT"
+test "$(git --git-dir="$REMOTE" rev-parse main)" = "$REMOTE_COMMIT"
+test "$(cat "$TARGET/README.md")" = 'broken formatting'
+printf '%s\n' '# Formatted' >"$TARGET/README.md"
+
+# Formatting also runs for unpublished commits in an otherwise clean worktree.
+printf '%s\n' '#   Committed format' >"$TARGET/README.md"
+git -C "$TARGET" add README.md
+git -C "$TARGET" commit -m "unpublished formatting" >/dev/null
+"$HELPER_DIR/git_commit_push_all.sh" -m "format local commit" --prettier >"$OUTPUT" 2>&1
+test "$(git --git-dir="$REMOTE" show main:README.md)" = '# Formatted'
+test "$(git -C "$TARGET" log -1 --format=%s)" = "format local commit"
 test -z "$(git -C "$TARGET" status --porcelain)"
 
 git -C "$PUBLISHER" fetch origin >/dev/null

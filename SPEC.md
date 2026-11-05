@@ -1,13 +1,18 @@
 # MirrorNeuron Deployment Specification
 
+## Current contracts
+
+Current installation uses explicit component pins and current release-index fingerprints (`v2:`). Historical unified-tag inference, fingerprint recovery, shell-profile migration, retired inline-watchdog matching, and host-BEAM PID cleanup are removed. Historical support snapshots are immutable release artifacts and are not modified by this source change.
+
+Backward compatibility and automatic migration of obsolete state are unsupported.
+
 ## Full reset isolation
 
 `install.sh --reset` retains the exact `YES` confirmation and separate desktop
 reset boundary. Before deleting data it holds an installation lifecycle/reset
 lock, stops and verifies owned host relays, watchdogs, model runners and native
-helpers, and removes owned Docker runtime/worker/model resources. Legacy host
-processes can be identified without PID metadata by exact runtime command and
-installation path. PID metadata also requires birth-time evidence; unrelated
+helpers, and removes owned Docker runtime/worker/model resources. Current host processes are identified by their runtime module or executable and
+installation path; retired inline Python watchdogs are unsupported. PID metadata also requires birth-time evidence; unrelated
 processes and other installations are preserved. Cleanup failure aborts reset.
 
 Reset deletes managed downloads and model caches with runtime state, rotates
@@ -215,6 +220,11 @@ Preview never prepares an environment or installs dependencies.
 - The bulk commit/push helper publishes existing local commits even when the
   working tree is clean. Remote updates are fast-forwarded before local work
   is committed; pushes never force-update remote history.
+- Its opt-in `--prettier` flag runs the configured Prettier hook with `--write`
+  after synchronization and before committing. Selection covers pending push
+  files and non-ignored untracked files, honors hook types and exclusions, and
+  reuses its pinned formatter environment through `uvx`. Formatting errors stop
+  before commit/push; ordinary pre-push checks remain enabled.
 
 ## Portability and Output
 

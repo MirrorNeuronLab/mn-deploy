@@ -49,7 +49,6 @@ def source_fingerprint(
     ref: str = "HEAD",
     *,
     include_nested: bool = False,
-    legacy: bool = False,
 ) -> str:
     """Hash tracked package inputs, excluding nested independently built projects.
 
@@ -65,9 +64,7 @@ def source_fingerprint(
     digest = hashlib.sha256()
     # Raw tree rows contain blob IDs; sorting those before normalization makes
     # a version-only edit reorder otherwise identical inputs.
-    ordered = sorted(
-        set(rows), key=None if legacy else lambda row: row.split("\t", 1)[1]
-    )
+    ordered = sorted(set(rows), key=lambda row: row.split("\t", 1)[1])
     for row in ordered:
         metadata, name = row.split("\t", 1)
         mode, kind, oid = metadata.split()
@@ -82,41 +79,14 @@ def source_fingerprint(
             )
             oid = hashlib.sha256(content.encode()).hexdigest()
         digest.update(f"{mode} {name} {oid}\n".encode())
-    return ("" if legacy else "v2:") + digest.hexdigest()
+    return "v2:" + digest.hexdigest()
 
 
 def source_matches(
     workspace: Path, relative: str, expected: str, *, include_nested: bool = False
 ) -> bool:
-    actual = source_fingerprint(workspace, relative, include_nested=include_nested)
-    if expected.startswith("v2:"):
-        return expected == actual
-    if (
-        source_fingerprint(
-            workspace, relative, include_nested=include_nested, legacy=True
-        )
-        == expected
-    ):
-        return True
-    # Recover only the original ordering defect across the immediately preceding
-    # commit. Its recorded legacy hash must match AND normalized inputs must be
-    # identical. This does not rewrite a release snapshot or accept code drift.
-    repo = workspace / Path(relative).parts[0]
-    parent = subprocess.run(
-        ["git", "-C", str(repo), "rev-parse", "--verify", "HEAD^"],
-        capture_output=True,
-        text=True,
-    )
-    if parent.returncode:
-        return False
-    ref = parent.stdout.strip()
-    return (
-        source_fingerprint(
-            workspace, relative, ref, include_nested=include_nested, legacy=True
-        )
-        == expected
-        and source_fingerprint(workspace, relative, ref, include_nested=include_nested)
-        == actual
+    return expected == source_fingerprint(
+        workspace, relative, include_nested=include_nested
     )
 
 

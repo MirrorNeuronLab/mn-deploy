@@ -1,5 +1,11 @@
 # MirrorNeuron Deploy
 
+## Current contracts
+
+Current installation uses explicit component pins and current release-index fingerprints (`v2:`). Historical unified-tag inference, fingerprint recovery, shell-profile migration, retired inline-watchdog matching, and host-BEAM PID cleanup are removed. Historical support snapshots are immutable release artifacts and are not modified by this source change.
+
+Backward compatibility and automatic migration of obsolete state are unsupported.
+
 OpenShell startup resolves the Compose network gateway before launching the
 host-native SDK helper. The installer uses `docker compose create openshell`
 to create the service without starting it, records the resolved bind address
@@ -229,6 +235,18 @@ Commit and push changes across sibling development repositories:
 ```bash
 ./git_commit_push_all.sh -m "Describe the update"
 ```
+
+Add `--prettier` to run Prettier with `--write` before committing:
+
+```bash
+./git_commit_push_all.sh --prettier -m "Describe the update"
+```
+
+This requires `uvx` (provided by uv) and uses each repository's configured
+Prettier version, file types, exclusions, and ignore files. It formats only
+pending push files, including untracked files and unpublished local commits.
+A formatting error stops that repository before commit or push. Other checks
+still run normally at push time.
 
 The bulk helper fetches the current branch and all remote tags before updating.
 It commits uncommitted changes and pushes unpublished commits, including when

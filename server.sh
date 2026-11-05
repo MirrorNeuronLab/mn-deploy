@@ -3,7 +3,6 @@
 DIR="${MN_HOME:-${HOME}/.mn}"
 PID_DIR="${DIR}/.pids"
 LOG_DIR="${DIR}/.logs"
-BEAM_PID_FILE="${PID_DIR}/beam.pid"
 API_PID_FILE="${PID_DIR}/api.pid"
 BEAM_LOG="${LOG_DIR}/beam.log"
 API_LOG="${LOG_DIR}/api.log"
@@ -351,22 +350,16 @@ stop_services() {
     docker rm mirror-neuron-core >/dev/null 2>&1 || true
   fi
 
-  for pid_file in "$API_PID_FILE" "$BEAM_PID_FILE"; do
-    if [ -f "$pid_file" ]; then
-      local pid
-      pid=$(cat "$pid_file")
-      if kill -0 "$pid" 2>/dev/null; then
-        if [ "$pid_file" == "$API_PID_FILE" ]; then
-          ui_detail "Stopping REST API (PID: $pid)."
-        else
-          ui_detail "Stopping legacy Core service (PID: $pid)."
-        fi
-        kill_tree "$pid"
-        sleep 1
-      fi
-      rm -f "$pid_file"
+  if [ -f "$API_PID_FILE" ]; then
+    local pid
+    pid=$(cat "$API_PID_FILE")
+    if kill -0 "$pid" 2>/dev/null; then
+      ui_detail "Stopping REST API (PID: $pid)."
+      kill_tree "$pid"
+      sleep 1
     fi
-  done
+    rm -f "$API_PID_FILE"
+  fi
 
   ui_success "MirrorNeuron stopped."
 }

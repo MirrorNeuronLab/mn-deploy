@@ -5,39 +5,57 @@ set -e
 
 # Commit message (default if not provided)
 COMMIT_MSG="auto: update all repos"
+RUN_PRETTIER="N"
 
 usage() {
-  echo "Usage: $0 [-m \"commit message\"]"
+  echo "Usage: $0 [--prettier] [-m \"commit message\"]"
+  echo "  --prettier  Run the configured Prettier formatter on files being published."
 }
 
-while getopts ":m:h" opt; do
-  case "$opt" in
-  m)
-    COMMIT_MSG="$OPTARG"
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+  --prettier)
+    RUN_PRETTIER="Y"
     ;;
-  h)
+  -m)
+    if [ "$#" -lt 2 ]; then
+      echo "Error: option -m requires a commit message." >&2
+      usage >&2
+      exit 2
+    fi
+    COMMIT_MSG="$2"
+    shift
+    ;;
+  -m?*)
+    COMMIT_MSG="${1#-m}"
+    ;;
+  -h | --help)
     usage
     exit 0
     ;;
-  :)
-    echo "Error: option -$OPTARG requires a commit message." >&2
+  --)
+    shift
+    break
+    ;;
+  -*)
+    echo "Error: invalid option $1." >&2
     usage >&2
     exit 2
     ;;
-  \?)
-    echo "Error: invalid option -$OPTARG." >&2
-    usage >&2
-    exit 2
-    ;;
+  *) break ;;
   esac
+  shift
 done
-
-shift $((OPTIND - 1))
 
 if [ "$#" -gt 0 ]; then
   echo "Error: unexpected argument: $1" >&2
   usage >&2
   exit 2
+fi
+
+if [ "$RUN_PRETTIER" = "Y" ] && ! command -v uvx >/dev/null 2>&1; then
+  echo "error: --prettier requires uvx. Install uv and rerun." >&2
+  exit 1
 fi
 
 echo "Starting bulk git commit & push..."
@@ -128,6 +146,10 @@ for dir in "$TARGET_DIR"/*/; do
     # Get current branch and pull latest changes
     BRANCH=$(git rev-parse --abbrev-ref HEAD)
     sync_branch_before_commit "$BRANCH"
+
+    if [ "$RUN_PRETTIER" = "Y" ]; then
+      uvx --from pre-commit==4.5.1 python "$SCRIPT_DIR/scripts/format-prettier.py" "refs/remotes/origin/$BRANCH"
+    fi
 
     # Check if there are changes
     if [[ -n $(git status --porcelain) ]]; then
