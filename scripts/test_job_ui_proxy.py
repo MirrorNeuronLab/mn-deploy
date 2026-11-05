@@ -7,6 +7,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
+import yaml
 
 
 def test_compose_proxy_readiness_authentication_lifecycle_and_ports(tmp_path):
@@ -14,13 +15,16 @@ def test_compose_proxy_readiness_authentication_lifecycle_and_ports(tmp_path):
     if node is None:
         pytest.skip("Node is required to exercise the Compose Web UI proxy")
     source = (Path(__file__).resolve().parents[1] / "docker-compose.yml").read_text()
-    script = source.split("<<'NODE'\n", 1)[1].split("\n          NODE", 1)[0]
+    command = yaml.safe_load(source)["services"]["web-ui"]["command"][-1]
+    script = command.split("<<'NODE'\n", 1)[1].split("\nNODE\n", 1)[0]
     script = textwrap.dedent(script).replace("$$", "$")
     full = tmp_path / "server.mjs"
     full.write_text(script)
-    subprocess.run([node, "--check", str(full)], check=True, capture_output=True, timeout=10)
+    subprocess.run(
+        [node, "--check", str(full)], check=True, capture_output=True, timeout=10
+    )
     helpers = script.split("const server = http.createServer", 1)[0]
-    harness = r'''
+    harness = r"""
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 let requests = [];
@@ -125,9 +129,15 @@ assert.ok(remote.written.includes("Authorization: Bearer test-token"));
 remote.emit("data", Buffer.from("HTTP/1.1 101 Switching Protocols\r\n\r\n"));
 socket.emit("close");
 assert.equal(remote.destroyed, true);
-'''
+"""
     test = tmp_path / "proxy-test.mjs"
     test.write_text(helpers + harness)
-    result = subprocess.run([node, str(test)], check=False, capture_output=True, text=True, timeout=10,
-                            env={"PATH": os.environ.get("PATH", ""), "MN_API_TOKEN": "test-token"})
+    result = subprocess.run(
+        [node, str(test)],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        env={"PATH": os.environ.get("PATH", ""), "MN_API_TOKEN": "test-token"},
+    )
     assert result.returncode == 0, result.stderr

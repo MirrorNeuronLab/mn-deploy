@@ -81,7 +81,7 @@ prepare_python_publish_environment() {
     require_command uv
     PUBLISH_PYTHON="${publish_venv}/bin/python"
     if [[ ! -x "$PUBLISH_PYTHON" ]] ||
-       ! "$PUBLISH_PYTHON" -c 'import sys; assert sys.version_info[:2] == (3, 12)' >/dev/null 2>&1; then
+      ! "$PUBLISH_PYTHON" -c 'import sys; assert sys.version_info[:2] == (3, 12)' >/dev/null 2>&1; then
       printf 'Preparing Python publishing environment with uv: %s\n' "$publish_venv"
       uv venv --python 3.12 "$publish_venv" --clear
     fi
@@ -108,9 +108,10 @@ select_python_plan_environment() {
   if ! command -v "$PUBLISH_PYTHON" >/dev/null 2>&1; then
     PUBLISH_PYTHON="${MN_PUBLISH_PYTHON:-python3}"
   fi
-  command -v "$PUBLISH_PYTHON" >/dev/null 2>&1 &&
-    "$PUBLISH_PYTHON" -c 'import sys; assert sys.version_info[:2] == (3, 12); import packaging, tomllib' >/dev/null 2>&1 ||
+  if ! command -v "$PUBLISH_PYTHON" >/dev/null 2>&1 ||
+    ! "$PUBLISH_PYTHON" -c 'import sys; assert sys.version_info[:2] == (3, 12); import packaging, tomllib' >/dev/null 2>&1; then
     die "Release preview requires Python 3.12 with packaging. Set MN_PUBLISH_PYTHON to a suitable interpreter; --plan does not install dependencies."
+  fi
 }
 
 validate_version() {
@@ -123,9 +124,13 @@ set_installer_default_version() {
   local tag="$2"
   local expected
 
+  # Perl syntax and the generated shell expression must remain literal.
+  # shellcheck disable=SC2016
   env MN_RELEASE_SETTING="$setting" MN_RELEASE_TAG="$tag" perl -0pi -e \
     's~^(\Q$ENV{MN_RELEASE_SETTING}\E="\$\{\Q$ENV{MN_RELEASE_SETTING}\E:-)[^}]+(\}")~$1$ENV{MN_RELEASE_TAG}$2~m' \
     "${DEPLOY_DIR}/install.sh"
+  # This is a literal shell default expression for grep, not an expansion.
+  # shellcheck disable=SC2016
   printf -v expected '%s="${%s:-%s}"' "$setting" "$setting" "$tag"
   grep -Fq "$expected" "${DEPLOY_DIR}/install.sh" ||
     die "Could not set ${setting} to ${tag} in install.sh."
@@ -151,13 +156,14 @@ prepare_install_support_snapshot() {
     return
   fi
 
-  [[ -f "${support_dir}/docker-compose.yml" ]] &&
-    [[ -f "${support_dir}/package-index/python-packages.toml" ]] &&
-    cmp -s "${DEPLOY_DIR}/docker-compose.yml" "${support_dir}/docker-compose.yml" &&
-    cmp -s \
+  if [[ ! -f "${support_dir}/docker-compose.yml" ]] ||
+    [[ ! -f "${support_dir}/package-index/python-packages.toml" ]] ||
+    ! cmp -s "${DEPLOY_DIR}/docker-compose.yml" "${support_dir}/docker-compose.yml" ||
+    ! cmp -s \
       "${DEPLOY_DIR}/package-index/python-packages.toml" \
-      "${support_dir}/package-index/python-packages.toml" ||
+      "${support_dir}/package-index/python-packages.toml"; then
     die "Existing install support snapshot ${support_dir} does not match the prepared release metadata; refusing to overwrite an immutable snapshot."
+  fi
 
   printf 'Reusing matching install support snapshot: %s\n' "$support_dir"
 }
@@ -176,15 +182,15 @@ commit_and_push_if_changed() {
 
 phase_rank() {
   case "$1" in
-    prepare) printf '0' ;;
-    computer-use) printf '1' ;;
-    python) printf '2' ;;
-    web-ui) printf '3' ;;
-    membrane) printf '4' ;;
-    core) printf '5' ;;
-    tags) printf '6' ;;
-    finalize) printf '7' ;;
-    *) die "Unknown release phase: $1" ;;
+  prepare) printf '0' ;;
+  computer-use) printf '1' ;;
+  python) printf '2' ;;
+  web-ui) printf '3' ;;
+  membrane) printf '4' ;;
+  core) printf '5' ;;
+  tags) printf '6' ;;
+  finalize) printf '7' ;;
+  *) die "Unknown release phase: $1" ;;
   esac
 }
 
@@ -283,7 +289,8 @@ prepare_release_metadata() {
     install.sh package-index/python-packages.toml docker-compose.yml "install_support/${TAG}"
   local repo
   for repo in "${REPOSITORIES[@]}"; do
-    metadata_output="$("$PUBLISH_PYTHON" - "$index_file" "$repo" <<'PYTHON'
+    metadata_output="$(
+      "$PUBLISH_PYTHON" - "$index_file" "$repo" <<'PYTHON'
 import sys, tomllib
 from pathlib import PurePosixPath
 for package in tomllib.loads(open(sys.argv[1]).read())["packages"]:
@@ -296,7 +303,7 @@ PYTHON
     local metadata_paths=()
     while IFS= read -r pyproject; do
       metadata_paths+=("$pyproject")
-    done <<< "$metadata_output"
+    done <<<"$metadata_output"
     commit_and_push_if_changed "$repo" "Prepare ${TAG} package metadata" "${metadata_paths[@]}"
   done
 }
@@ -355,11 +362,11 @@ publish_and_verify_gar() {
     CURRENT_PHASE="membrane"
     image="${LOCATION}-docker.pkg.dev/${PROJECT}/mirrorneuron-runtime/membrane-context-engine"
     tags_file="$(mktemp "${TMPDIR:-/tmp}/mn-membrane-tags.XXXXXX")"
-    gcloud artifacts docker tags list "$image" --format='value(tag)' > "$tags_file"
+    gcloud artifacts docker tags list "$image" --format='value(tag)' >"$tags_file"
 
     if ! grep -qx "$VERSION" "$tags_file" ||
-       ! grep -qx "$TAG" "$tags_file" ||
-       ! grep -qx latest "$tags_file"; then
+      ! grep -qx "$TAG" "$tags_file" ||
+      ! grep -qx latest "$tags_file"; then
       membrane_worktree_root="$(mktemp -d "${TMPDIR:-/tmp}/mn-membrane-release.XXXXXX")"
       membrane_dir="${membrane_worktree_root}/source"
       (
@@ -372,7 +379,7 @@ publish_and_verify_gar() {
           --membrane-dir "$membrane_dir" \
           --skip-binary
       )
-      gcloud artifacts docker tags list "$image" --format='value(tag)' > "$tags_file"
+      gcloud artifacts docker tags list "$image" --format='value(tag)' >"$tags_file"
     fi
 
     grep -qx "$VERSION" "$tags_file" || die "Membrane Docker tag ${VERSION} was not published."
@@ -385,17 +392,17 @@ publish_and_verify_gar() {
     CURRENT_PHASE="core"
     core_image="${LOCATION}-docker.pkg.dev/${PROJECT}/mirrorneuron-runtime/mirror-neuron-core"
     core_tags_file="$(mktemp "${TMPDIR:-/tmp}/mn-core-tags.XXXXXX")"
-    gcloud artifacts docker tags list "$core_image" --format='value(tag)' > "$core_tags_file"
+    gcloud artifacts docker tags list "$core_image" --format='value(tag)' >"$core_tags_file"
 
     if ! grep -qx "$VERSION" "$core_tags_file" ||
-       ! grep -qx "$TAG" "$core_tags_file" ||
-       ! grep -qx latest "$core_tags_file"; then
+      ! grep -qx "$TAG" "$core_tags_file" ||
+      ! grep -qx latest "$core_tags_file"; then
       "${SCRIPT_DIR}/publish_public_core_to_google_artifact_registry.sh" \
         --apply \
         --version "$TAG" \
         --project "$PROJECT" \
         --location "$LOCATION"
-      gcloud artifacts docker tags list "$core_image" --format='value(tag)' > "$core_tags_file"
+      gcloud artifacts docker tags list "$core_image" --format='value(tag)' >"$core_tags_file"
     fi
 
     grep -qx "$VERSION" "$core_tags_file" || die "Core Docker tag ${VERSION} was not published."
@@ -412,7 +419,8 @@ update_installer_pins() {
     MN_DEFAULT_INSTALL_VERSION MN_DEFAULT_INSTALL_SUPPORT_VERSION; do
     set_installer_default_version "$setting" "$TAG"
   done
-  package_versions="$("$PUBLISH_PYTHON" - "${DEPLOY_DIR}/package-index/python-packages.toml" <<'PYTHON'
+  package_versions="$(
+    "$PUBLISH_PYTHON" - "${DEPLOY_DIR}/package-index/python-packages.toml" <<'PYTHON'
 import sys, tomllib
 settings = {"mirrorneuron-python-sdk": "MN_DEFAULT_PYTHON_SDK_VERSION",
             "mirrorneuron-cli": "MN_DEFAULT_CLI_VERSION", "mirrorneuron-api": "MN_DEFAULT_API_VERSION"}
@@ -424,12 +432,12 @@ PYTHON
   [[ -n "$package_versions" ]] || die "No installer versions found in the Python package index."
   while read -r setting version; do
     set_installer_default_version "$setting" "v${version}"
-  done <<< "$package_versions"
+  done <<<"$package_versions"
 }
 
 update_post_release_pins() {
   if ! grep -Fq "## ${TAG} " "${DEPLOY_DIR}/released.md"; then
-    cat >> "${DEPLOY_DIR}/released.md" <<EOF
+    cat >>"${DEPLOY_DIR}/released.md" <<EOF
 
 ## ${TAG} -- $(date +%F)
 
@@ -455,8 +463,7 @@ EOF
     [[ "$(git -C "${WORKSPACE_ROOT}/otterdesk-blueprints" branch --show-current)" == "main" ]] ||
       die "otterdesk-blueprints is not on main."
     git -C "${WORKSPACE_ROOT}/otterdesk-blueprints" fetch --quiet origin main
-    [[ "$(git -C "${WORKSPACE_ROOT}/otterdesk-blueprints" rev-parse HEAD)" == \
-       "$(git -C "${WORKSPACE_ROOT}/otterdesk-blueprints" rev-parse origin/main)" ]] ||
+    [[ "$(git -C "${WORKSPACE_ROOT}/otterdesk-blueprints" rev-parse HEAD)" == "$(git -C "${WORKSPACE_ROOT}/otterdesk-blueprints" rev-parse origin/main)" ]] ||
       die "otterdesk-blueprints is not synchronized with origin/main."
     python3 "${DEPLOY_DIR}/scripts/release-contract.py" blueprints \
       "${DEPLOY_DIR}/package-index/python-packages.toml" "${WORKSPACE_ROOT}/otterdesk-blueprints"
@@ -466,26 +473,26 @@ EOF
 
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
-    -v|--version)
-      shift
-      [[ "$#" -gt 0 ]] || die "--version requires a value."
-      VERSION="$1"
-      ;;
-    --resume-from)
-      shift
-      [[ "$#" -gt 0 ]] || die "--resume-from requires a phase."
-      RESUME_FROM="$1"
-      ;;
-    --resume-from=*) RESUME_FROM="${1#*=}" ;;
-    --auto) VERSION="" ;;
-    --plan) PLAN="Y" ;;
-    -h|--help)
-      usage
-      exit 0
-      ;;
-    *)
-      die "Unknown argument: $1"
-      ;;
+  -v | --version)
+    shift
+    [[ "$#" -gt 0 ]] || die "--version requires a value."
+    VERSION="$1"
+    ;;
+  --resume-from)
+    shift
+    [[ "$#" -gt 0 ]] || die "--resume-from requires a phase."
+    RESUME_FROM="$1"
+    ;;
+  --resume-from=*) RESUME_FROM="${1#*=}" ;;
+  --auto) VERSION="" ;;
+  --plan) PLAN="Y" ;;
+  -h | --help)
+    usage
+    exit 0
+    ;;
+  *)
+    die "Unknown argument: $1"
+    ;;
   esac
   shift
 done
@@ -500,7 +507,10 @@ if [[ -z "$VERSION" ]]; then
   fi
   VERSION="$(python3 "${DEPLOY_DIR}/scripts/release-contract.py" next-version \
     "$WORKSPACE_ROOT" "${REPOSITORIES[@]}")"
-  [[ -n "$VERSION" ]] || { printf 'No source changes since the last release.\n'; exit 0; }
+  [[ -n "$VERSION" ]] || {
+    printf 'No source changes since the last release.\n'
+    exit 0
+  }
 fi
 MN_RELEASE_BASELINE="$(sed -n 's/^MN_DEFAULT_INSTALL_VERSION=.*:-\(v[0-9.]*\)}"/\1/p' "${DEPLOY_DIR}/install.sh")"
 validate_version "$VERSION"
@@ -550,7 +560,7 @@ else
 fi
 
 if should_run_phase computer-use || should_run_phase python || should_run_phase web-ui ||
-   should_run_phase membrane || should_run_phase core; then
+  should_run_phase membrane || should_run_phase core; then
   publish_and_verify_gar
 fi
 if should_run_phase tags; then

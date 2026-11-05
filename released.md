@@ -8,52 +8,52 @@ published. Python distributions use the public GAR `agent-skills` repository;
 
 ## 2026-07-18
 
-| What | Version | Where |
-| --- | --- | --- |
-| MirrorNeuron Core runtime | `v1.2.27` | GitHub Releases (OTP tarballs). GAR: not published. |
-| `mirrorneuron-api` | `1.2.27` | PyPI; GAR Python: `agent-skills` (`https://us-central1-python.pkg.dev/mirrorneuron-public-packages/agent-skills/simple/`). |
-| `mirrorneuron-cli` | `1.2.27` | PyPI; GAR Python: `agent-skills` (`https://us-central1-python.pkg.dev/mirrorneuron-public-packages/agent-skills/simple/`). |
-| `mirrorneuron-python-sdk` | `1.2.27` | PyPI; GAR Python: `agent-skills` (`https://us-central1-python.pkg.dev/mirrorneuron-public-packages/agent-skills/simple/`). |
-| `mirrorneuron-web-ui` | `1.2.27` | npm. GAR: not published. |
-| `mirrorneuron-membrane-python-sdk` | `1.2.27` | GAR Python: `agent-skills` (`https://us-central1-python.pkg.dev/mirrorneuron-public-packages/agent-skills/simple/`). |
-| `membrane-context-engine` runtime image | `v1.2.27`, `1.2.27` | GAR Docker: `mirrorneuron-runtime` (`us-central1-docker.pkg.dev/mirrorneuron-public-packages/mirrorneuron-runtime/membrane-context-engine`). |
-| `mirrorneuron-actor-review-skill` | `1.2.27` | GAR Python: `agent-skills`. |
-| `mirrorneuron-autonomous-research-skill` | `1.2.27` | GAR Python: `agent-skills`. |
-| `mirrorneuron-blueprint-support-skill` | `1.2.27` | GAR Python: `agent-skills`. |
-| `mirrorneuron-client-report-skill` | `1.2.27` | GAR Python: `agent-skills`. |
-| `mirrorneuron-document-reading-skill` | `1.2.27` | GAR Python: `agent-skills`. |
-| `mirrorneuron-evidence-engine-skill` | `1.2.27` | GAR Python: `agent-skills`. |
-| `mirrorneuron-litellm-communicate-skill` | `1.2.27` | GAR Python: `agent-skills`. |
-| `mirrorneuron-llm-ocr-skill` | `1.2.27` | GAR Python: `agent-skills`. |
-| `mirrorneuron-public-research-orchestrator-skill` | `1.2.27` | GAR Python: `agent-skills`. |
-| `mirrorneuron-rag-skill` | `1.2.27` | GAR Python: `agent-skills`. |
-| `mirrorneuron-scoring-framework-skill` | `1.2.27` | GAR Python: `agent-skills`. |
-| `mirrorneuron-w3m-browser-skill` | `1.2.27` | GAR Python: `agent-skills`. |
-| `mirrorneuron-web-browser-skill` | `1.2.27` | GAR Python: `agent-skills`. |
-| `mirrorneuron-websocket-stream-skill` | `1.2.27` | GAR Python: `agent-skills`. |
-| `mn-prototype-actor-review-agent` | `1.2.27` | GAR Python: `agent-skills`. |
-| `mn-prototype-artifact-finalizer-agent` | `1.2.27` | GAR Python: `agent-skills`. |
-| `mn-prototype-bounded-tool-loop-agent` | `1.2.27` | GAR Python: `agent-skills`. |
-| `mn-prototype-entity-queue-agent` | `1.2.27` | GAR Python: `agent-skills`. |
-| `mn-prototype-stateful-step-agent` | `1.2.27` | GAR Python: `agent-skills`. |
-| `mn-prototype-stream-processor-agent` | `1.2.27` | GAR Python: `agent-skills`. |
-| `mn-prototype-supervised-service-agent` | `1.2.27` | GAR Python: `agent-skills`. |
+| What                                              | Version             | Where                                                                                                                                        |
+| ------------------------------------------------- | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| MirrorNeuron Core runtime                         | `v1.2.27`           | GitHub Releases (OTP tarballs). GAR: not published.                                                                                          |
+| `mirrorneuron-api`                                | `1.2.27`            | PyPI; GAR Python: `agent-skills` (`https://us-central1-python.pkg.dev/mirrorneuron-public-packages/agent-skills/simple/`).                   |
+| `mirrorneuron-cli`                                | `1.2.27`            | PyPI; GAR Python: `agent-skills` (`https://us-central1-python.pkg.dev/mirrorneuron-public-packages/agent-skills/simple/`).                   |
+| `mirrorneuron-python-sdk`                         | `1.2.27`            | PyPI; GAR Python: `agent-skills` (`https://us-central1-python.pkg.dev/mirrorneuron-public-packages/agent-skills/simple/`).                   |
+| `mirrorneuron-web-ui`                             | `1.2.27`            | npm. GAR: not published.                                                                                                                     |
+| `mirrorneuron-membrane-python-sdk`                | `1.2.27`            | GAR Python: `agent-skills` (`https://us-central1-python.pkg.dev/mirrorneuron-public-packages/agent-skills/simple/`).                         |
+| `membrane-context-engine` runtime image           | `v1.2.27`, `1.2.27` | GAR Docker: `mirrorneuron-runtime` (`us-central1-docker.pkg.dev/mirrorneuron-public-packages/mirrorneuron-runtime/membrane-context-engine`). |
+| `mirrorneuron-actor-review-skill`                 | `1.2.27`            | GAR Python: `agent-skills`.                                                                                                                  |
+| `mirrorneuron-autonomous-research-skill`          | `1.2.27`            | GAR Python: `agent-skills`.                                                                                                                  |
+| `mirrorneuron-blueprint-support-skill`            | `1.2.27`            | GAR Python: `agent-skills`.                                                                                                                  |
+| `mirrorneuron-client-report-skill`                | `1.2.27`            | GAR Python: `agent-skills`.                                                                                                                  |
+| `mirrorneuron-document-reading-skill`             | `1.2.27`            | GAR Python: `agent-skills`.                                                                                                                  |
+| `mirrorneuron-evidence-engine-skill`              | `1.2.27`            | GAR Python: `agent-skills`.                                                                                                                  |
+| `mirrorneuron-litellm-communicate-skill`          | `1.2.27`            | GAR Python: `agent-skills`.                                                                                                                  |
+| `mirrorneuron-llm-ocr-skill`                      | `1.2.27`            | GAR Python: `agent-skills`.                                                                                                                  |
+| `mirrorneuron-public-research-orchestrator-skill` | `1.2.27`            | GAR Python: `agent-skills`.                                                                                                                  |
+| `mirrorneuron-rag-skill`                          | `1.2.27`            | GAR Python: `agent-skills`.                                                                                                                  |
+| `mirrorneuron-scoring-framework-skill`            | `1.2.27`            | GAR Python: `agent-skills`.                                                                                                                  |
+| `mirrorneuron-w3m-browser-skill`                  | `1.2.27`            | GAR Python: `agent-skills`.                                                                                                                  |
+| `mirrorneuron-web-browser-skill`                  | `1.2.27`            | GAR Python: `agent-skills`.                                                                                                                  |
+| `mirrorneuron-websocket-stream-skill`             | `1.2.27`            | GAR Python: `agent-skills`.                                                                                                                  |
+| `mn-prototype-actor-review-agent`                 | `1.2.27`            | GAR Python: `agent-skills`.                                                                                                                  |
+| `mn-prototype-artifact-finalizer-agent`           | `1.2.27`            | GAR Python: `agent-skills`.                                                                                                                  |
+| `mn-prototype-bounded-tool-loop-agent`            | `1.2.27`            | GAR Python: `agent-skills`.                                                                                                                  |
+| `mn-prototype-entity-queue-agent`                 | `1.2.27`            | GAR Python: `agent-skills`.                                                                                                                  |
+| `mn-prototype-stateful-step-agent`                | `1.2.27`            | GAR Python: `agent-skills`.                                                                                                                  |
+| `mn-prototype-stream-processor-agent`             | `1.2.27`            | GAR Python: `agent-skills`.                                                                                                                  |
+| `mn-prototype-supervised-service-agent`           | `1.2.27`            | GAR Python: `agent-skills`.                                                                                                                  |
 
 The `latest` image tag also points to the Membrane engine release digest at
 publication time, but installers must use the immutable `:v1.2.27` tag.
 
 ## 2026-07-19
 
-| What | Version | Where |
-| --- | --- | --- |
-| MirrorNeuron Core runtime | `v1.2.29` | GitHub Releases (OTP tarballs). |
-| `mirrorneuron-api` | `1.2.29` | GAR Python: `agent-skills` (`https://us-central1-python.pkg.dev/mirrorneuron-public-packages/agent-skills/simple/`). |
-| `mirrorneuron-cli` | `1.2.29` | GAR Python: `agent-skills`. |
-| `mirrorneuron-python-sdk` | `1.2.29` | GAR Python: `agent-skills`. |
-| `mirrorneuron-web-ui` | `1.2.29` | npm. GAR: not published. |
-| `mirrorneuron-membrane-python-sdk` | `1.2.29` | PyPI; GAR Python: `agent-skills`. |
-| `membrane-context-engine` runtime image | `v1.2.29`, `1.2.29` | GAR Docker: `mirrorneuron-runtime` (`us-central1-docker.pkg.dev/mirrorneuron-public-packages/mirrorneuron-runtime/membrane-context-engine`). |
-| All indexed skill and agent distributions | `1.2.29` | GAR Python: `agent-skills` — 52 packages, 103 wheel/source distributions. |
+| What                                      | Version             | Where                                                                                                                                        |
+| ----------------------------------------- | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| MirrorNeuron Core runtime                 | `v1.2.29`           | GitHub Releases (OTP tarballs).                                                                                                              |
+| `mirrorneuron-api`                        | `1.2.29`            | GAR Python: `agent-skills` (`https://us-central1-python.pkg.dev/mirrorneuron-public-packages/agent-skills/simple/`).                         |
+| `mirrorneuron-cli`                        | `1.2.29`            | GAR Python: `agent-skills`.                                                                                                                  |
+| `mirrorneuron-python-sdk`                 | `1.2.29`            | GAR Python: `agent-skills`.                                                                                                                  |
+| `mirrorneuron-web-ui`                     | `1.2.29`            | npm. GAR: not published.                                                                                                                     |
+| `mirrorneuron-membrane-python-sdk`        | `1.2.29`            | PyPI; GAR Python: `agent-skills`.                                                                                                            |
+| `membrane-context-engine` runtime image   | `v1.2.29`, `1.2.29` | GAR Docker: `mirrorneuron-runtime` (`us-central1-docker.pkg.dev/mirrorneuron-public-packages/mirrorneuron-runtime/membrane-context-engine`). |
+| All indexed skill and agent distributions | `1.2.29`            | GAR Python: `agent-skills` — 52 packages, 103 wheel/source distributions.                                                                    |
 
 The Membrane runtime image digest is
 `sha256:4833dd00e712a054a35225b82f7b472d3fffbd41edceb64508943ede79e49bfa`.
@@ -62,22 +62,22 @@ installers must use the immutable `:v1.2.29` tag.
 
 ## 2026-07-21
 
-| What | Version | Where |
-| --- | --- | --- |
+| What                                   | Version  | Where                                                                                                                |
+| -------------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------- |
 | `mirrorneuron-use-generic-model-skill` | `1.2.29` | GAR Python: `agent-skills` (`https://us-central1-python.pkg.dev/mirrorneuron-public-packages/agent-skills/simple/`). |
 
 ## 2026-07-29 — v1.2.31
 
-| What | Version | Where |
-| --- | --- | --- |
-| MirrorNeuron Core runtime | `v1.2.31`, `1.2.31`, `latest` | GitHub Releases (OTP tarballs); GAR Docker: `mirrorneuron-runtime` (`us-central1-docker.pkg.dev/mirrorneuron-public-packages/mirrorneuron-runtime/mirror-neuron-core`), Linux amd64 and arm64. |
-| `mirrorneuron-api` | `1.2.31` | PyPI; GAR Python: `agent-skills` (`https://us-central1-python.pkg.dev/mirrorneuron-public-packages/agent-skills/simple/`). |
-| `mirrorneuron-cli` | `1.2.31` | PyPI; GAR Python: `agent-skills`. |
-| `mirrorneuron-python-sdk` | `1.2.31` | PyPI; GAR Python: `agent-skills`. |
-| `mirrorneuron-web-ui` | `1.2.31` | npm. |
-| `mirrorneuron-membrane-python-sdk` | `1.2.31` | PyPI; GAR Python: `agent-skills`. |
-| All indexed skill and agent distributions | `1.2.31` | GAR Python: `agent-skills` — 107 wheel/source distributions, including `mirrorneuron-live-video-analysis-skill`. |
-| `membrane-context-engine` runtime image | `v1.2.31`, `1.2.31`, `latest` | GAR Docker: `mirrorneuron-runtime` (`us-central1-docker.pkg.dev/mirrorneuron-public-packages/mirrorneuron-runtime/membrane-context-engine`), Linux amd64 and arm64. |
+| What                                      | Version                       | Where                                                                                                                                                                                          |
+| ----------------------------------------- | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| MirrorNeuron Core runtime                 | `v1.2.31`, `1.2.31`, `latest` | GitHub Releases (OTP tarballs); GAR Docker: `mirrorneuron-runtime` (`us-central1-docker.pkg.dev/mirrorneuron-public-packages/mirrorneuron-runtime/mirror-neuron-core`), Linux amd64 and arm64. |
+| `mirrorneuron-api`                        | `1.2.31`                      | PyPI; GAR Python: `agent-skills` (`https://us-central1-python.pkg.dev/mirrorneuron-public-packages/agent-skills/simple/`).                                                                     |
+| `mirrorneuron-cli`                        | `1.2.31`                      | PyPI; GAR Python: `agent-skills`.                                                                                                                                                              |
+| `mirrorneuron-python-sdk`                 | `1.2.31`                      | PyPI; GAR Python: `agent-skills`.                                                                                                                                                              |
+| `mirrorneuron-web-ui`                     | `1.2.31`                      | npm.                                                                                                                                                                                           |
+| `mirrorneuron-membrane-python-sdk`        | `1.2.31`                      | PyPI; GAR Python: `agent-skills`.                                                                                                                                                              |
+| All indexed skill and agent distributions | `1.2.31`                      | GAR Python: `agent-skills` — 107 wheel/source distributions, including `mirrorneuron-live-video-analysis-skill`.                                                                               |
+| `membrane-context-engine` runtime image   | `v1.2.31`, `1.2.31`, `latest` | GAR Docker: `mirrorneuron-runtime` (`us-central1-docker.pkg.dev/mirrorneuron-public-packages/mirrorneuron-runtime/membrane-context-engine`), Linux amd64 and arm64.                            |
 
 The Core runtime image tags all resolve to
 `sha256:dad099b5485322051e6a9056c176599d82542887d348a7f570e132a8996ac630`.
@@ -88,8 +88,8 @@ The release scope excludes `otterdesk-desktop-app` and
 
 ## 2026-07-29 — mn-cli v1.2.32
 
-| What | Version | Where |
-| --- | --- | --- |
+| What               | Version  | Where                  |
+| ------------------ | -------- | ---------------------- |
 | `mirrorneuron-cli` | `1.2.32` | GitHub Releases; PyPI. |
 
 This patch prevents the runtime update check from treating an older release
@@ -99,7 +99,7 @@ runtime.
 
 ## v1.3.47 -- 2026-09-13
 
-- GAR npm:  in mirrorneuron-npm.
+- GAR npm: in mirrorneuron-npm.
 - GAR Python: all packages in package-index/python-packages.toml, including
   mirrorneuron-api, mirrorneuron-cli, and mirrorneuron-python-sdk.
 - GAR Docker: mirror-neuron-core and membrane-context-engine each published
@@ -224,20 +224,20 @@ Published to the public Google Artifact Registry repository
 Membrane 2.2.0 preceded the SDK 1.4.1 family. API and CLI candidates passed
 verification against fresh public SDK downloads before their publication.
 
-| Distribution | Version |
-| --- | --- |
-| `mirrorneuron-membrane-python-sdk` | `2.2.0` |
-| `mn-python-sdk-common` | `1.4.1` |
-| `mn-python-sdk-web-ui` | `1.4.1` |
-| `mn-python-sdk-models` | `1.4.1` |
-| `mn-python-sdk-mcp` | `1.4.1` |
-| `mn-python-sdk-collaboration` | `1.4.1` |
-| `mn-python-sdk-rag` | `1.4.1` |
-| `mn-python-sdk-job-response` | `1.4.1` |
-| `mirrorneuron-python-sdk` | `1.4.1` |
-| `mn-blueprint-blocks` | `1.4.1` |
-| `mirrorneuron-cli` | `1.3.65` |
-| `mirrorneuron-api` | `1.3.64` |
+| Distribution                       | Version  |
+| ---------------------------------- | -------- |
+| `mirrorneuron-membrane-python-sdk` | `2.2.0`  |
+| `mn-python-sdk-common`             | `1.4.1`  |
+| `mn-python-sdk-web-ui`             | `1.4.1`  |
+| `mn-python-sdk-models`             | `1.4.1`  |
+| `mn-python-sdk-mcp`                | `1.4.1`  |
+| `mn-python-sdk-collaboration`      | `1.4.1`  |
+| `mn-python-sdk-rag`                | `1.4.1`  |
+| `mn-python-sdk-job-response`       | `1.4.1`  |
+| `mirrorneuron-python-sdk`          | `1.4.1`  |
+| `mn-blueprint-blocks`              | `1.4.1`  |
+| `mirrorneuron-cli`                 | `1.3.65` |
+| `mirrorneuron-api`                 | `1.3.64` |
 
 The release checks passed 312 Membrane tests, 23 cross-component contracts,
 158 focused API tests, 82 focused CLI tests, the complete 660-test API suite,
@@ -251,16 +251,16 @@ Prepared installer pins and support snapshot `v1.4.8` for the published SDK
 and adapter versions. GitHub synchronization of the source and installer commits
 requires separate approval.
 
-| Source repository | Release commit |
-| --- | --- |
-| `Membrane` | `3de199479466a5a0218604a2164abffad164a3f2` |
-| `mn-python-sdk` | `5452c65141b1feb22070da1c0d362ddee6937c0b` |
-| `mn-api` | `f55bbb6694b0142cc3bc1bab99c60f70a6a26a9a` |
-| `mn-cli` | `f4b753852251f6e99987f6cadb8e778f75815696` |
+| Source repository | Release commit                             |
+| ----------------- | ------------------------------------------ |
+| `Membrane`        | `3de199479466a5a0218604a2164abffad164a3f2` |
+| `mn-python-sdk`   | `5452c65141b1feb22070da1c0d362ddee6937c0b` |
+| `mn-api`          | `f55bbb6694b0142cc3bc1bab99c60f70a6a26a9a` |
+| `mn-cli`          | `f4b753852251f6e99987f6cadb8e778f75815696` |
 
-| Main wheel | SHA-256 |
-| --- | --- |
+| Main wheel                                                | SHA-256                                                            |
+| --------------------------------------------------------- | ------------------------------------------------------------------ |
 | `mirrorneuron_membrane_python_sdk-2.2.0-py3-none-any.whl` | `ceb1c662be8ec347bf8b8c3c43e205722874831fcb7640041796d5b19c67ce6d` |
-| `mirrorneuron_python_sdk-1.4.1-py3-none-any.whl` | `91bd42e833094f00eb61b705b81f4f616cd36a943ffb22e109abed061fb29441` |
-| `mirrorneuron_api-1.3.64-py3-none-any.whl` | `1fddcbd531478bc99e9f05719d2ef0ecfa429dbb29549378adae468a0ae2a10c` |
-| `mirrorneuron_cli-1.3.65-py3-none-any.whl` | `870b8dcc5d720bac3da6b5ca61d4f95f9cc853bf7df494a071fb1b38db7aa100` |
+| `mirrorneuron_python_sdk-1.4.1-py3-none-any.whl`          | `91bd42e833094f00eb61b705b81f4f616cd36a943ffb22e109abed061fb29441` |
+| `mirrorneuron_api-1.3.64-py3-none-any.whl`                | `1fddcbd531478bc99e9f05719d2ef0ecfa429dbb29549378adae468a0ae2a10c` |
+| `mirrorneuron_cli-1.3.65-py3-none-any.whl`                | `870b8dcc5d720bac3da6b5ca61d4f95f9cc853bf7df494a071fb1b38db7aa100` |

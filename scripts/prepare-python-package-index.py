@@ -21,9 +21,7 @@ VERSION_LINE = re.compile(r'(?m)^version = "[^"]+"$')
 FINAL_VERSION = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
 
 
-def project_release_version(
-    pyproject: Path, release_version: str
-) -> str:
+def project_release_version(pyproject: Path, release_version: str) -> str:
     data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
     project = data.get("project") or {}
     static_version = project.get("version")
@@ -45,7 +43,14 @@ def git(repo: Path, *args: str) -> str:
     return subprocess.check_output(["git", "-C", str(repo), *args], text=True).strip()
 
 
-def source_fingerprint(workspace: Path, relative: str, ref: str = "HEAD", *, include_nested: bool = False, legacy: bool = False) -> str:
+def source_fingerprint(
+    workspace: Path,
+    relative: str,
+    ref: str = "HEAD",
+    *,
+    include_nested: bool = False,
+    legacy: bool = False,
+) -> str:
     """Hash tracked package inputs, excluding nested independently built projects.
 
     Normalize the static version so preparation itself never causes another bump.
@@ -60,25 +65,38 @@ def source_fingerprint(workspace: Path, relative: str, ref: str = "HEAD", *, inc
     digest = hashlib.sha256()
     # Raw tree rows contain blob IDs; sorting those before normalization makes
     # a version-only edit reorder otherwise identical inputs.
-    ordered = sorted(set(rows), key=None if legacy else lambda row: row.split("\t", 1)[1])
+    ordered = sorted(
+        set(rows), key=None if legacy else lambda row: row.split("\t", 1)[1]
+    )
     for row in ordered:
         metadata, name = row.split("\t", 1)
         mode, kind, oid = metadata.split()
-        if kind != "blob" or (scope == "." and not include_nested and name.startswith("packages/")):
+        if kind != "blob" or (
+            scope == "." and not include_nested and name.startswith("packages/")
+        ):
             continue
         if name.endswith("pyproject.toml"):
             content = git(repo, "show", f"{ref}:{name}")
-            content = re.sub(r'(?m)^version\s*=\s*"[^"\n]+"', 'version = "<release>"', content)
+            content = re.sub(
+                r'(?m)^version\s*=\s*"[^"\n]+"', 'version = "<release>"', content
+            )
             oid = hashlib.sha256(content.encode()).hexdigest()
         digest.update(f"{mode} {name} {oid}\n".encode())
     return ("" if legacy else "v2:") + digest.hexdigest()
 
 
-def source_matches(workspace: Path, relative: str, expected: str, *, include_nested: bool = False) -> bool:
+def source_matches(
+    workspace: Path, relative: str, expected: str, *, include_nested: bool = False
+) -> bool:
     actual = source_fingerprint(workspace, relative, include_nested=include_nested)
     if expected.startswith("v2:"):
         return expected == actual
-    if source_fingerprint(workspace, relative, include_nested=include_nested, legacy=True) == expected:
+    if (
+        source_fingerprint(
+            workspace, relative, include_nested=include_nested, legacy=True
+        )
+        == expected
+    ):
         return True
     # Recover only the original ordering defect across the immediately preceding
     # commit. Its recorded legacy hash must match AND normalized inputs must be
@@ -86,14 +104,19 @@ def source_matches(workspace: Path, relative: str, expected: str, *, include_nes
     repo = workspace / Path(relative).parts[0]
     parent = subprocess.run(
         ["git", "-C", str(repo), "rev-parse", "--verify", "HEAD^"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     if parent.returncode:
         return False
     ref = parent.stdout.strip()
     return (
-        source_fingerprint(workspace, relative, ref, include_nested=include_nested, legacy=True) == expected
-        and source_fingerprint(workspace, relative, ref, include_nested=include_nested) == actual
+        source_fingerprint(
+            workspace, relative, ref, include_nested=include_nested, legacy=True
+        )
+        == expected
+        and source_fingerprint(workspace, relative, ref, include_nested=include_nested)
+        == actual
     )
 
 
@@ -104,7 +127,9 @@ def patch_version(version: str) -> str:
     return f"{major}.{minor}.{patch + 1}"
 
 
-def stable_candidates(minimum: str, requirements: list[tuple[str, Requirement]]) -> list[str]:
+def stable_candidates(
+    minimum: str, requirements: list[tuple[str, Requirement]]
+) -> list[str]:
     """Stable versions at constraint boundaries, without an unbounded patch search.
 
     On the MAJOR.MINOR.PATCH lattice, a permitted interval starts at a bound
@@ -126,22 +151,39 @@ def stable_candidates(minimum: str, requirements: list[tuple[str, Requirement]])
             candidates.add(f"{parts[0]}.{parts[1]}.{parts[2] + 1}")
             if specifier.version.endswith(".*") and len(release) <= 3:
                 parts[len(release) - 1] += 1
-                parts[len(release):] = [0] * (3 - len(release))
+                parts[len(release) :] = [0] * (3 - len(release))
                 candidates.add(".".join(map(str, parts)))
-    return sorted((v for v in candidates if Version(v) >= Version(minimum)), key=Version)
+    return sorted(
+        (v for v in candidates if Version(v) >= Version(minimum)), key=Version
+    )
 
 
-def compatible_versions(packages: list[dict], projects: dict[str, dict], versions: dict[str, str], *, independent: bool) -> dict[str, str]:
+def compatible_versions(
+    packages: list[dict],
+    projects: dict[str, dict],
+    versions: dict[str, str],
+    *,
+    independent: bool,
+) -> dict[str, str]:
     """Plan compatible versions for the whole inventory before changing files."""
     for name, version in versions.items():
         if not FINAL_VERSION.fullmatch(version):
-            raise SystemExit(f"Release versions must use final MAJOR.MINOR.PATCH, without dev/prerelease suffixes: {name}=={version}")
+            raise SystemExit(
+                f"Release versions must use final MAJOR.MINOR.PATCH, without dev/prerelease suffixes: {name}=={version}"
+            )
     incoming: dict[str, list[tuple[str, Requirement]]] = {name: [] for name in versions}
     for name, project in projects.items():
-        if {"dependencies", "optional-dependencies"}.intersection(project.get("dynamic", [])):
-            raise SystemExit(f"Cannot plan dynamic dependencies for {name}; declare release requirements in pyproject.toml.")
+        if {"dependencies", "optional-dependencies"}.intersection(
+            project.get("dynamic", [])
+        ):
+            raise SystemExit(
+                f"Cannot plan dynamic dependencies for {name}; declare release requirements in pyproject.toml."
+            )
         sections = [(name, project.get("dependencies", []))]
-        sections += [(f"{name}[{extra}]", requirements) for extra, requirements in project.get("optional-dependencies", {}).items()]
+        sections += [
+            (f"{name}[{extra}]", requirements)
+            for extra, requirements in project.get("optional-dependencies", {}).items()
+        ]
         for owner, requirements in sections:
             for raw in requirements:
                 requirement = Requirement(raw)
@@ -153,7 +195,11 @@ def compatible_versions(packages: list[dict], projects: dict[str, dict], version
     groups: dict[str, list[str]] = {}
     for package in packages:
         name = canonicalize_name(package["name"])
-        group = "mn-python-sdk" if independent and Path(package["path"]).parts[0] == "mn-python-sdk" else name
+        group = (
+            "mn-python-sdk"
+            if independent and Path(package["path"]).parts[0] == "mn-python-sdk"
+            else name
+        )
         groups.setdefault(group, []).append(name)
 
     selected = dict(versions)
@@ -161,14 +207,28 @@ def compatible_versions(packages: list[dict], projects: dict[str, dict], version
     for names in groups.values():
         minimum = max((versions[name] for name in names), key=Version)
         requirements = [entry for name in names for entry in incoming[name]]
-        candidates = stable_candidates(minimum, requirements) if independent else [minimum]
-        version = next((candidate for candidate in candidates if all(
-            not requirement.url and Version(candidate) in requirement.specifier
-            for _, requirement in requirements
-        )), None)
+        candidates = (
+            stable_candidates(minimum, requirements) if independent else [minimum]
+        )
+        version = next(
+            (
+                candidate
+                for candidate in candidates
+                if all(
+                    not requirement.url and Version(candidate) in requirement.specifier
+                    for _, requirement in requirements
+                )
+            ),
+            None,
+        )
         if version is None:
-            detail = "\n".join(f"  {owner} requires {requirement}" for owner, requirement in requirements)
-            errors.append(f"No compatible stable version for {', '.join(names)} at or above {minimum}:\n{detail}")
+            detail = "\n".join(
+                f"  {owner} requires {requirement}"
+                for owner, requirement in requirements
+            )
+            errors.append(
+                f"No compatible stable version for {', '.join(names)} at or above {minimum}:\n{detail}"
+            )
         else:
             selected.update(dict.fromkeys(names, version))
     if errors:
@@ -183,9 +243,13 @@ def load_projects(packages: list[dict], workspace_root: Path) -> dict[str, dict]
         pyproject = workspace_root / package["path"] / "pyproject.toml"
         if not pyproject.is_file():
             raise SystemExit(f"Indexed package is missing pyproject.toml: {pyproject}")
-        project = tomllib.loads(pyproject.read_text(encoding="utf-8")).get("project", {})
+        project = tomllib.loads(pyproject.read_text(encoding="utf-8")).get(
+            "project", {}
+        )
         if name in projects or canonicalize_name(project.get("name", "")) != name:
-            raise SystemExit(f"Duplicate or mismatched indexed package: {package['name']} at {pyproject}")
+            raise SystemExit(
+                f"Duplicate or mismatched indexed package: {package['name']} at {pyproject}"
+            )
         projects[name] = project
     return projects
 
@@ -197,10 +261,21 @@ def verify_dependencies(index_file: Path, workspace_root: Path) -> None:
     try:
         compatible_versions(packages, projects, versions, independent=False)
     except SystemExit as exc:
-        raise SystemExit(f"{exc}\nNext: prepare a new release with a new aggregate version; do not resume an incompatible frozen package index.") from exc
+        raise SystemExit(
+            f"{exc}\nNext: prepare a new release with a new aggregate version; do not resume an incompatible frozen package index."
+        ) from exc
 
 
-def synchronize(index_file: Path, workspace_root: Path, release_version: str, *, independent: bool = False, baseline: str = "", dry_run: bool = False, write_projects: bool = True) -> str:
+def synchronize(
+    index_file: Path,
+    workspace_root: Path,
+    release_version: str,
+    *,
+    independent: bool = False,
+    baseline: str = "",
+    dry_run: bool = False,
+    write_projects: bool = True,
+) -> str:
     source = index_file.read_text(encoding="utf-8")
     data = tomllib.loads(source)
     packages = data.get("packages") or []
@@ -232,12 +307,26 @@ def synchronize(index_file: Path, workspace_root: Path, release_version: str, *,
     sdk_version = None
     sdk_hash = None
     if independent and sdk_entries:
-        sdk_hash = source_fingerprint(workspace_root, "mn-python-sdk", include_nested=True)
+        sdk_hash = source_fingerprint(
+            workspace_root, "mn-python-sdk", include_nested=True
+        )
         previous_hashes = [p.get("source_hash") for p in sdk_entries]
         if not all(previous_hashes) and baseline:
-            previous_hashes = [source_fingerprint(workspace_root, "mn-python-sdk", baseline, include_nested=True)]
-        previous = max((str(p["version"]) for p in sdk_entries), key=numeric_version_key)
-        sdk_changed = any(not h or not source_matches(workspace_root, "mn-python-sdk", h, include_nested=True) for h in previous_hashes)
+            previous_hashes = [
+                source_fingerprint(
+                    workspace_root, "mn-python-sdk", baseline, include_nested=True
+                )
+            ]
+        previous = max(
+            (str(p["version"]) for p in sdk_entries), key=numeric_version_key
+        )
+        sdk_changed = any(
+            not h
+            or not source_matches(
+                workspace_root, "mn-python-sdk", h, include_nested=True
+            )
+            for h in previous_hashes
+        )
         sdk_version = patch_version(previous) if sdk_changed else previous
 
     for package in packages:
@@ -250,26 +339,41 @@ def synchronize(index_file: Path, workspace_root: Path, release_version: str, *,
             previous_hash = package.get("source_hash")
             if not previous_hash and baseline:
                 try:
-                    previous_hash = source_fingerprint(workspace_root, str(package["path"]), baseline)
+                    previous_hash = source_fingerprint(
+                        workspace_root, str(package["path"]), baseline
+                    )
                 except subprocess.CalledProcessError:
                     pass  # Newly indexed repositories have no baseline tag.
             previous = str(package["version"])
-            changed = not previous_hash or not source_matches(workspace_root, str(package["path"]), previous_hash)
+            changed = not previous_hash or not source_matches(
+                workspace_root, str(package["path"]), previous_hash
+            )
             if project.get("version"):
                 declared = str(project["version"])
                 if numeric_version_key(declared) < numeric_version_key(previous):
-                    raise SystemExit(f"Static version regressed for {package['name']}: {declared} < {previous}")
-                version = patch_version(previous) if changed and declared == previous else declared
+                    raise SystemExit(
+                        f"Static version regressed for {package['name']}: {declared} < {previous}"
+                    )
+                version = (
+                    patch_version(previous)
+                    if changed and declared == previous
+                    else declared
+                )
             else:
                 version = patch_version(previous) if changed else previous
             if Path(package["path"]).parts[0] == "mn-python-sdk":
                 # Runtime catalog defaults derive component pins from SDK identity.
-                version = max((str(project.get("version") or sdk_version), sdk_version), key=numeric_version_key)
+                version = max(
+                    (str(project.get("version") or sdk_version), sdk_version),
+                    key=numeric_version_key,
+                )
                 fingerprint = sdk_hash
             fingerprints[name] = fingerprint
         versions[name] = version
 
-    versions = compatible_versions(packages, projects, versions, independent=independent)
+    versions = compatible_versions(
+        packages, projects, versions, independent=independent
+    )
     updates: dict[Path, str] = {}
     rendered: list[str] = []
     position = 0
@@ -282,17 +386,27 @@ def synchronize(index_file: Path, workspace_root: Path, release_version: str, *,
         block = block_match.group(0)
         if independent:
             fingerprint = fingerprints[name]
-            if 'source_hash = ' in block:
-                block = re.sub(r'(?m)^source_hash = "[^"]*"$', f'source_hash = "{fingerprint}"', block)
+            if "source_hash = " in block:
+                block = re.sub(
+                    r'(?m)^source_hash = "[^"]*"$',
+                    f'source_hash = "{fingerprint}"',
+                    block,
+                )
             else:
                 block = block.rstrip() + f'\nsource_hash = "{fingerprint}"\n\n'
             if project.get("version") and version != project["version"]:
                 updates[pyproject] = re.sub(
                     r'(?m)^version\s*=\s*"[^"\n]+"',
-                    f'version = "{version}"', pyproject.read_text(), count=1,
+                    f'version = "{version}"',
+                    pyproject.read_text(),
+                    count=1,
                 )
         if dry_run:
-            state = f"{package['version']} -> {version}" if version != package['version'] else f"{version} (unchanged)"
+            state = (
+                f"{package['version']} -> {version}"
+                if version != package["version"]
+                else f"{version} (unchanged)"
+            )
             print(f"{package['name']}: {state}", file=sys.stderr)
         updated, count = VERSION_LINE.subn(f'version = "{version}"', block)
         if count != 1:
@@ -327,9 +441,13 @@ def verify_sources(index_file: Path, workspace_root: Path) -> None:
         scope = "mn-python-sdk" if sdk else package["path"]
         repo = workspace_root / Path(scope).parts[0]
         if git(repo, "status", "--porcelain"):
-            raise SystemExit(f"Uncommitted source changes in {repo}; publishing requires the prepared source.")
+            raise SystemExit(
+                f"Uncommitted source changes in {repo}; publishing requires the prepared source."
+            )
         if not source_matches(workspace_root, scope, expected, include_nested=sdk):
-            raise SystemExit(f"Source changed after version preparation: {package['name']}; prepare a new release.")
+            raise SystemExit(
+                f"Source changed after version preparation: {package['name']}; prepare a new release."
+            )
 
 
 def main() -> None:
@@ -350,7 +468,9 @@ def main() -> None:
             verify_dependencies(args.index_file, args.workspace_root)
         except SystemExit as exc:
             print(exc, file=sys.stderr)
-            raise SystemExit(65) from exc  # Invalid frozen release data, not a retryable publishing failure.
+            raise SystemExit(
+                65
+            ) from exc  # Invalid frozen release data, not a retryable publishing failure.
     if args.verify_source or args.verify_dependencies:
         return
     print(

@@ -42,33 +42,33 @@ Options:
 EOF_USAGE
 }
 
-while (( "$#" > 0 )); do
+while (("$#" > 0)); do
   case "${1}" in
-    --dest-root)
-      DEST_ROOT="${2:?missing value}"
-      shift 2
-      ;;
-    --clean)
-      CLEAN=1
-      shift
-      ;;
-    --dry-run)
-      DRY_RUN=1
-      shift
-      ;;
-    --recurse-submodules)
-      RECURSE_SUBMODULES=1
-      shift
-      ;;
-    --help)
-      usage
-      exit 0
-      ;;
-    *)
-      ui_error "Unknown option: $1"
-      usage
-      exit 1
-      ;;
+  --dest-root)
+    DEST_ROOT="${2:?missing value}"
+    shift 2
+    ;;
+  --clean)
+    CLEAN=1
+    shift
+    ;;
+  --dry-run)
+    DRY_RUN=1
+    shift
+    ;;
+  --recurse-submodules)
+    RECURSE_SUBMODULES=1
+    shift
+    ;;
+  --help)
+    usage
+    exit 0
+    ;;
+  *)
+    ui_error "Unknown option: $1"
+    usage
+    exit 1
+    ;;
   esac
 done
 
@@ -96,8 +96,8 @@ for url in "${repos[@]}"; do
   target="${DEST_ROOT}/${name}"
 
   if [ -d "$target" ]; then
-    if (( CLEAN )); then
-      if (( DRY_RUN )); then
+    if ((CLEAN)); then
+      if ((DRY_RUN)); then
         ui_step "Would remove ${target}"
       else
         ui_step "Removing ${target}"
@@ -109,15 +109,15 @@ for url in "${repos[@]}"; do
     fi
   fi
 
-  if (( RECURSE_SUBMODULES )); then
-    if (( DRY_RUN )); then
+  if ((RECURSE_SUBMODULES)); then
+    if ((DRY_RUN)); then
       ui_step "Would clone ${name} with submodules"
     else
       ui_step "Cloning ${name} with submodules"
       git clone --recurse-submodules "$url" "$target"
     fi
   else
-    if (( DRY_RUN )); then
+    if ((DRY_RUN)); then
       ui_step "Would clone ${name}"
     else
       ui_step "Cloning ${name}"

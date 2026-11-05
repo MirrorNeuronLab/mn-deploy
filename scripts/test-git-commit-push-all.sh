@@ -13,7 +13,7 @@ HELPER_DIR="$WORKSPACE/mn-deploy"
 OUTPUT="$TEST_ROOT/helper-output.log"
 
 cleanup() {
-    rm -rf -- "$TEST_ROOT"
+  rm -rf -- "$TEST_ROOT"
 }
 trap cleanup EXIT
 
@@ -47,7 +47,7 @@ test -z "$(git -C "$TARGET" tag --list sync-test-tag)"
 "$HELPER_DIR/git_commit_push_all.sh" >"$OUTPUT" 2>&1
 
 test "$(git -C "$TARGET" rev-parse refs/tags/sync-test-tag)" = \
-    "$(git -C "$PUBLISHER" rev-parse refs/tags/sync-test-tag)"
+  "$(git -C "$PUBLISHER" rev-parse refs/tags/sync-test-tag)"
 grep -q "Fetching latest changes and tags" "$OUTPUT"
 
 printf '%s\n' "published duplicate" >"$PUBLISHER/value.txt"
@@ -59,7 +59,7 @@ printf '%s\n' "published duplicate" >"$TARGET/value.txt"
 "$HELPER_DIR/git_commit_push_all.sh" >"$OUTPUT" 2>&1
 
 test "$(git -C "$TARGET" rev-parse HEAD)" = \
-    "$(git -C "$TARGET" rev-parse origin/main)"
+  "$(git -C "$TARGET" rev-parse origin/main)"
 test -z "$(git -C "$TARGET" status --porcelain)"
 test -z "$(git -C "$TARGET" stash list)"
 grep -q "Duplicate local changes reconciled" "$OUTPUT"
@@ -98,8 +98,8 @@ git -C "$PUBLISHER" push origin main >/dev/null
 printf '%s\n' "unique local value" >"$TARGET/value.txt"
 
 if "$HELPER_DIR/git_commit_push_all.sh" >"$OUTPUT" 2>&1; then
-    echo "expected unique dirty worktree reconciliation to fail" >&2
-    exit 1
+  echo "expected unique dirty worktree reconciliation to fail" >&2
+  exit 1
 fi
 
 grep -q "local changes differ from origin/main" "$OUTPUT"
@@ -113,8 +113,8 @@ git -C "$TARGET" commit -m "unique local work" >/dev/null
 LOCAL_COMMIT="$(git -C "$TARGET" rev-parse HEAD)"
 REMOTE_COMMIT="$(git --git-dir="$REMOTE" rev-parse main)"
 if "$HELPER_DIR/git_commit_push_all.sh" >"$OUTPUT" 2>&1; then
-    echo "expected clean divergent branch reconciliation to fail" >&2
-    exit 1
+  echo "expected clean divergent branch reconciliation to fail" >&2
+  exit 1
 fi
 test "$(git -C "$TARGET" rev-parse HEAD)" = "$LOCAL_COMMIT"
 test "$(git --git-dir="$REMOTE" rev-parse main)" = "$REMOTE_COMMIT"

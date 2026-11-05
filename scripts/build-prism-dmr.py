@@ -13,10 +13,14 @@ from mn_sdk.dmr_managed import managed_descriptor
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--backend", choices=["metal", "cuda", "hip", "vulkan", "cpu"], default=None)
+    parser.add_argument(
+        "--backend", choices=["metal", "cuda", "hip", "vulkan", "cpu"], default=None
+    )
     args = parser.parse_args()
     try:
-        entry = prepare_dmr_model(resolve_model_entry("small"), accelerator=args.backend)
+        entry = prepare_dmr_model(
+            resolve_model_entry("small"), accelerator=args.backend
+        )
         state = managed_descriptor(entry, required=True)
     except (ValueError, RuntimeError, OSError) as exc:
         parser.exit(1, f"error: {exc}\n")

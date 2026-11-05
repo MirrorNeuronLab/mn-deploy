@@ -17,7 +17,6 @@ Fresh Compose and direct Docker Core launches receive these same generated
 credentials. Source checkouts, user documents and external outputs are preserved.
 Only the reset owner may start services while installation is in progress.
 
-
 ## Purpose
 
 `mn-deploy` is the installation, service-management, release-support, and
@@ -282,7 +281,6 @@ prepared source tags. GitHub release workflow outputs are not release inputs. Mi
 remain separate repositories within that project.
 Source and wheel tests do not require a live runtime installation.
 
-
 The current Compose template starts the authenticated Membrane v2 service with
 CPU processing, authoritative Markdown and one disposable DuckDB index per job.
 Optional last-resort record selection uses the existing LiteLLM `default` route
@@ -331,6 +329,7 @@ referenced, its selected parent manifest is deleted first and the child is
 retried; a parent outside the confirmed plan is never added to the deletion
 set. An updated deletion plan during confirmation aborts for fresh review.
 Tests use a fake gcloud executable and must never clean the live registry.
+
 # Desktop node identity contract
 
 Managed Core launch commands reject empty, malformed, and nonode@nohost names
@@ -363,7 +362,6 @@ the internal service DNS. Ship the matching SDK connection selection with this
 template. Existing deployments need template application and a native SDK
 restart, without resetting Job data or memory. Historical snapshots remain
 unchanged.
-
 
 Managed Markdown context turns may bind a trusted serving-tokenizer integration
 with `MN_CONTEXT_TOKEN_COUNTER_FACTORY=package.module:create_counter`. The factory
@@ -447,7 +445,6 @@ from direct worker requests. Private Docker addresses are resolved on their
 hosting computer. Client disconnects dispose upstream connections; handshake
 deadlines do not become idle timeouts on established WebSockets. Keep this
 contract aligned with the Python Web UI server.
-
 
 ## Native computer-use app releases
 

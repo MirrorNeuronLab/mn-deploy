@@ -376,7 +376,7 @@ see [Google's npm package contract](https://docs.cloud.google.com/artifact-regis
   `--core-version`, `--python-sdk-version`, `--cli-version`, `--api-version`,
   and `--web-ui-version` can override those components independently; for
   example, `./install.sh --core-version v1.2.24 --python-sdk-version v1.2.24
-  --cli-version v1.2.24 --api-version v1.2.24 --web-ui-version v1.2.24`.
+--cli-version v1.2.24 --api-version v1.2.24 --web-ui-version v1.2.24`.
   With no version flags, binary installs use `v1.3.47` for Core, SDK, CLI, API,
   Web UI, the package index, Membrane, and installer support.
 - Versioned installer support files live under `install_support/<version>/`.
@@ -392,7 +392,7 @@ see [Google's npm package contract](https://docs.cloud.google.com/artifact-regis
 - Installs prepare the Membrane context engine by default: the installer pulls
   the versioned GAR image before any context-memory blueprint runs. Use
   `--no-context-engine` only when the local runtime must omit it. `mn runtime
-  ensure-context-engine` performs the same package preparation for an existing
+ensure-context-engine` performs the same package preparation for an existing
   install.
 - Python packages published to Google Artifact Registry are controlled by
   `package-index/python-packages.toml`.
@@ -562,7 +562,6 @@ see [release recovery](./HOW_TO_RELEASE.md#automatic-and-independent-versions).
 Python backends build from temporary source archives so generated `build/` and
 `.egg-info` files cannot dirty the source repositories or block retries.
 
-
 The current Compose template starts the authenticated Membrane v2 service with
 CPU processing, authoritative Markdown and one disposable DuckDB index per job.
 Optional last-resort record selection uses the existing LiteLLM `default` route
@@ -654,7 +653,6 @@ host connections and the installed private `context_auth.token`. Existing
 runtimes must apply the current Compose template and restart the native SDK
 service to use this contract; job and memory data remain intact.
 
-
 Managed Markdown context turns may bind a trusted serving-tokenizer integration
 with `MN_CONTEXT_TOKEN_COUNTER_FACTORY=package.module:create_counter`. The factory
 receives `request`, `scope` and `principal` keyword arguments and returns a
@@ -730,7 +728,6 @@ The Web UI sidecar supports owner-scoped Job UI forwarding across connected
 computers, including live WebSockets. It requires the matching API relay and SDK
 execution-bound UI handles. `scripts/test_job_ui_proxy.py` exercises the actual
 Compose JavaScript without Docker or a live runtime.
-
 
 ## Native computer-use app releases
 

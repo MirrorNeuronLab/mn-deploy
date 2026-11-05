@@ -107,7 +107,7 @@ wait_for_syncthing_gui_port_release() {
   local attempt
 
   case "$port" in
-    ''|*[!0-9]*) return 0 ;;
+  '' | *[!0-9]*) return 0 ;;
   esac
 
   for ((attempt = 0; attempt < 40; attempt += 1)); do
@@ -138,10 +138,10 @@ if [ -n "$configured_syncthing_gui_port" ]; then
 fi
 
 MN_NETWORK_ADVERTISE_HOST="$advertise_host" \
-MN_GRPC_BIND_HOST="${MN_GRPC_BIND_HOST:-0.0.0.0}" \
-MN_EPMD_BIND_HOST="${MN_EPMD_BIND_HOST:-0.0.0.0}" \
-MN_DIST_BIND_HOST="${MN_DIST_BIND_HOST:-0.0.0.0}" \
-ERL_EPMD_ADDRESS="${ERL_EPMD_ADDRESS:-0.0.0.0}" \
-mn runtime start
+  MN_GRPC_BIND_HOST="${MN_GRPC_BIND_HOST:-0.0.0.0}" \
+  MN_EPMD_BIND_HOST="${MN_EPMD_BIND_HOST:-0.0.0.0}" \
+  MN_DIST_BIND_HOST="${MN_DIST_BIND_HOST:-0.0.0.0}" \
+  ERL_EPMD_ADDRESS="${ERL_EPMD_ADDRESS:-0.0.0.0}" \
+  mn runtime start
 
 docker port mirror-neuron-core 50051

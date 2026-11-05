@@ -204,14 +204,12 @@ Offline verification:
 ../mn-python-sdk/.venv/bin/python -m pytest ../mn-system-tests/tests/integration/installer -q
 ```
 
-
 Source fingerprints use `v2:` hashes ordered by file path. Legacy hashes from
 preparation before this fix are accepted across a version-only preparation
 commit only when the parent's legacy hash matches the recorded hash and the
 normalized package inputs are identical. This permits resuming `v1.3.48`
 without changing its tags, package versions, or immutable support snapshot.
 Commit and push release-tooling fixes before retrying the printed resume command.
-
 
 ## mn computer use
 

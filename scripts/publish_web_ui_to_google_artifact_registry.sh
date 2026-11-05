@@ -45,22 +45,49 @@ die() {
 
 while (($#)); do
   case "$1" in
-    --version) shift; [[ "$#" -gt 0 ]] || die "--version requires a value."; VERSION="$1" ;;
-    --version=*) VERSION="${1#*=}" ;;
-    --apply) APPLY="Y" ;;
-    --skip-build) SKIP_BUILD="Y" ;;
-    --project) shift; [[ "$#" -gt 0 ]] || die "--project requires a value."; PROJECT="$1" ;;
-    --project=*) PROJECT="${1#*=}" ;;
-    --location) shift; [[ "$#" -gt 0 ]] || die "--location requires a value."; LOCATION="$1" ;;
-    --location=*) LOCATION="${1#*=}" ;;
-    --repository) shift; [[ "$#" -gt 0 ]] || die "--repository requires a value."; REPOSITORY="$1" ;;
-    --repository=*) REPOSITORY="${1#*=}" ;;
-    --web-ui-dir) shift; [[ "$#" -gt 0 ]] || die "--web-ui-dir requires a value."; WEB_UI_DIR="$1" ;;
-    --web-ui-dir=*) WEB_UI_DIR="${1#*=}" ;;
-    --dist-dir) shift; [[ "$#" -gt 0 ]] || die "--dist-dir requires a value."; DIST_DIR="$1" ;;
-    --dist-dir=*) DIST_DIR="${1#*=}" ;;
-    -h|--help) usage; exit 0 ;;
-    *) die "Unknown option: $1" ;;
+  --version)
+    shift
+    [[ "$#" -gt 0 ]] || die "--version requires a value."
+    VERSION="$1"
+    ;;
+  --version=*) VERSION="${1#*=}" ;;
+  --apply) APPLY="Y" ;;
+  --skip-build) SKIP_BUILD="Y" ;;
+  --project)
+    shift
+    [[ "$#" -gt 0 ]] || die "--project requires a value."
+    PROJECT="$1"
+    ;;
+  --project=*) PROJECT="${1#*=}" ;;
+  --location)
+    shift
+    [[ "$#" -gt 0 ]] || die "--location requires a value."
+    LOCATION="$1"
+    ;;
+  --location=*) LOCATION="${1#*=}" ;;
+  --repository)
+    shift
+    [[ "$#" -gt 0 ]] || die "--repository requires a value."
+    REPOSITORY="$1"
+    ;;
+  --repository=*) REPOSITORY="${1#*=}" ;;
+  --web-ui-dir)
+    shift
+    [[ "$#" -gt 0 ]] || die "--web-ui-dir requires a value."
+    WEB_UI_DIR="$1"
+    ;;
+  --web-ui-dir=*) WEB_UI_DIR="${1#*=}" ;;
+  --dist-dir)
+    shift
+    [[ "$#" -gt 0 ]] || die "--dist-dir requires a value."
+    DIST_DIR="$1"
+    ;;
+  --dist-dir=*) DIST_DIR="${1#*=}" ;;
+  -h | --help)
+    usage
+    exit 0
+    ;;
+  *) die "Unknown option: $1" ;;
   esac
   shift
 done
@@ -128,7 +155,8 @@ DIST_DIR="$(cd "$DIST_DIR" && pwd)"
 tarball_name="$(cd "$stage_dir" && "$NPM_BIN" pack --silent --pack-destination "$DIST_DIR")"
 tarball="${DIST_DIR}/${tarball_name}"
 [[ -f "$tarball" ]] || die "npm pack did not produce ${tarball}"
-integrity="$("$NODE_BIN" - "$tarball" <<'JS'
+integrity="$(
+  "$NODE_BIN" - "$tarball" <<'JS'
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const digest = crypto.createHash("sha512").update(fs.readFileSync(process.argv[2])).digest("base64");
@@ -152,7 +180,7 @@ format="$($GCLOUD_BIN artifacts repositories describe "$REPOSITORY" \
 token="$($GCLOUD_BIN auth print-access-token)"
 [[ -n "$token" ]] || die "Could not obtain a Google Cloud access token."
 chmod 600 "$npmrc"
-cat > "$npmrc" <<EOF
+cat >"$npmrc" <<EOF
 registry=${registry}
 //${LOCATION}-npm.pkg.dev/${PROJECT}/${REPOSITORY}/:_authToken=${token}
 always-auth=true
