@@ -186,6 +186,13 @@ version; URL downloads honor those respective pins. Historical explicit
 installer versions continue selecting their historical support and inventory.
 No package deletion, Git tag replacement, commit/push or installed-runtime
 mutation is part of this helper. Source repositories must be clean for apply.
+Python retry caches reuse complete, checksum-validated package builds across
+release plans only for matching package versions, source fingerprints and build
+formats. Existing uploads require exact GAR hashes; a rebuilt retry can restore
+the matching original cached build but cannot accept different published bytes.
+Plans reserve versions recorded by earlier completed builds. Changed package
+inputs advance to a new patch, with SDK version grouping and dependency checks
+preserved, even if an earlier attempt stopped before updating the main index.
 Full automatic releases skip version numbers already used by support snapshots.
 The aggregate release entrypoint is `scripts/release_all.sh`. Its read-only
 `--plan` uses an explicitly selected Python, the existing publishing environment,

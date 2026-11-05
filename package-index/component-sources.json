@@ -12,9 +12,12 @@
     "tree": "2bb89b129085ff6bf83fba2157330075f66db42d"
   },
   "core:v1.4.0": {
-    "tree": "a27c0d80c80ff14405693dbede88ab1bcc4b220e"
+    "tree": "df08d227b55ac7d2f49641f5cbbd9607563cfdd2"
   },
   "membrane:v1.4.0": {
-    "tree": "082652add555939376a1c331cf8a43741fc4302d"
+    "tree": "5f09d5307e0c25d483c3bc505e23e3b98a01f1e8"
+  },
+  "web-ui:v1.4.1": {
+    "tree": "b4ff95f8b3c84a7fd379acb8260f2e5f6be3febd"
   }
 }

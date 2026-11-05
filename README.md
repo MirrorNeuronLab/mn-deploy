@@ -298,8 +298,16 @@ The default preview uses local Git history and writes no release metadata.
 It reports uncommitted work; commit or stash it before `--apply`. Fetch tags
 yourself if the locally pinned Docker/Web UI release tags are missing.
 Builds use isolated committed sources. Python builds are cached under
-`dist/component-updates/` for identical upload retries, and uploads are verified
-against GAR file hashes. Web UI and Docker publishers verify integrity/digests.
+`dist/component-updates/` and reused per package across changed release plans
+when the version, source fingerprint and build formats match. Cached file hashes
+are checked before reuse. If a previous attempt already uploaded a different
+archive of the same source, the helper restores a matching validated cached build
+only when its bytes match GAR's hashes. Changed source advances past versions
+used by earlier cached builds, with dependency constraints checked again. Keep
+these caches until publication finishes; a checksum conflict without a matching
+original build still fails verification.
+Uploads are verified against GAR file hashes. Web UI and Docker publishers
+verify integrity/digests.
 Requires the same publishing tools as `scripts/release_all.sh`; set `MN_PUBLISH_PYTHON`
 or prepare `.venv-gar-publish` with Python 3.12+, packaging, build and twine.
 Use `--help` for registry, platform and component selection options.

@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -92,6 +93,7 @@ def plan(workspace, only):
                 baseline=default(source, "MN_DEFAULT_INSTALL_VERSION"),
                 write_projects=False,
             )
+            avoid_cached_python_versions(prepared, previous, workspace, inventory)
         prepared_source = prepared.read_text()
     packages = tomllib.loads(prepared_source)["packages"]
     selected = [
@@ -231,6 +233,150 @@ def stage_repository(repo, target):
     rows.unlink()
 
 
+def python_artifact_identity(path):
+    from packaging.utils import (
+        canonicalize_name,
+        parse_sdist_filename,
+        parse_wheel_filename,
+    )
+
+    name, version, *_ = (
+        parse_wheel_filename(path.name)
+        if path.suffix == ".whl"
+        else parse_sdist_filename(path.name)
+    )
+    return canonicalize_name(name), str(version)
+
+
+def python_build_inputs(package):
+    return (
+        package["name"],
+        package["path"],
+        package["version"],
+        package.get("source_hash"),
+        tuple(sorted(package.get("build_formats") or ["sdist", "wheel"])),
+    )
+
+
+def avoid_cached_python_versions(index, previous, workspace, inventory):
+    """Keep different build inputs off versions used by interrupted attempts."""
+    from packaging.utils import canonicalize_name
+
+    reservations = {}
+    root = workspace / "mn-deploy/dist/component-updates"
+    for ready in root.glob("*/python-ready.json"):
+        try:
+            expected = json.loads(ready.read_text())
+            if not isinstance(expected, dict):
+                continue
+            built = {python_artifact_identity(Path(p)) for p in expected}
+            packages = tomllib.loads((ready.parent / "index.toml").read_text())[
+                "packages"
+            ]
+            for package in packages:
+                identity = canonicalize_name(package["name"]), package["version"]
+                if identity in built and package.get("source_hash", "").startswith(
+                    "v2:"
+                ):
+                    reservations.setdefault(identity, set()).add(
+                        python_build_inputs(package)
+                    )
+        except (OSError, ValueError, KeyError):
+            continue
+    if not reservations:
+        return
+    source = index.read_text()
+    packages = tomllib.loads(source)["packages"]
+    versions = {canonicalize_name(p["name"]): p["version"] for p in packages}
+    original = {canonicalize_name(p["name"]): p["version"] for p in previous}
+    projects = inventory.load_projects(packages, workspace)
+    while True:
+        minimums = dict(versions)
+        for package in packages:
+            name = canonicalize_name(package["name"])
+            version = versions[name]
+            if version == original[name]:
+                continue
+            inputs = python_build_inputs({**package, "version": version})
+            if reservations.get((name, version), set()) - {inputs}:
+                minimums[name] = inventory.patch_version(version)
+        if minimums == versions:
+            break
+        versions = inventory.compatible_versions(
+            packages, projects, minimums, independent=True
+        )
+    rows = iter(packages)
+
+    def replace_version(match):
+        version = versions[canonicalize_name(next(rows)["name"])]
+        return inventory.VERSION_LINE.sub(f'version = "{version}"', match[0])
+
+    index.write_text(inventory.PACKAGE_BLOCK.sub(replace_version, source))
+
+
+def python_artifacts(package, directory):
+    from packaging.utils import canonicalize_name
+    from packaging.version import Version
+
+    identity = canonicalize_name(package["name"]), str(Version(package["version"]))
+    return [
+        path
+        for path in sorted((directory / "python").iterdir())
+        if python_artifact_identity(path) == identity
+    ]
+
+
+def cached_python_builds(package, directory):
+    """Find complete, checksum-validated builds of the same package inputs."""
+    if not package.get("source_hash", "").startswith("v2:"):
+        return
+    # Prefer the first build: it may already have been partially published.
+    for ready in sorted(
+        directory.parent.glob("*/python-ready.json"), key=lambda p: p.stat().st_mtime
+    ):
+        candidate = ready.parent
+        if candidate == directory:
+            continue
+        try:
+            packages = tomllib.loads((candidate / "index.toml").read_text())["packages"]
+            if not any(
+                python_build_inputs(p) == python_build_inputs(package) for p in packages
+            ):
+                continue
+            expected = json.loads(ready.read_text())
+            files = python_artifacts(package, candidate)
+            formats = {"wheel" if p.suffix == ".whl" else "sdist" for p in files}
+            if formats != set(package.get("build_formats") or ["sdist", "wheel"]):
+                continue
+            if isinstance(expected, dict) and all(
+                not p.is_symlink()
+                and p.is_file()
+                and expected.get(str(p.relative_to(candidate)))
+                == hashlib.sha256(p.read_bytes()).hexdigest()
+                for p in files
+            ):
+                yield files
+        except (OSError, ValueError, KeyError):
+            continue  # An incomplete or damaged sibling cache is not reusable.
+
+
+def reuse_python_build(files, directory):
+    for source in files:
+        shutil.copyfile(source, directory / "python" / source.name)
+    # Existing retry caches must record the restored bytes as well.
+    ready = directory / "python-ready.json"
+    if ready.exists():
+        expected = json.loads(ready.read_text())
+        for source in files:
+            target = directory / "python" / source.name
+            expected[str(target.relative_to(directory))] = hashlib.sha256(
+                target.read_bytes()
+            ).hexdigest()
+        pending = ready.with_suffix(".tmp")
+        pending.write_text(json.dumps(expected, indent=2) + "\n")
+        pending.replace(ready)
+
+
 def build_python(workspace, planned, directory):
     if not planned["packages"]:
         return
@@ -252,17 +398,29 @@ def build_python(workspace, planned, directory):
         )
     artifacts = directory / "python"
     artifacts.mkdir(exist_ok=True)
+    pending = []
+    for package in planned["packages"]:
+        cached = next(cached_python_builds(package, directory), None)
+        if cached:
+            reuse_python_build(cached, directory)
+            print(
+                f"==> Reusing Python build {package['name']}=={package['version']}",
+                flush=True,
+            )
+        else:
+            pending.append(package)
     with tempfile.TemporaryDirectory(prefix="mn-component-build-") as staging:
         rows = Path(staging) / "packages.tsv"
         rows.write_text(
             "".join(
                 f"{p['name']}\t{workspace / p['path']}\t{','.join(p.get('build_formats') or ['sdist', 'wheel'])}\t{p['version']}\n"
-                for p in planned["packages"]
+                for p in pending
             )
         )
-        module("stage-python-release-sources.py").stage_sources(
-            rows, Path(staging) / "sources"
-        )
+        if pending:
+            module("stage-python-release-sources.py").stage_sources(
+                rows, Path(staging) / "sources"
+            )
         for line in rows.read_text().splitlines():
             name, path, formats, version = line.split("\t")
             staged = Path(path)
@@ -348,11 +506,7 @@ def verify_python_artifact(package, artifact, remote):
 
 
 def publish_python(args, planned, directory):
-    from packaging.utils import (
-        canonicalize_name,
-        parse_sdist_filename,
-        parse_wheel_filename,
-    )
+    from packaging.utils import canonicalize_name
 
     scope = [
         f"--project={args.project}",
@@ -362,15 +516,7 @@ def publish_python(args, planned, directory):
     url = f"https://{args.location}-python.pkg.dev/{args.project}/{args.python_repository}/"
     for package in planned["packages"]:
         name = canonicalize_name(package["name"])
-        artifacts = []
-        for path in (directory / "python").iterdir():
-            parsed = (
-                parse_wheel_filename(path.name)
-                if path.suffix == ".whl"
-                else parse_sdist_filename(path.name)
-            )
-            if canonicalize_name(parsed[0]) == name:
-                artifacts.append(path)
+        artifacts = python_artifacts(package, directory)
 
         def remote_files():
             data = json.loads(
@@ -392,9 +538,32 @@ def publish_python(args, planned, directory):
             }
 
         remote = remote_files()
-        for path in artifacts:
-            if path.name in remote:
-                verify_python_artifact(name, path, remote)
+        try:
+            for path in artifacts:
+                if path.name in remote:
+                    verify_python_artifact(name, path, remote)
+        except RuntimeError:
+            # A changed release plan used to rebuild every package, including
+            # already-uploaded versions whose archive timestamps then differed.
+            # Restore only a complete build with matching source provenance AND
+            # exact GAR hashes; never accept a different published payload.
+            for cached in cached_python_builds(package, directory):
+                if {p.name for p in cached} != {p.name for p in artifacts}:
+                    continue
+                try:
+                    for path in cached:
+                        if path.name in remote:
+                            verify_python_artifact(name, path, remote)
+                except RuntimeError:
+                    continue
+                reuse_python_build(cached, directory)
+                print(
+                    f"==> Reusing published Python build {name}=={package['version']}",
+                    flush=True,
+                )
+                break
+            else:
+                raise
         missing = [path for path in artifacts if path.name not in remote]
         if missing:
             run(

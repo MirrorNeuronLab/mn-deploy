@@ -220,7 +220,13 @@ def test_python_build_stages_static_version_and_preserves_original(
     monkeypatch.setattr(repair, "run", fake_run)
     repair.build_python(workspace, planned, directory)
     repair.build_python(workspace, planned, directory)
+    next_directory = tmp_path / "another-release-plan"
+    next_directory.mkdir()
+    repair.build_python(workspace, planned, next_directory)
     assert builds == ["1.0.1"]  # Retry uses the same artifact bytes.
+    assert (next_directory / "python-ready.json").read_bytes() == (
+        directory / "python-ready.json"
+    ).read_bytes()
     assert git(workspace / "mn-api", "status", "--porcelain") == ""
     assert (
         tomllib.loads((workspace / "mn-api/pyproject.toml").read_text())["project"][
@@ -228,6 +234,202 @@ def test_python_build_stages_static_version_and_preserves_original(
         ]
         == "1.0.0"
     )
+
+
+def cached_build(directory, package, payload):
+    artifacts = directory / "python"
+    artifacts.mkdir(parents=True)
+    (directory / "index.toml").write_text(
+        "[[packages]]\n"
+        + "".join(f"{key} = {json.dumps(value)}\n" for key, value in package.items())
+    )
+    prefix = package["name"].replace("-", "_") + "-" + package["version"]
+    files = [
+        artifacts / (prefix + suffix)
+        for fmt, suffix in (("sdist", ".tar.gz"), ("wheel", "-py3-none-any.whl"))
+        if fmt in (package.get("build_formats") or ["sdist", "wheel"])
+    ]
+    for path in files:
+        path.write_bytes(payload + path.suffix.encode())
+    (directory / "python-ready.json").write_text(
+        json.dumps(
+            {
+                str(p.relative_to(directory)): hashlib.sha256(
+                    p.read_bytes()
+                ).hexdigest()
+                for p in files
+            }
+        )
+    )
+    return files
+
+
+@pytest.mark.parametrize("constrained", [False, True])
+def test_retry_plan_advances_changed_cached_source_and_checks_dependencies(
+    workspace, constrained
+):
+    project = workspace / "mn-api/pyproject.toml"
+    if constrained:
+        project.write_text(
+            project.read_text() + 'dependencies = ["mirrorneuron-api<1.0.2"]\n'
+        )
+    change(workspace, "mn-api")
+    initial = repair.plan(workspace, {"python"})
+    cache = workspace / "mn-deploy/dist/component-updates"
+    cached_build(cache / "initial", initial["packages"][0], b"first build")
+    # An unrelated release-plan change keeps the same package version/build.
+    assert repair.plan(workspace, {"python"})["packages"] == initial["packages"]
+    (workspace / "mn-api/source.txt").write_text("another source change\n")
+    commit(workspace / "mn-api")
+    before = project.read_bytes()
+    if constrained:
+        with pytest.raises(SystemExit, match="No compatible stable version"):
+            repair.plan(workspace, {"python"})
+    else:
+        updated = repair.plan(workspace, {"python"})
+        assert updated["packages"][0]["version"] == "1.0.2"
+        assert 'version = "1.0.2"' in updated["metadata"]["mn-api/pyproject.toml"]
+        cached_build(cache / "updated", updated["packages"][0], b"second build")
+        assert repair.plan(workspace, {"python"})["packages"] == updated["packages"]
+    assert project.read_bytes() == before
+
+
+def test_retry_plan_ignores_unbuilt_inventory_entries(workspace):
+    change(workspace, "mn-api")
+    initial = repair.plan(workspace, {"python"})
+    cache = workspace / "mn-deploy/dist/component-updates/initial"
+    cached_build(cache, initial["packages"][0], b"first build")
+    (cache / "python-ready.json").write_text("{}")
+    (workspace / "mn-api/source.txt").write_text("another source change\n")
+    commit(workspace / "mn-api")
+    assert repair.plan(workspace, {"python"})["packages"][0]["version"] == "1.0.1"
+
+
+def test_reserved_component_version_advances_the_entire_sdk_group(tmp_path):
+    packages = []
+    for name, relative in [
+        ("mirrorneuron-python-sdk", "mn-python-sdk"),
+        ("mn-python-sdk-common", "mn-python-sdk/packages/common"),
+    ]:
+        project = tmp_path / relative
+        project.mkdir(parents=True)
+        (project / "pyproject.toml").write_text(
+            f'[project]\nname = "{name}"\ndynamic = ["version"]\n'
+        )
+        packages.append(
+            dict(name=name, path=relative, version="1.0.1", source_hash="v2:new")
+        )
+    cache = tmp_path / "mn-deploy/dist/component-updates/previous"
+    cached_build(cache, {**packages[1], "source_hash": "v2:old"}, b"old component")
+    index = tmp_path / "index.toml"
+    index.write_text(
+        "".join(
+            "[[packages]]\n"
+            + "".join(f"{key} = {json.dumps(value)}\n" for key, value in p.items())
+            for p in packages
+        )
+    )
+    previous = [{**p, "version": "1.0.0"} for p in packages]
+    repair.avoid_cached_python_versions(index, previous, tmp_path, indexer)
+    assert [p["version"] for p in tomllib.loads(index.read_text())["packages"]] == [
+        "1.0.2",
+        "1.0.2",
+    ]
+
+
+@pytest.mark.parametrize("partial", [False, True])
+def test_rebuilt_retry_restores_exact_published_build(tmp_path, monkeypatch, partial):
+    package = dict(
+        name="mirrorneuron-api", path="mn-api", version="1.0.1", source_hash="v2:source"
+    )
+    original = cached_build(tmp_path / "original", package, b"published build")
+    directory = tmp_path / "retry"
+    rebuilt = cached_build(directory, package, b"rebuilt with different timestamps")
+    remote = {
+        p.name: {
+            "hashes": [
+                {"type": "SHA256", "value": hashlib.sha256(p.read_bytes()).hexdigest()}
+            ]
+        }
+        for p in (original[:1] if partial else original)
+    }
+    args = argparse.Namespace(
+        gcloud="fake-gcloud",
+        project="project",
+        location="us-central1",
+        python_repository="python",
+    )
+    uploads = []
+
+    def fake_run(*command, **kwargs):
+        if command[1:4] == ("artifacts", "files", "list"):
+            return json.dumps(
+                [{"name": "pkg%2F" + name, **row} for name, row in remote.items()]
+            )
+        assert command[1:4] == ("-m", "twine", "upload")
+        missing = [p for p in rebuilt if p.name not in remote]
+        assert missing and all(p in command for p in missing)
+        assert all(p not in command for p in rebuilt if p.name in remote)
+        for path in missing:
+            assert path.read_bytes() == (original[0].parent / path.name).read_bytes()
+            remote[path.name] = {
+                "hashes": [
+                    {
+                        "type": "SHA256",
+                        "value": hashlib.sha256(path.read_bytes()).hexdigest(),
+                    }
+                ]
+            }
+        uploads.append(missing)
+
+    monkeypatch.setattr(repair, "run", fake_run)
+    for _ in range(2):
+        repair.publish_python(args, {"packages": [package]}, directory)
+    assert len(uploads) == int(partial)
+    expected = json.loads((directory / "python-ready.json").read_text())
+    for old, new in zip(original, rebuilt, strict=True):
+        assert old.read_bytes() == new.read_bytes()
+        assert (
+            expected[str(new.relative_to(directory))]
+            == hashlib.sha256(new.read_bytes()).hexdigest()
+        )
+
+
+@pytest.mark.parametrize(
+    "problem",
+    [
+        "source",
+        "version",
+        "formats",
+        "checksum",
+        "missing",
+        "manifest",
+        "no-fingerprint",
+    ],
+)
+def test_python_build_cache_rejects_unverified_or_different_inputs(tmp_path, problem):
+    package = dict(
+        name="mirrorneuron-api", path="mn-api", version="1.0.1", source_hash="v2:source"
+    )
+    cached_package = {**package}
+    if problem == "source":
+        cached_package["source_hash"] = "v2:different"
+    elif problem == "version":
+        cached_package["version"] = "1.0.2"
+    elif problem == "formats":
+        cached_package["build_formats"] = ["wheel"]
+    elif problem == "no-fingerprint":
+        del package["source_hash"]
+        del cached_package["source_hash"]
+    directory = tmp_path / "previous"
+    files = cached_build(directory, cached_package, b"original")
+    if problem == "checksum":
+        files[0].write_bytes(b"tampered")
+    elif problem == "missing":
+        files[0].unlink()
+    elif problem == "manifest":
+        (directory / "python-ready.json").write_text("{}")
+    assert list(repair.cached_python_builds(package, tmp_path / "next")) == []
 
 
 def test_python_upload_scope_hash_verification_and_retry(tmp_path, monkeypatch):
