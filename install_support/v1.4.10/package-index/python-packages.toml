@@ -1,0 +1,572 @@
+# Local source of truth for Python packages published to Google Artifact Registry.
+# Paths are relative to the mirror-neuron-set workspace root.
+
+[[packages]]
+name = "mn-python-sdk-common"
+path = "mn-python-sdk/packages/common"
+publish_group = "runtime"
+version = "1.4.3"
+installer_groups = ["sdk"]
+binary_default = true
+source_hash = "v2:8501a467b0c3d7b7ab115f6ff3201f339ba941bbdbf377b6e390f3d783e176b1"
+
+[[packages]]
+name = "mn-python-sdk-web-ui"
+path = "mn-python-sdk/packages/web-ui"
+publish_group = "runtime"
+version = "1.4.3"
+installer_groups = ["sdk"]
+binary_default = true
+source_hash = "v2:8501a467b0c3d7b7ab115f6ff3201f339ba941bbdbf377b6e390f3d783e176b1"
+
+[[packages]]
+name = "mn-python-sdk-models"
+path = "mn-python-sdk/packages/models"
+publish_group = "runtime"
+version = "1.4.3"
+installer_groups = []
+binary_default = false
+source_hash = "v2:8501a467b0c3d7b7ab115f6ff3201f339ba941bbdbf377b6e390f3d783e176b1"
+
+[[packages]]
+name = "mn-python-sdk-mcp"
+path = "mn-python-sdk/packages/mcp"
+publish_group = "runtime"
+version = "1.4.3"
+installer_groups = []
+binary_default = false
+source_hash = "v2:8501a467b0c3d7b7ab115f6ff3201f339ba941bbdbf377b6e390f3d783e176b1"
+
+[[packages]]
+name = "mn-python-sdk-collaboration"
+path = "mn-python-sdk/packages/collaboration"
+publish_group = "runtime"
+version = "1.4.3"
+installer_groups = []
+binary_default = false
+source_hash = "v2:8501a467b0c3d7b7ab115f6ff3201f339ba941bbdbf377b6e390f3d783e176b1"
+
+[[packages]]
+name = "mn-python-sdk-rag"
+path = "mn-python-sdk/packages/rag"
+publish_group = "runtime"
+version = "1.4.3"
+installer_groups = []
+binary_default = false
+source_hash = "v2:8501a467b0c3d7b7ab115f6ff3201f339ba941bbdbf377b6e390f3d783e176b1"
+
+[[packages]]
+name = "mn-python-sdk-job-response"
+path = "mn-python-sdk/packages/job-response"
+publish_group = "runtime"
+version = "1.4.3"
+installer_groups = []
+binary_default = false
+source_hash = "v2:8501a467b0c3d7b7ab115f6ff3201f339ba941bbdbf377b6e390f3d783e176b1"
+
+[[packages]]
+name = "mirrorneuron-python-sdk"
+path = "mn-python-sdk"
+publish_group = "runtime"
+version = "1.4.3"
+installer_groups = ["sdk"]
+binary_default = true
+source_hash = "v2:8501a467b0c3d7b7ab115f6ff3201f339ba941bbdbf377b6e390f3d783e176b1"
+
+[[packages]]
+name = "mirrorneuron-cli"
+path = "mn-cli"
+publish_group = "runtime"
+version = "1.3.67"
+installer_groups = ["cli"]
+binary_default = true
+source_hash = "v2:a5f6f7b37c9eb85101b34f8407ec110cfada9e0bc264b4221b208a92530a22ac"
+
+[[packages]]
+name = "mirrorneuron-api"
+path = "mn-api"
+publish_group = "runtime"
+version = "1.3.66"
+installer_groups = ["api"]
+binary_default = true
+source_hash = "v2:22b8b23d3e0dce6a08bf2f868df30f84565da79da3020f5e095f4df8de40e56b"
+
+[[packages]]
+name = "mirrorneuron-membrane-python-sdk"
+path = "Membrane/mn-context-engine-python-sdk"
+publish_group = "membrane"
+version = "2.2.1"
+installer_groups = ["membrane-runtime"]
+binary_default = true
+build_formats = ["wheel"]
+source_hash = "v2:749b74c5f053303e1714af8ccc63917a0d440fd490822c7548d12a8428693f33"
+
+[[packages]]
+name = "mn-context-auto-optimizer"
+path = "Membrane/mn-context-auto-optimizer"
+publish_group = "membrane"
+version = "1.3.61"
+installer_groups = ["membrane-tools"]
+binary_default = false
+source_hash = "v2:ae118af47fba1f84f75201ea6610d741768bff1c8987bef24d72361cda325790"
+
+[[packages]]
+name = "mn-context-source-code"
+path = "Membrane/mn-context-source-code"
+publish_group = "membrane"
+version = "0.1.7"
+installer_groups = ["membrane-tools"]
+binary_default = false
+source_hash = "v2:7ef0761e38dcdf44429987382a4219402e859ed6f65c41b32e1c79d67b73a94f"
+
+[[packages]]
+name = "mn-context-auto-optimizer-benchmark"
+path = "Membrane/mn-context-auto-optimizer-benchmark"
+publish_group = "membrane"
+version = "1.3.64"
+installer_groups = ["membrane-tools"]
+binary_default = false
+source_hash = "v2:6acba72e9ac688cb3b32e437a1235d4eae59f70d2bade7a34a7a3251b680de7a"
+
+[[packages]]
+name = "mirrorneuron-actor-review-skill"
+path = "mn-skills/actor_review_skill"
+publish_group = "skill"
+version = "1.3.53"
+installer_groups = ["skill"]
+binary_default = false
+source_hash = "v2:fb8df89c3eb768598eea55d5b9860a0a85dbc23c68aea09d8c36a9f47ae87069"
+
+[[packages]]
+name = "mirrorneuron-autonomous-research-skill"
+path = "mn-skills/autonomous_research_skill"
+publish_group = "skill"
+version = "1.3.53"
+installer_groups = ["skill"]
+binary_default = false
+source_hash = "v2:c85337558cd612f66bb30014e623246084c361cd31033e83677e906e105edd01"
+
+[[packages]]
+name = "mirrorneuron-client-report-skill"
+path = "mn-skills/client_report_skill"
+publish_group = "skill"
+version = "1.3.53"
+installer_groups = ["skill"]
+binary_default = false
+source_hash = "v2:ab3dcac3c614a1eb9995c26eda228d900cf6817f28f1f2ca131a657e3132a67e"
+
+[[packages]]
+name = "mirrorneuron-code-generation-skill"
+path = "mn-skills/code_generation_skill"
+publish_group = "skill"
+version = "1.3.53"
+installer_groups = ["skill"]
+binary_default = false
+source_hash = "v2:4f5a9092d84a1e8752cf510eed5450fd72ba24179d49e93551b88a8e00dd2994"
+
+[[packages]]
+name = "mirrorneuron-docs-to-markdown-skill"
+path = "mn-skills/docs_to_markdown_skill"
+publish_group = "skill"
+version = "1.3.63"
+installer_groups = ["skill"]
+binary_default = false
+source_hash = "v2:110ea882840ddf9280ab763ee30fcc957ac1e06e8cf5c592b161718b70da3190"
+
+[[packages]]
+name = "mirrorneuron-evidence-engine-skill"
+path = "mn-skills/evidence_engine_skill"
+publish_group = "skill"
+version = "1.3.53"
+installer_groups = ["skill"]
+binary_default = false
+source_hash = "v2:3699c8872610da64360f2a6a0dce5f383e90551306318baa023069be0f6530bb"
+
+[[packages]]
+name = "mirrorneuron-email-delivery-skill"
+path = "mn-skills/email_delivery_skill"
+publish_group = "skill"
+version = "1.3.54"
+installer_groups = ["skill"]
+binary_default = false
+source_hash = "v2:d8d245fad779ada2eac911084c388ba912bc629765eea3431595e5f772246c5a"
+
+[[packages]]
+name = "mirrorneuron-email-receive-agentmail-skill"
+path = "mn-skills/email_receive_agentmail_skill"
+publish_group = "skill"
+version = "1.3.54"
+installer_groups = ["skill"]
+binary_default = false
+source_hash = "v2:47b5ab1e1b1f207b21ad7bc2a18105b053f1410ed8a2cb9d1261f72283832c22"
+
+[[packages]]
+name = "mirrorneuron-email-send-resend-skill"
+path = "mn-skills/email_send_resend_skill"
+publish_group = "skill"
+version = "1.3.54"
+installer_groups = ["skill"]
+binary_default = false
+source_hash = "v2:1af831d9531777dd16fa61403386488b2f7f7a1b08cf1301f7dbf9fe09c7a61b"
+
+[[packages]]
+name = "mirrorneuron-first-draft-slides-skill"
+path = "mn-skills/first_draft_slides_skill"
+publish_group = "skill"
+version = "1.3.53"
+installer_groups = ["skill"]
+binary_default = false
+source_hash = "v2:4e23d6f20cd014b5a9c508f536cf32e94dd4913eb8f3d546bc0038f0ccbc33cf"
+
+[[packages]]
+name = "mirrorneuron-generate-fake-data-skill"
+path = "mn-skills/generate_fake_data_skill"
+publish_group = "skill"
+version = "1.3.53"
+installer_groups = ["skill"]
+binary_default = false
+source_hash = "v2:446038b0b075fef314005e3a09244e4f46b7eb2ab4fa86a204023010af3b2c90"
+
+[[packages]]
+name = "mirrorneuron-graph-analysis-skill"
+path = "mn-skills/graph_analysis_skill"
+publish_group = "skill"
+version = "1.3.53"
+installer_groups = ["skill"]
+binary_default = false
+source_hash = "v2:eadb74db70bdec996607e97b51744a85310fd4d01ad8b7e232097ad720b723ae"
+
+[[packages]]
+name = "mirrorneuron-implementation-plan-skill"
+path = "mn-skills/implementation_plan_skill"
+publish_group = "skill"
+version = "1.3.53"
+installer_groups = ["skill"]
+binary_default = false
+source_hash = "v2:15e1f38a03221720840df0c8eace9ec7151434807f55bb5760a4a18ae2e0c76c"
+
+[[packages]]
+name = "mirrorneuron-live-video-analysis-skill"
+path = "mn-skills/live_video_analysis_skill"
+publish_group = "skill"
+version = "1.3.53"
+installer_groups = ["skill"]
+binary_default = false
+source_hash = "v2:e3dbc57216fdbbabca6e7fdb4237f79557e88aa8d6ccc9796b975e6a87f1b289"
+
+[[packages]]
+name = "mirrorneuron-macos-logs-skill"
+path = "mn-skills/macos_logs_skill"
+publish_group = "skill"
+version = "1.3.65"
+installer_groups = ["skill"]
+binary_default = false
+source_hash = "v2:c67a039da2efdd2de2d27907f2485a9f5733a19096664ac3563a79f20d327fe6"
+
+[[packages]]
+name = "mirrorneuron-market-research-skill"
+path = "mn-skills/market_research_skill"
+publish_group = "skill"
+version = "1.3.53"
+installer_groups = ["skill"]
+binary_default = false
+source_hash = "v2:4cdbfe0b2bcdb6fcd54694da90724dd296cad954c4771f850f65329a7f0ae928"
+
+[[packages]]
+name = "mirrorneuron-marketing-email-skill"
+path = "mn-skills/marketing_email_skill"
+publish_group = "skill"
+version = "1.3.53"
+installer_groups = ["skill"]
+binary_default = false
+source_hash = "v2:2cbf5aa3d2d2a77353f5d118719a468e7b8c4e63ecaee182fdd316dde9ebc4e4"
+
+[[packages]]
+name = "mirrorneuron-meeting-summary-skill"
+path = "mn-skills/meeting_summary_skill"
+publish_group = "skill"
+version = "1.3.53"
+installer_groups = ["skill"]
+binary_default = false
+source_hash = "v2:a7f43b962479caaea529c5805c4a6a754810ea0ebae1ca42a0cd92455fe6df2b"
+
+[[packages]]
+name = "mirrorneuron-process-map-skill"
+path = "mn-skills/process_map_skill"
+publish_group = "skill"
+version = "1.3.53"
+installer_groups = ["skill"]
+binary_default = false
+source_hash = "v2:21c1969923c63ef00f1bd10dcfa97bd632239b9cf9844433a03171cde1238da9"
+
+[[packages]]
+name = "mirrorneuron-public-research-orchestrator-skill"
+path = "mn-skills/public_research_orchestrator_skill"
+publish_group = "skill"
+version = "1.3.53"
+installer_groups = ["skill"]
+binary_default = false
+source_hash = "v2:eb363e899bef75901eba0904bcfcd1e9eb14bc1a13c3386a8821a1be01d35eb4"
+
+[[packages]]
+name = "mirrorneuron-scoring-framework-skill"
+path = "mn-skills/scoring_framework_skill"
+publish_group = "skill"
+version = "1.3.53"
+installer_groups = ["skill"]
+binary_default = false
+source_hash = "v2:4e4bdcf0558db30a0f5f22077bc1c5421d52f480b4ef617e2eacbbb13b30ee5a"
+
+[[packages]]
+name = "mirrorneuron-slack-communicate-skill"
+path = "mn-skills/slack_communicate_skill"
+publish_group = "skill"
+version = "1.3.53"
+installer_groups = ["skill"]
+binary_default = false
+source_hash = "v2:e4d5f3d28f752f9c4e421b83743e9a5525f4e5c34b04b9d64be398d10868a5b8"
+
+[[packages]]
+name = "mirrorneuron-spreadsheet-analysis-skill"
+path = "mn-skills/spreadsheet_analysis_skill"
+publish_group = "skill"
+version = "1.3.53"
+installer_groups = ["skill"]
+binary_default = false
+source_hash = "v2:c3f57762c55430f64f74612d2f05c25c11d60e452b1bfbac2a241f9a06fb9169"
+
+[[packages]]
+name = "mirrorneuron-text-analysis-skill"
+path = "mn-skills/text_analysis_skill"
+publish_group = "skill"
+version = "1.3.53"
+installer_groups = ["skill"]
+binary_default = false
+source_hash = "v2:f6f76b4a99b0e4e763da7da84fee9947923ce9d0edb26cbefc9fd3616e07c5e5"
+
+[[packages]]
+name = "mirrorneuron-temporal-graph-skill"
+path = "mn-skills/temporal_graph_skill"
+publish_group = "skill"
+version = "1.3.65"
+installer_groups = ["skill"]
+binary_default = false
+source_hash = "v2:7af5c6fedb3b124aa07bc9b33b15c7bcea61ff191a02a05994badcfba269de60"
+
+[[packages]]
+name = "mirrorneuron-vendor-comparison-skill"
+path = "mn-skills/vendor_comparison_skill"
+publish_group = "skill"
+version = "1.3.53"
+installer_groups = ["skill"]
+binary_default = false
+source_hash = "v2:2f978cb7200184ed53c4d6bb9c80979e767ddc8a44e21dfccd45cc77fbf350d1"
+
+[[packages]]
+name = "mirrorneuron-web-browser-skill"
+path = "mn-skills/web_browser_skill"
+publish_group = "skill"
+version = "1.3.54"
+installer_groups = ["skill"]
+binary_default = false
+source_hash = "v2:4f39e97f940069675e6b12755fbfa5a64922c017fd515444e397423b9f4c398e"
+
+[[packages]]
+name = "mn-worker-python-host-agent"
+path = "mn-agents/worker_python_host_agent"
+publish_group = "agent"
+version = "1.3.60"
+installer_groups = ["agent"]
+binary_default = false
+source_hash = "v2:f96c2e12a5a42b98325c56ab359aef361da8cd7d7d96b6f8fa0cc50bb4651fbd"
+
+[[packages]]
+name = "mn-worker-python-docker-agent"
+path = "mn-agents/worker_python_docker_agent"
+publish_group = "agent"
+version = "1.3.60"
+installer_groups = ["agent"]
+binary_default = false
+source_hash = "v2:646f88822a1237595d9a2320d52ba2af7af4f7c401843993ddff76fba07f5034"
+
+[[packages]]
+name = "mn-worker-llm-host-agent"
+path = "mn-agents/worker_llm_host_agent"
+publish_group = "agent"
+version = "1.3.60"
+installer_groups = ["agent"]
+binary_default = false
+source_hash = "v2:5285b447b22ae12777564d74326979e033735d62bcb48ff78f06de89786410da"
+
+[[packages]]
+name = "mn-control-terminal-sink-agent"
+path = "mn-agents/control_terminal_sink_agent"
+publish_group = "agent"
+version = "1.3.60"
+installer_groups = ["agent"]
+binary_default = false
+source_hash = "v2:14852f6cde4c4873f6620127724a761c0e80ed695be5885a8295386be174eee9"
+
+[[packages]]
+name = "mn-control-message-router-agent"
+path = "mn-agents/control_message_router_agent"
+publish_group = "agent"
+version = "1.3.60"
+installer_groups = ["agent"]
+binary_default = false
+source_hash = "v2:e11e195ef87d7dd3e4cc0d7390599c2c9ecd92f8e1ff33b6b3afd209a6b8bf32"
+
+[[packages]]
+name = "mn-module-beam-module-agent"
+path = "mn-agents/module_beam_module_agent"
+publish_group = "agent"
+version = "1.3.60"
+installer_groups = ["agent"]
+binary_default = false
+source_hash = "v2:30c776e205ba72ecebb2e05a94518988124774c27e22d2fc94abd2d14cf36a34"
+
+[[packages]]
+name = "mn-service-openshell-agent"
+path = "mn-agents/service_openshell_agent"
+publish_group = "agent"
+version = "1.3.60"
+installer_groups = ["agent"]
+binary_default = false
+source_hash = "v2:280147e75ef00990550c44ebee7ad0b6a74bf11012bfe281eb72a5ad16a49cf6"
+
+[[packages]]
+name = "mn-prototype-operation-router-agent"
+path = "mn-agents/prototype_operation_router_agent"
+publish_group = "agent"
+version = "1.3.60"
+installer_groups = ["agent"]
+binary_default = false
+source_hash = "v2:b78a08357f2805ee218636243df32964a343c447d38dd84427f0e29edde15fa0"
+
+[[packages]]
+name = "mn-prototype-stateful-step-agent"
+path = "mn-agents/prototype_stateful_step_agent"
+publish_group = "agent"
+version = "1.3.60"
+installer_groups = ["agent"]
+binary_default = false
+source_hash = "v2:b205639d1ea82872510035caed2109855b0dec2ede70da0ae05a65aaae4fc096"
+
+[[packages]]
+name = "mn-prototype-entity-queue-agent"
+path = "mn-agents/prototype_entity_queue_agent"
+publish_group = "agent"
+version = "1.3.60"
+installer_groups = ["agent"]
+binary_default = false
+source_hash = "v2:b0960f781841aa3719594c915931ff29ea14e0a49525f363312d89cada34d1d3"
+
+[[packages]]
+name = "mn-prototype-bounded-tool-loop-agent"
+path = "mn-agents/prototype_bounded_tool_loop_agent"
+publish_group = "agent"
+version = "1.3.62"
+installer_groups = ["agent"]
+binary_default = false
+source_hash = "v2:485f5f22fa598197ea3f00c6d598ee7106c94a757c57f159f87f2f428ad76803"
+
+[[packages]]
+name = "mn-prototype-actor-review-agent"
+path = "mn-agents/prototype_actor_review_agent"
+publish_group = "agent"
+version = "1.3.60"
+installer_groups = ["agent"]
+binary_default = false
+source_hash = "v2:e6879d7dcd16d7d5b10d25d1a34d0507af2d02d6c6794031ef855634b3ac102b"
+
+[[packages]]
+name = "mn-prototype-artifact-finalizer-agent"
+path = "mn-agents/prototype_artifact_finalizer_agent"
+publish_group = "agent"
+version = "1.3.60"
+installer_groups = ["agent"]
+binary_default = false
+source_hash = "v2:4a01b51be2f2b51f1777d82f5b88f9fbe1ebac8c0241f169c7c3f01d7f43409f"
+
+[[packages]]
+name = "mn-prototype-supervised-service-agent"
+path = "mn-agents/prototype_supervised_service_agent"
+publish_group = "agent"
+version = "1.3.60"
+installer_groups = ["agent"]
+binary_default = false
+source_hash = "v2:d165617edc22a816996346494c9cd35fc4f74774b469a472e9dd0ad4a9b96342"
+
+[[packages]]
+name = "mn-prototype-stream-processor-agent"
+path = "mn-agents/prototype_stream_processor_agent"
+publish_group = "agent"
+version = "1.3.60"
+installer_groups = ["agent"]
+binary_default = false
+source_hash = "v2:f838995cb760aff7471c672b1f53138304dcff6f7d82b094cade8de837cd3ec8"
+
+
+[[packages]]
+name = "mirrorneuron-opencode-skill"
+path = "mn-skills/opencode_skill"
+publish_group = "skill"
+version = "1.3.63"
+installer_groups = ["skill"]
+binary_default = false
+source_hash = "v2:864270153ed7c19a69c9b8c9c58b7e1530b268e3c4fe938dcc0afa09f1b23421"
+
+[[packages]]
+name = "mirrorneuron-code-search-skill"
+path = "mn-skills/code_search_skill"
+publish_group = "skill"
+version = "1.3.64"
+installer_groups = ["skill"]
+binary_default = false
+source_hash = "v2:52d0a371b5dc372eb4b4dfa42c4508198694d7cc06dd8c9b5c75f119205d2131"
+
+[[packages]]
+name = "mirrorneuron-beam-analysis-skill"
+path = "mn-skills/beam_analysis_skill"
+publish_group = "skill"
+version = "1.3.63"
+installer_groups = ["skill"]
+binary_default = false
+source_hash = "v2:2e1fa526fd27cc605df80c1e4d36f62f057e5b0b5e9d1b28c5d924d1d2bc8d2d"
+
+
+[[packages]]
+name = "mn-blueprint-blocks"
+path = "mn-python-sdk/packages/blueprint-blocks"
+publish_group = "runtime"
+version = "1.4.3"
+installer_groups = ["sdk"]
+binary_default = true
+source_hash = "v2:8501a467b0c3d7b7ab115f6ff3201f339ba941bbdbf377b6e390f3d783e176b1"
+
+[[packages]]
+name = "mirrorneuron-static-code-analysis-skill"
+path = "mn-skills/static_code_analysis_skill"
+publish_group = "skill"
+version = "1.4.2"
+installer_groups = ["skill"]
+binary_default = false
+source_hash = "v2:9e52b4debc9907de4ee5bb1c591d6ba1420ad4cc7dcdbcb8c8f2196a172f8695"
+
+[[packages]]
+name = "mirrorneuron-web-report-skill"
+path = "mn-skills/web_report_skill"
+publish_group = "skill"
+version = "1.3.63"
+installer_groups = ["skill"]
+binary_default = false
+source_hash = "v2:a8be45ab31fff9358e8573f6362f2a29ae0b1791eef3584aa391858415aa9f65"
+
+[[packages]]
+name = "mirrorneuron-computer-use-skill"
+path = "mn-skills/computer_use_skill"
+publish_group = "skill"
+version = "1.4.2"
+installer_groups = ["skill"]
+binary_default = false
+source_hash = "v2:e272213638b71387b0ed147673dcdd663d700fea2458274aef99ad8b4f5f5cad"
