@@ -50,9 +50,11 @@ MN_DEFAULT_WEB_UI_IMAGE="${MN_DEFAULT_WEB_UI_IMAGE:-node:22-alpine}"
 # policy. Replace `latest` with a release tag or digest here to pin them.
 MN_DEFAULT_SYNCTHING_IMAGE="${MN_DEFAULT_SYNCTHING_IMAGE:-syncthing/syncthing:latest}"
 MN_DEFAULT_OPENSHELL_SANDBOX_IMAGE="${MN_DEFAULT_OPENSHELL_SANDBOX_IMAGE:-ghcr.io/nvidia/openshell/sandbox:latest}"
-MN_DEFAULT_OPENSHELL_SUPERVISOR_IMAGE="${MN_DEFAULT_OPENSHELL_SUPERVISOR_IMAGE:-ghcr.io/nvidia/openshell/supervisor:latest}"
+# Keep the OpenShell gateway and supervisor on matching releases so the
+# gateway can extract /openshell-sandbox at startup.
 MN_DEFAULT_OPENSHELL_VERSION="${MN_DEFAULT_OPENSHELL_VERSION:-v0.0.47}"
 MN_DEFAULT_OPENSHELL_GATEWAY_IMAGE="${MN_DEFAULT_OPENSHELL_GATEWAY_IMAGE:-ghcr.io/nvidia/openshell/gateway:0.0.47}"
+MN_DEFAULT_OPENSHELL_SUPERVISOR_IMAGE="${MN_DEFAULT_OPENSHELL_SUPERVISOR_IMAGE:-ghcr.io/nvidia/openshell/supervisor:0.0.47}"
 
 # Docker Model Runner's NVIDIA source build.
 MN_DEFAULT_DOCKER_MODEL_PLUGIN_PACKAGE="${MN_DEFAULT_DOCKER_MODEL_PLUGIN_PACKAGE:-docker-model-plugin}"
