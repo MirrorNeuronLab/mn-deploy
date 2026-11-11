@@ -1,5 +1,34 @@
 # MirrorNeuron Deploy
 
+## Installer interface
+
+The installer shows the selected mode, home, components and startup behavior,
+then three numbered stages (four when starting the runtime). It prints one
+completion message after all requested work succeeds, with a primary `Next:`
+command that also loads the current shell's environment. A connected client
+reinstall suggests `mn node list`; a new client suggests connection setup.
+Runtime startup still displays its verified connection details for joining
+another node.
+
+```bash
+./install.sh --help                     # Common choices and examples
+./install.sh --help-all                 # Full binary-install reference
+./install.sh --mode local --help-all    # Full local-source reference
+./install.sh --interactive              # Choose components; Enter keeps defaults
+./install.sh --verbose                  # Substeps, versions, paths and tool output
+```
+
+Default runs are non-interactive. Prompts accept `y`/`n`, retry invalid input,
+and report an error on missing input. `--reset` still requires the exact `YES`
+confirmation even with `--yes`. Terminal progress shows activity and elapsed
+time; redirected output, `TERM=dumb`, and `NO_COLOR` use stable plain lines.
+Routine Docker build/download output is hidden by default; a failed command
+reports its diagnostic log and returns a failure status. Use `--detect-only`
+for machine-readable JSON status.
+
+This presentation update keeps component selections, package pins, service
+startup policy and historical support snapshots unchanged.
+
 ## Lightweight production client
 
 ```bash

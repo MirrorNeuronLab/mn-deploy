@@ -240,6 +240,23 @@ code must quote values, handle spaces in paths, and avoid undocumented global
 tools. Non-interactive execution is line-oriented and deterministic; color is
 TTY-only and disabled by `NO_COLOR`.
 
+Installer output presents one resolved plan, numbered stages, and one completion
+message after all requested work succeeds. The primary `Next:` command includes
+the environment reload when needed. A runtime's verified readiness/join block
+remains visible. Reinstalling a connected client preserves its credential and
+offers `mn node list` as the next step.
+
+`--help` shows common choices; `--help-all` includes the selected mode's complete
+reference. `--mode MODE --help` retains its mode-specific reference. Help does
+not prepare an installation or acquire its lifecycle lock. `--verbose` exposes
+substeps and Docker build/download output. Default failures identify retained
+logs and keep nonzero exit status; no completion message appears after failure.
+TTY progress may animate while waiting for background work; redirected output,
+`NO_COLOR` (including an empty value), and `TERM=dumb` contain no ANSI controls.
+Yes/no prompts preserve defaults, validate responses and fail with instructions
+on EOF. Exact `YES` reset confirmation and deterministic non-interactive behavior
+are unchanged. `--detect-only` remains JSON-only.
+
 ## Current installer contract
 
 Install mode meanings, installed paths, service names, support file formats,
