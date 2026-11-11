@@ -19,5 +19,8 @@
   },
   "web-ui:v1.4.1": {
     "tree": "b4ff95f8b3c84a7fd379acb8260f2e5f6be3febd"
+  },
+  "web-ui:v1.4.2": {
+    "tree": "baa44bf8cfe4501deaa3dcf32e0404e352015945"
   }
 }
