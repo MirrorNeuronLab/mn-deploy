@@ -155,7 +155,7 @@ function mn_print_stage() {
 # Capture chatty external tools without hiding failure details or changing their
 # status. Logs live in the installer's private temporary directory.
 function mn_run_logged() {
-  local label="$1" status log_dir="${TMPDIR:-/tmp}/mirror_neuron_install"
+  local label="$1" status command_umask log_dir="${TMPDIR:-/tmp}/mirror_neuron_install"
   shift
   if [ "$MN_INSTALL_VERBOSE" = "Y" ]; then
     "$@"
@@ -164,8 +164,11 @@ function mn_run_logged() {
   local log_file="${log_dir}/${label//[^A-Za-z0-9_.-]/_}.$$.log"
   mkdir -p "$log_dir"
   if (
+    command_umask="$(umask)"
     umask 077
-    "$@" >"$log_file" 2>&1
+    exec >"$log_file" 2>&1 || exit $?
+    umask "$command_umask"
+    "$@"
   ); then
     rm -f "$log_file"
     return 0
@@ -1161,6 +1164,37 @@ function mn_print_cli_verification_prompt() {
   print_detail "Command help: mn --help"
 }
 
+function mn_print_runtime_connect_command() {
+  # Read the endpoint written by startup. The local gRPC target can be loopback.
+  if ! "$VENV_DIR/bin/python" - "$INSTALL_DIR" >&3 2>/dev/null <<'PY_CONNECT'; then
+from pathlib import Path
+import shlex
+import sys
+
+from mn_sdk.runtime_connection import DEFAULT_PORT, normalize_target, read_object
+
+home = Path(sys.argv[1])
+grpc = read_object(home / "runtime-endpoints.json")["grpc"]
+host = grpc["host"]
+if ":" in host and not host.startswith("["):
+    host = f"[{host}]"
+port = int(grpc["port"])
+host = normalize_target(host, port).rsplit(":", 1)[0]
+token = (home / "runtime.token").read_text(encoding="utf-8").strip()
+if not token:
+    raise SystemExit(1)
+
+command = ["mn", "node", "add", host]
+if port != DEFAULT_PORT:
+    command.extend(["--grpc-port", str(port)])
+command.extend(["--token", token])
+print("  Connect to this runtime")
+print(f"    {shlex.join(command)}")
+PY_CONNECT
+    print_warning "Could not display the runtime connection command. Check ${INSTALL_DIR}/runtime-endpoints.json and ${INSTALL_DIR}/runtime.token."
+  fi
+}
+
 function mn_print_install_complete() {
   printf '\n' >&3
   if [ "$MN_NO_RUNTIME" = "Y" ]; then
@@ -1190,14 +1224,15 @@ function mn_print_install_complete() {
       fi
     elif [ "$MN_INSTALL_ROLE" = "runtime" ]; then
       print_detail "Runtime credential: ${INSTALL_DIR}/runtime.token"
-      if [ "$START_NOW" = "Y" ]; then
-        printf '  Connect from a surface: mn node add <HOST> --token <RUNTIME_NODE_TOKEN>\n' >&3
-      else
+      if [ "$START_NOW" != "Y" ]; then
         mn_print_next_shell_command "mn-runtime start"
       fi
     fi
   fi
   mn_print_cli_verification_prompt
+  if [ "$MN_NO_RUNTIME" != "Y" ] && [ "$START_NOW" = "Y" ]; then
+    mn_print_runtime_connect_command
+  fi
 }
 
 function mn_run_runtime_compose() {
@@ -1247,10 +1282,6 @@ function mn_run_runtime_start_command() {
   mkdir -p "$log_dir"
   if MN_DISABLE_UPDATE_CHECK=1 MN_CLI_OUTPUT=plain "$@" </dev/null >"$log_file" 2>&1; then
     grep -E '(^|[[:space:]])(! Warning:|warning:|× Error:|error:)' "$log_file" >&3 2>/dev/null || true
-    awk '
-            /^Runtime endpoint:/ { showing = 3 }
-            showing > 0 { print; showing-- }
-        ' "$log_file" >&3
     rm -f "$log_file"
     return 0
   else
@@ -2386,10 +2417,7 @@ function generate_openshell_jwt_keys() (
     print_error "Failed to generate OpenShell sandbox JWT keys with ${gateway_image}."
     return 1
   fi
-  if ! docker cp "${container_id}:/tmp/openshell-bootstrap/output/jwt/." "$bootstrap_dir"; then
-    print_error "Failed to copy OpenShell sandbox JWT keys from the bootstrap container."
-    return 1
-  fi
+  mn_run_logged "OpenShell JWT key copy" docker cp "${container_id}:/tmp/openshell-bootstrap/output/jwt/." "$bootstrap_dir" || return 1
   for name in signing.pem public.pem kid; do
     if [ ! -s "${bootstrap_dir}/${name}" ]; then
       print_error "OpenShell certificate bootstrap did not create jwt/${name}."
@@ -5920,7 +5948,7 @@ EOF
       done
     fi
     # One resolution transaction selects local components over registry versions.
-    "$VENV_DIR/bin/pip" install "${editable_requirements[@]}" >/dev/null
+    "$VENV_DIR/bin/pip" install "${editable_requirements[@]}"
   }
 
   VENV_BACKUP_DIR=""
@@ -5949,11 +5977,11 @@ EOF
 
   print_step "Installing Python components from local source"
   (
-    "$MN_PYTHON_BIN" -m venv "$VENV_DIR" >/dev/null
-    "$VENV_DIR/bin/pip" install --upgrade pip >/dev/null
-    install_local_editable_python_packages
+    mn_run_logged "local Python virtual environment" "$MN_PYTHON_BIN" -m venv "$VENV_DIR"
+    mn_run_logged "pip upgrade" "$VENV_DIR/bin/pip" install --upgrade pip
+    mn_run_logged "local editable Python packages" install_local_editable_python_packages
   ) &
-  spinner $! "Installed local editable Python packages"
+  spinner $! "Installing local editable Python packages"
   require_local_cli_target_executables
   validate_local_python_component_imports
   VENV_INSTALL_OK="Y"

@@ -7,8 +7,8 @@ then three numbered stages (four when starting the runtime). It prints one
 completion message after all requested work succeeds, with a primary `Next:`
 command that also loads the current shell's environment. A connected client
 reinstall suggests `mn node list`; a new client suggests connection setup.
-Runtime startup still displays its verified connection details for joining
-another node.
+When the installer starts a runtime, its final line is a copyable `mn node add`
+command for connecting to that runtime from another machine.
 
 ```bash
 ./install.sh --help                     # Common choices and examples
@@ -22,9 +22,9 @@ Default runs are non-interactive. Prompts accept `y`/`n`, retry invalid input,
 and report an error on missing input. `--reset` still requires the exact `YES`
 confirmation even with `--yes`. Terminal progress shows activity and elapsed
 time; redirected output, `TERM=dumb`, and `NO_COLOR` use stable plain lines.
-Routine Docker build/download output is hidden by default; a failed command
-reports its diagnostic log and returns a failure status. Use `--detect-only`
-for machine-readable JSON status.
+`--verbose` shows routine Docker and local editable Python build output. Failed
+commands identify their diagnostic logs in the default output. Use
+`--detect-only` for machine-readable JSON status.
 
 This presentation update keeps component selections, package pins, service
 startup policy and historical support snapshots unchanged.
@@ -216,13 +216,10 @@ Install the local runtime:
 ./install.sh
 ```
 
-When the installer starts the runtime, it forwards the final
-`Runtime node ready` block from `mn runtime start`. That block contains the
-advertised endpoint, the active federation join token, and the exact
-`mn node add` command for connecting another independently installed Core.
-Treat the token and captured installer output as credentials.
-For the default gRPC port (`55051`), that command omits `--grpc-port`; it is
-shown only when the advertised endpoint uses a non-default port.
+The final `mn node add` command uses the installed runtime's advertised Core
+gRPC endpoint and its runtime control token from `MN_HOME/runtime.token`.
+Treat captured installer output as a credential. The command includes
+`--grpc-port` when the advertised port differs from `55051`.
 
 Install a specific release:
 

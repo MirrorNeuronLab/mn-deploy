@@ -206,11 +206,9 @@ Preview never prepares an environment or installs dependencies.
   Empty variables, home-directory globs, and workspace-wide deletion are
   invalid targets.
 - Credentials and tokens come from the environment or approved credential
-  mechanisms and are never emitted to normal logs, except that successful
-  runtime startup intentionally returns the active federation join token and
-  exact `mn node add` command to the invoking operator. Non-interactive
-  installer filtering may forward only that final readiness block, not
-  unrelated command output.
+  mechanisms and stay out of installer diagnostics. After successful startup,
+  the installer intentionally prints a copyable `mn node add` command with the
+  runtime control token to the invoking operator.
 - The default gRPC port (`55051`) is implicit in the displayed add-node
   command. A non-default advertised port is included with `--grpc-port` so the
   displayed command remains exact.
@@ -242,15 +240,16 @@ TTY-only and disabled by `NO_COLOR`.
 
 Installer output presents one resolved plan, numbered stages, and one completion
 message after all requested work succeeds. The primary `Next:` command includes
-the environment reload when needed. A runtime's verified readiness/join block
-remains visible. Reinstalling a connected client preserves its credential and
-offers `mn node list` as the next step.
+the environment reload when needed. An installation that starts a runtime ends
+with the connect command for its advertised gRPC endpoint. Reinstalling a
+connected client preserves its credential and offers `mn node list` as the next
+step.
 
 `--help` shows common choices; `--help-all` includes the selected mode's complete
 reference. `--mode MODE --help` retains its mode-specific reference. Help does
 not prepare an installation or acquire its lifecycle lock. `--verbose` exposes
-substeps and Docker build/download output. Default failures identify retained
-logs and keep nonzero exit status; no completion message appears after failure.
+substeps, Docker output, and local editable Python build diagnostics. Default
+failures identify retained logs and keep nonzero exit status.
 TTY progress may animate while waiting for background work; redirected output,
 `NO_COLOR` (including an empty value), and `TERM=dumb` contain no ANSI controls.
 Yes/no prompts preserve defaults, validate responses and fail with instructions
