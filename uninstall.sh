@@ -34,6 +34,7 @@ function print_warning() { printf '%swarning:%s %s\n' "${YELLOW}${BOLD}" "$RESET
 function print_error() { printf '%serror:%s %s\n' "${RED}${BOLD}" "$RESET" "$1" >&3; }
 
 ASSUME_YES="N"
+CLIENT_ONLY="N"
 
 function usage() {
   cat >&3 <<EOF
@@ -41,6 +42,7 @@ Usage: ./uninstall.sh [options]
 
 Options:
   --yes, -y   Run non-interactively and answer yes to prompts.
+  --no-runtime Remove the client install (default ~/.mn-client), without runtime cleanup.
   MN_HOME=/path Override the runtime state directory. Defaults to ${HOME}/.mn.
   -h, --help  Show this help.
 EOF
@@ -49,6 +51,7 @@ EOF
 for arg in "$@"; do
   case "$arg" in
   --yes | -y) ASSUME_YES="Y" ;;
+  --no-runtime) CLIENT_ONLY="Y" ;;
   -h | --help)
     usage
     exit 0
@@ -110,6 +113,29 @@ if [ "$CONFIRM" != "Y" ]; then
 fi
 
 INSTALL_DIR="${MN_HOME:-${HOME}/.mn}"
+if [ "$CLIENT_ONLY" = "Y" ]; then
+  INSTALL_DIR="${MN_HOME:-${HOME}/.mn-client}"
+fi
+if [ "$CLIENT_ONLY" = "Y" ] || { [ -f "$INSTALL_DIR/install_metadata.json" ] && grep -Eq '"install_role"[[:space:]]*:[[:space:]]*"client"' "$INSTALL_DIR/install_metadata.json"; }; then
+  if [ -L "$INSTALL_DIR" ] || [ -L "$INSTALL_DIR/bin" ] || [ ! -f "$INSTALL_DIR/install_metadata.json" ] ||
+    ! grep -Eq '"install_role"[[:space:]]*:[[:space:]]*"client"' "$INSTALL_DIR/install_metadata.json" ||
+    [ -e "$INSTALL_DIR/docker-compose.yml" ] || [ -e "$INSTALL_DIR/docker-compose.env" ]; then
+    print_error "MN_HOME is not a client installation. Refusing runtime cleanup."
+    exit 1
+  fi
+  INSTALL_DIR="$(cd "$INSTALL_DIR" && pwd -P)"
+  if [ "$INSTALL_DIR" = / ] || [ "$INSTALL_DIR" = "$(cd "$HOME" && pwd -P)" ] || [ "$INSTALL_DIR" = "$(pwd -P)" ]; then
+    print_error "Refusing to remove a protected directory."
+    exit 1
+  fi
+  print_step "Removing client packages, connection and downloaded results"
+  rm -rf "$INSTALL_DIR/venv" "$INSTALL_DIR/python" "$INSTALL_DIR/uv" "$INSTALL_DIR/tmp" "$INSTALL_DIR/cache" "$INSTALL_DIR/logs" "$INSTALL_DIR/outputs"
+  rm -f "$INSTALL_DIR/bin/mn" "$INSTALL_DIR/bin/mn-api" "$INSTALL_DIR/client.json" "$INSTALL_DIR/api.token" "$INSTALL_DIR/install_metadata.json" "$INSTALL_DIR/env" "$INSTALL_DIR/env.fish"
+  rmdir "$INSTALL_DIR/bin" 2>/dev/null || true
+  rmdir "$INSTALL_DIR" 2>/dev/null || true
+  print_success "MirrorNeuron client removed."
+  exit 0
+fi
 UI_DIR="${INSTALL_DIR}/webui"
 BIN_DIR="${HOME}/.local/bin"
 RUNTIME_BIN_DIR="${INSTALL_DIR}/bin"

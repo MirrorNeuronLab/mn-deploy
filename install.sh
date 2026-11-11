@@ -21,13 +21,13 @@ exec 3>&1
 # Core is a GAR Docker image.
 MN_DEFAULT_CORE_VERSION="${MN_DEFAULT_CORE_VERSION:-v1.4.0}"
 # SDK, CLI, and API are pip packages.
-MN_DEFAULT_PYTHON_SDK_VERSION="${MN_DEFAULT_PYTHON_SDK_VERSION:-v1.4.6}"
-MN_DEFAULT_CLI_VERSION="${MN_DEFAULT_CLI_VERSION:-v1.3.68}"
-MN_DEFAULT_API_VERSION="${MN_DEFAULT_API_VERSION:-v1.3.68}"
+MN_DEFAULT_PYTHON_SDK_VERSION="${MN_DEFAULT_PYTHON_SDK_VERSION:-v1.4.7}"
+MN_DEFAULT_CLI_VERSION="${MN_DEFAULT_CLI_VERSION:-v1.3.69}"
+MN_DEFAULT_API_VERSION="${MN_DEFAULT_API_VERSION:-v1.3.69}"
 # Web UI is a GAR npm package (the installer strips the leading `v`).
 MN_DEFAULT_WEB_UI_VERSION="${MN_DEFAULT_WEB_UI_VERSION:-v1.4.1}"
 # Additional pip packages are selected from the versioned package index.
-MN_DEFAULT_AGENT_PACKAGE_INDEX_VERSION="${MN_DEFAULT_AGENT_PACKAGE_INDEX_VERSION:-v1.4.13}"
+MN_DEFAULT_AGENT_PACKAGE_INDEX_VERSION="${MN_DEFAULT_AGENT_PACKAGE_INDEX_VERSION:-v1.4.14}"
 # Membrane v2 context engine is a GAR Docker image.
 MN_DEFAULT_MEMBRANE_CONTEXT_ENGINE_VERSION="${MN_DEFAULT_MEMBRANE_CONTEXT_ENGINE_VERSION:-v1.4.0}"
 
@@ -82,6 +82,7 @@ MN_INSTALL_VERBOSE="${MN_INSTALL_VERBOSE:-N}"
 MN_INSTALL_RESET="N"
 MN_INSTALL_DETECT_ONLY="N"
 MN_INSTALL_START_DOCKER="N"
+MN_NO_RUNTIME="N"
 MN_BUILD_MEMBRANE="N"
 MN_BUILD_MEMBRANE_DIR=""
 MN_MEMBRANE_BUILD_PREPARED="N"
@@ -89,7 +90,7 @@ MN_MEMBRANE_BUILD_PREPARED="N"
 # snapshot while the component pins above select each published artifact.
 MN_DEFAULT_INSTALL_VERSION="${MN_DEFAULT_INSTALL_VERSION:-v1.4.0}"
 # Support snapshots can advance independently when repairing component packages.
-MN_DEFAULT_INSTALL_SUPPORT_VERSION="${MN_DEFAULT_INSTALL_SUPPORT_VERSION:-v1.4.13}"
+MN_DEFAULT_INSTALL_SUPPORT_VERSION="${MN_DEFAULT_INSTALL_SUPPORT_VERSION:-v1.4.14}"
 MN_INSTALL_VERSION="${MN_INSTALL_VERSION:-}"
 MN_INSTALL_SCRIPT_NAME="$(basename "$0")"
 MN_INSTALL_ARGS=()
@@ -106,6 +107,8 @@ Modes:
   binary   Install released artifacts/packages. This is the default.
 
 Common options:
+  --no-runtime                 Binary only: install CLI/API clients for remote execution, without runtime services.
+                                Defaults to ~/.mn-client. Ignored in github/local source modes.
   --start-docker                Start existing Docker only; do not install MirrorNeuron or Docker.
   --detect-only                 Print installed/running status and version as JSON; make no changes.
   --version TAG                 Install this release version, for example v1.2.31.
@@ -331,6 +334,16 @@ function mn_detect_runtime_is_ready() {
 function mn_detect_runtime() {
   local install_dir="${MN_HOME:-${HOME}/.mn}"
   local metadata_file="${install_dir}/install_metadata.json"
+  if [ "$MN_NO_RUNTIME" = "Y" ] || mn_is_client_home "$install_dir"; then
+    local client_installed=false client_version=null
+    if mn_is_client_home "$install_dir" && [ -x "$install_dir/bin/mn" ] && [ -x "$install_dir/bin/mn-api" ]; then
+      client_installed=true
+      client_version="$(sed -n 's/.*"cli_version": "\([v0-9.a-z-]*\)".*/"\1"/p' "$metadata_file" | head -n 1)"
+      client_version="${client_version:-null}"
+    fi
+    printf '{"installed":%s,"install_role":"client","running":false,"runtime_ready":false,"status":"client","version":%s,"docker_installed":null,"docker_running":null}\n' "$client_installed" "$client_version"
+    return
+  fi
   local installed="false"
   local running="false"
   local runtime_ready="false"
@@ -1050,6 +1063,10 @@ function mn_run_runtime_start_command() {
   return "$status"
 }
 
+function mn_is_client_home() {
+  [ -f "$1/install_metadata.json" ] && grep -Eq '"install_role"[[:space:]]*:[[:space:]]*"client"' "$1/install_metadata.json"
+}
+
 while [ "$#" -gt 0 ]; do
   case "$1" in
   --mode)
@@ -1096,6 +1113,9 @@ while [ "$#" -gt 0 ]; do
   --start-docker)
     MN_INSTALL_START_DOCKER="Y"
     ;;
+  --no-runtime)
+    MN_NO_RUNTIME="Y"
+    ;;
   *)
     MN_INSTALL_ARGS+=("$1")
     ;;
@@ -1103,10 +1123,20 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
+if [ "$MN_NO_RUNTIME" = "Y" ]; then
+  case "$MN_INSTALL_MODE" in
+  binary) export MN_HOME="${MN_HOME:-${HOME}/.mn-client}" ;;
+  github | local)
+    printf 'warning: --no-runtime is ignored in %s source mode; the development runtime is installed.\n' "$MN_INSTALL_MODE" >&3
+    MN_NO_RUNTIME="N"
+    ;;
+  esac
+fi
+
 if [ "$MN_INSTALL_START_DOCKER" = "Y" ]; then
   if [ "$MN_INSTALL_MODE_EXPLICIT" = "Y" ] || [ -n "$MN_INSTALL_VERSION" ] ||
     [ "$MN_INSTALL_DETECT_ONLY" = "Y" ] || [ "$MN_INSTALL_RESET" = "Y" ] ||
-    [ "$MN_BUILD_MEMBRANE" = "Y" ] || [ "${#MN_INSTALL_ARGS[@]}" -ne 0 ]; then
+    [ "$MN_BUILD_MEMBRANE" = "Y" ] || [ "$MN_NO_RUNTIME" = "Y" ] || [ "${#MN_INSTALL_ARGS[@]}" -ne 0 ]; then
     printf 'error: --start-docker cannot be combined with detection or installation options.\n' >&3
     exit 1
   fi
@@ -1160,6 +1190,10 @@ if [ "$MN_INSTALL_MODE" = "local" ] && [ -n "$MN_INSTALL_VERSION" ]; then
 fi
 
 if [ "$MN_INSTALL_HELP_REQUESTED" = "Y" ]; then
+  if [ "$MN_NO_RUNTIME" = "Y" ]; then
+    print_unified_usage
+    exit 0
+  fi
   if [ "$MN_INSTALL_MODE_EXPLICIT" = "Y" ]; then
     MN_INSTALL_ARGS+=("--help")
   else
@@ -1170,6 +1204,11 @@ fi
 
 export MN_INSTALL_VERSION
 export MN_HOME="${MN_HOME:-${HOME}/.mn}"
+
+if [ "$MN_INSTALL_HELP_REQUESTED" != "Y" ] && [ "$MN_NO_RUNTIME" != "Y" ] && mn_is_client_home "$MN_HOME"; then
+  printf 'error: MN_HOME contains a client installation. Use --no-runtime to update it, or choose another MN_HOME for a runtime.\n' >&3
+  exit 1
+fi
 
 # Preserve the last configured identity before any mode rewrites Compose env.
 # The CLI validates it against its persistent record and running Core before start.
@@ -2130,6 +2169,118 @@ venv = os.path.realpath(sys.argv[1])
 if not os.path.isabs(base) or not os.access(base, os.X_OK) or os.path.commonpath([base, venv]) == venv:
     raise SystemExit(1)
 print(base)' "$VENV_DIR"
+}
+
+# Uses binary mode's Python resolver and release-index installer only. No runtime
+# discovery, Compose generation, cleanup, or service startup is reachable here.
+function mn_install_client() {
+  local arg confirmation=""
+  for arg in ${MN_INSTALL_ARGS[@]+"${MN_INSTALL_ARGS[@]}"}; do
+    case "$arg" in
+    --web-ui | --redis | --context-engine | --openshell | --syncthing | --start | --agents | --no-cli | --no-api | --no-python-sdk | --python-components | --python-components=*)
+      print_error "${arg} conflicts with --no-runtime. Client mode installs CLI/API and their Python dependencies only."
+      return 1
+      ;;
+    esac
+  done
+  mn_reset_resolve_home_or_exit
+  INSTALL_DIR="$MN_RESET_HOME"
+  export MN_HOME="$INSTALL_DIR"
+  VENV_DIR="$INSTALL_DIR/venv"
+  BIN_DIR="$INSTALL_DIR/bin"
+  INSTALL_METADATA_FILE="$INSTALL_DIR/install_metadata.json"
+  if [ -f "$INSTALL_DIR/docker-compose.yml" ] || [ -f "$INSTALL_DIR/docker-compose.env" ] ||
+    [ -L "$INSTALL_DIR/bin" ] ||
+    { [ -d "$INSTALL_DIR" ] && [ -n "$(find "$INSTALL_DIR" -mindepth 1 -maxdepth 1 -print -quit)" ] && ! mn_is_client_home "$INSTALL_DIR"; }; then
+    print_error "MN_HOME contains an existing installation or other files. Choose an empty directory for client mode."
+    return 1
+  fi
+  if [ "$REINSTALL" = "N" ] && mn_is_client_home "$INSTALL_DIR" && [ "$MN_INSTALL_RESET" != "Y" ] &&
+    [ -x "$BIN_DIR/mn" ] && [ -x "$BIN_DIR/mn-api" ] && [ -x "$VENV_DIR/bin/mn" ] && [ -x "$VENV_DIR/bin/mn-api" ]; then
+    print_success "Keeping the existing client installation."
+    return 0
+  fi
+  if [ "$MN_INSTALL_RESET" = "Y" ]; then
+    printf 'warning: Reset permanently removes this client connection, credentials, logs and downloaded results.\nType YES to reset this client installation: ' >&3
+    if [ -t 0 ]; then
+      IFS= read -r confirmation || confirmation=""
+    elif { exec 4</dev/tty; } 2>/dev/null; then
+      IFS= read -r confirmation <&4 || confirmation=""
+      exec 4<&-
+    else
+      IFS= read -r confirmation || confirmation=""
+    fi
+    if [ "$confirmation" != "YES" ]; then
+      print_warning "Reset cancelled; no client data was changed."
+      return 0
+    fi
+    rm -f "$INSTALL_DIR/client.json" "$INSTALL_DIR/api.token"
+    rm -rf "$INSTALL_DIR/outputs" "$INSTALL_DIR/logs"
+  fi
+  umask 077
+  mkdir -p "$INSTALL_DIR"
+  # Mark partial installs too, so retry cannot mistake them for runtime homes.
+  if [ ! -f "$INSTALL_METADATA_FILE" ]; then
+    printf '{"install_role":"client","install_type":"binary"}\n' >"$INSTALL_METADATA_FILE"
+  fi
+  mn_prepare_installer_paths
+  print_step "Installing lightweight MirrorNeuron client (CLI and API)"
+  mn_ensure_python_package_index_file
+  resolve_python_runtime
+  ensure_pip
+  INSTALL_CLI="Y"
+  INSTALL_API="Y"
+  INSTALL_PYTHON_SDK="N"
+  INSTALL_AGENTS="N"
+  INSTALL_CONTEXT_ENGINE="N"
+  INSTALL_WEB_UI="N"
+  INSTALL_REDIS="N"
+  INSTALL_OPENSHELL="N"
+  START_NOW="N"
+  "$MN_PYTHON_BIN" - "$INSTALL_DIR" <<'PY'
+import os, secrets, sys
+from pathlib import Path
+home = Path(sys.argv[1])
+token = home / "api.token"
+if not token.exists():
+    fd = os.open(token, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w") as output:
+        output.write(secrets.token_urlsafe(32) + "\n")
+PY
+  (
+    client_backup="${VENV_DIR}.client-backup.$$"
+    client_success="N"
+    trap 'if [ "$client_success" != "Y" ]; then rm -rf "$VENV_DIR"; if [ -d "$client_backup" ]; then mv "$client_backup" "$VENV_DIR"; fi; fi' EXIT
+    if [ -e "$VENV_DIR" ]; then mv "$VENV_DIR" "$client_backup"; fi
+    install_python_packages
+    # Fail an incompatible old package selection before replacing command links.
+    run_quiet "client-package-check" "$VENV_DIR/bin/python" -c 'from mn_sdk.client_install import is_client_install; from mn_sdk.remote_api import RemoteApiClient; from mn_cli.client_commands import bind_client_commands; from mn_cli.main import app; from mn_api.client_app import create_client_app; assert is_client_install(); create_client_app()'
+    client_success="Y"
+    rm -rf "$client_backup"
+  )
+  "$MN_PYTHON_BIN" - "$INSTALL_DIR" "$INSTALL_VERSION" "$CLI_INSTALL_VERSION" <<'PY'
+import json, shlex, sys
+from pathlib import Path
+home = Path(sys.argv[1])
+(home / "bin").mkdir(exist_ok=True)
+for command in ("mn", "mn-api"):
+    target = home / "bin" / command
+    # Bind commands to this installation even in a shell with a different MN_HOME.
+    content = "#!/usr/bin/env bash\nset -euo pipefail\nexport MN_HOME=" + shlex.quote(str(home))
+    content += '\nexport MN_ENV="${MN_ENV:-prod}"\nexec ' + shlex.quote(str(home / "venv/bin" / command)) + ' "$@"\n'
+    temporary = target.with_suffix(".new")
+    temporary.write_text(content)
+    temporary.chmod(0o755)
+    temporary.replace(target)
+metadata = {"install_role": "client", "install_type": "binary", "install_version": sys.argv[2], "cli_version": sys.argv[3]}
+temporary = home / "install_metadata.json.new"
+temporary.write_text(json.dumps(metadata, indent=2) + "\n")
+temporary.replace(home / "install_metadata.json")
+PY
+  mn_write_shell_environment
+  print_success "MirrorNeuron client installed. All blueprint execution uses the remote node."
+  mn_print_next_shell_command 'mn node add <REMOTE_API_URL> --token <REMOTE_API_TOKEN>'
+  printf 'Optional local API: mn-api (foreground). Local bearer credential: %s/api.token\n' "$INSTALL_DIR" >&3
 }
 
 run_install_github() {
@@ -5959,11 +6110,13 @@ run_install_binary() {
   MN_HOST_OPENSHELL_CONFIG_DIR="${OPENSHELL_CONTAINER_CONFIG_DIR:-${INSTALL_DIR}/.config/openshell-mirror-neuron}"
   MN_HOST_OPENSHELL_STATE_DIR="${MN_HOST_OPENSHELL_STATE_DIR:-${INSTALL_DIR}/openshell-state}"
   OPENSHELL_GATEWAY_USER="${OPENSHELL_GATEWAY_USER:-$(id -u):$(id -g)}"
-  DOCKER_HOST_SOCKET="${DOCKER_HOST_SOCKET:-$(mn_resolve_docker_host_socket)}"
-  if [ -z "${OPENSHELL_GATEWAY_DOCKER_GROUP:-}" ] && [ "$(uname -s)" = "Darwin" ]; then
-    OPENSHELL_GATEWAY_DOCKER_GROUP="0"
-  elif [ -z "${OPENSHELL_GATEWAY_DOCKER_GROUP:-}" ] && [ -S "${DOCKER_HOST_SOCKET}" ]; then
-    OPENSHELL_GATEWAY_DOCKER_GROUP="$(stat -c '%g' "${DOCKER_HOST_SOCKET}" 2>/dev/null || stat -f '%g' "${DOCKER_HOST_SOCKET}" 2>/dev/null || true)"
+  if [ "$MN_NO_RUNTIME" != "Y" ]; then
+    DOCKER_HOST_SOCKET="${DOCKER_HOST_SOCKET:-$(mn_resolve_docker_host_socket)}"
+    if [ -z "${OPENSHELL_GATEWAY_DOCKER_GROUP:-}" ] && [ "$(uname -s)" = "Darwin" ]; then
+      OPENSHELL_GATEWAY_DOCKER_GROUP="0"
+    elif [ -z "${OPENSHELL_GATEWAY_DOCKER_GROUP:-}" ] && [ -S "${DOCKER_HOST_SOCKET}" ]; then
+      OPENSHELL_GATEWAY_DOCKER_GROUP="$(stat -c '%g' "${DOCKER_HOST_SOCKET}" 2>/dev/null || stat -f '%g' "${DOCKER_HOST_SOCKET}" 2>/dev/null || true)"
+    fi
   fi
   OPENSHELL_GATEWAY_DOCKER_GROUP="${OPENSHELL_GATEWAY_DOCKER_GROUP:-0}"
   MN_DYNAMIC_REDIS_PORT_START="${MN_DYNAMIC_REDIS_PORT_START:-56379}"
@@ -7733,6 +7886,11 @@ EOF
     mn_write_shell_environment
   }
 
+  if [ "$MN_NO_RUNTIME" = "Y" ]; then
+    mn_install_client
+    return
+  fi
+
   mn_prepare_installer_paths
   print_header
 
@@ -7868,7 +8026,7 @@ EOF
 
 # Ordinary installers and CLI starts share the same lock as reset. The owner
 # stamp remains outside MN_HOME so deleting that tree cannot release the fence.
-if [ "$MN_INSTALL_HELP_REQUESTED" != "Y" ] && [ "$MN_INSTALL_RESET" != "Y" ]; then
+if [ "$MN_INSTALL_HELP_REQUESTED" != "Y" ] && { [ "$MN_INSTALL_RESET" != "Y" ] || [ "$MN_NO_RUNTIME" = "Y" ]; }; then
   mkdir -p "$(dirname "$MN_HOME")"
   MN_RUNTIME_LIFECYCLE_LOCK="$(cd "$(dirname "$MN_HOME")" && pwd -P)/.$(basename "$MN_HOME").lifecycle.lock"
   mn_reset_acquire_lock_directory "$MN_RUNTIME_LIFECYCLE_LOCK"
@@ -7882,7 +8040,7 @@ if [ "$MN_INSTALL_HELP_REQUESTED" != "Y" ]; then
   mn_validate_membrane_build
 fi
 
-if [ "$MN_INSTALL_RESET" = "Y" ] && [ "$MN_INSTALL_HELP_REQUESTED" != "Y" ]; then
+if [ "$MN_INSTALL_RESET" = "Y" ] && [ "$MN_INSTALL_HELP_REQUESTED" != "Y" ] && [ "$MN_NO_RUNTIME" != "Y" ]; then
   mn_reset_install_state
   mn_reset_drop_conflicting_install_args
 fi

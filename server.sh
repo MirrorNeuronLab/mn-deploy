@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 
 DIR="${MN_HOME:-${HOME}/.mn}"
+if [ -f "$DIR/install_metadata.json" ] && grep -Eq '"install_role"[[:space:]]*:[[:space:]]*"client"' "$DIR/install_metadata.json"; then
+  if [ "${1:-}" = status ]; then
+    printf 'Client mode: no local runtime. Start the optional foreground API with mn-api.\n'
+    exit 0
+  fi
+  printf 'error: No local runtime is installed. Start the optional foreground API with mn-api.\n' >&2
+  exit 1
+fi
 PID_DIR="${DIR}/.pids"
 LOG_DIR="${DIR}/.logs"
 API_PID_FILE="${PID_DIR}/api.pid"

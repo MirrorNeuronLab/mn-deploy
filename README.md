@@ -1,5 +1,58 @@
 # MirrorNeuron Deploy
 
+## Lightweight production client
+
+```bash
+./install.sh --no-runtime
+# Open a new shell, or source ~/.mn-client/env
+mn node add https://node.example:54001 --token "$REMOTE_API_TOKEN"
+mn blueprint run <blueprint-id>
+```
+
+`--no-runtime` selects **client mode** for binary installs. It installs `mn-cli`,
+`mn-api`, their Python dependency closure, and Python 3.12 if needed. It does not
+probe or install Docker, Redis, Core, Membrane services, agents, models, Syncthing,
+OpenShell, or a Web UI deployment, and starts no services. `--mode local` and
+`--mode github` consume this flag with an explicit notice and install the normal
+development runtime.
+
+The default home is `~/.mn-client`; set `MN_HOME` during installation to choose
+another directory. An existing runtime or nonempty unmarked directory is refused.
+Generated `bin/mn` and `bin/mn-api` commands bind to this installation's home and
+its persisted `install_metadata.json` role. Runtime lifecycle commands cannot
+start a local node. Ordinary binary installs retain their existing behavior.
+
+`mn` talks directly to the connected node's `/api/v1` REST API. Use that node's
+**API bearer token**, not its federation join token. Catalog discovery,
+validation hooks, models, job preparation, scheduling and execution all happen
+on the remote side. Local blueprint paths, repository/revision/offline options
+and archive uploads are unsupported. Input paths in configuration refer to remote
+files. Existing job IDs, `--node`, `--queue`, `--schedule`, `--auto-schedule`,
+monitoring, logs, cancellation and result downloads use the remote API.
+
+The optional local relay starts manually with `mn-api` in the foreground. It
+listens on `127.0.0.1:54001` by default (`MN_API_HOST` / `MN_API_PORT` override).
+Authenticate to it with the separate private token in `MN_HOME/api.token`, or
+an explicit `MN_API_TOKEN`. It substitutes the remote token while forwarding.
+`POST /api/v1/nodes` with `{"host":"https://node.example:54001","token":"..."}`
+configures the same connection as the CLI. Successful reconnects take effect on
+subsequent requests; failed reconnects preserve the current connection.
+`mn node remove <connected-node-name> --yes` disconnects this client only.
+
+Reinstall with the same `--no-runtime` and `MN_HOME` preserves connection settings
+and the local API token. An incompatible package selection fails the import
+check and restores the previous Python environment. `install.sh --no-runtime
+--detect-only` reports client mode without Docker access. `install.sh
+--no-runtime --reset` requires exact `YES`, clears the client connection and
+results, rotates the local token, and reinstalls. `uninstall.sh --no-runtime
+--yes` removes client-owned files only; a custom `MN_HOME` must be supplied again.
+Stop any manually running `mn-api` before reinstalling or uninstalling it.
+
+The coordinated client release pins SDK/components `1.4.7`, CLI/API `1.3.69`, and
+installer-support/package index `v1.4.14`. Publish those Python artifacts and the
+new immutable support snapshot together before distributing this installer.
+Core and Web UI image/package versions are unchanged.
+
 ## Current contracts
 
 Current installation uses explicit component pins and current release-index fingerprints (`v2:`). Historical unified-tag inference, fingerprint recovery, shell-profile migration, retired inline-watchdog matching, and host-BEAM PID cleanup are removed. Historical support snapshots are immutable release artifacts and are not modified by this source change.
