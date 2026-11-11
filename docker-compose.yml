@@ -90,19 +90,25 @@ services:
 
         function proxyApi(request, response) {
           const headers = { ...request.headers, host: apiHost + ":" + apiPort };
+          if (apiToken && headers.authorization === undefined) headers.authorization = "Bearer " + apiToken;
           const upstream = http.request(
             { hostname: apiHost, port: apiPort, path: request.url, method: request.method, headers },
             (upstreamResponse) => {
+              upstreamResponse.on("error", () => response.destroy());
               response.writeHead(upstreamResponse.statusCode || 502, upstreamResponse.headers);
               upstreamResponse.pipe(response);
             },
           );
           upstream.on("error", (error) => {
-            if (!response.headersSent) {
-              response.writeHead(502, { "Content-Type": "application/json" });
+            if (response.destroyed) return;
+            if (response.headersSent) {
+              response.destroy();
+              return;
             }
+            response.writeHead(502, { "Content-Type": "application/json" });
             response.end(JSON.stringify({ detail: "API proxy unavailable", error: error.message }));
           });
+          response.on("close", () => upstream.destroy());
           request.pipe(upstream);
         }
 
@@ -300,11 +306,15 @@ services:
             (upstreamResponse) => {
               const headers = remoteResponseHeaders(upstreamResponse.headers);
               const contentType = String(headers["content-type"] || "").toLowerCase();
-              response.writeHead(upstreamResponse.statusCode || 502, headers);
-              if (!contentType.includes("text/html") || webUi.transport) {
+              const status = upstreamResponse.statusCode || 502;
+              if (request.method !== "GET" || status !== 200 || !contentType.includes("text/html") || headers["content-encoding"]) {
+                response.writeHead(status, headers);
                 upstreamResponse.pipe(response);
                 return;
               }
+              delete headers.etag;
+              delete headers["last-modified"];
+              response.writeHead(status, headers);
               const chunks = [];
               upstreamResponse.on("data", (chunk) => chunks.push(chunk));
               upstreamResponse.on("end", () => response.end(injectProxyConfig(Buffer.concat(chunks), details.jobId)));

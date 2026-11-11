@@ -58,7 +58,9 @@ def run_gcloud(binary: str, *args: str, listing: bool = True):
     return data
 
 
-def delete_version(binary: str, item: Deletion, project: str) -> None:
+def delete_version(
+    binary: str, item: Deletion, project: str, *, delete_tags: bool = True
+) -> None:
     """Delete one version, reporting a validated same-package OCI parent if blocked."""
     command = [
         binary,
@@ -67,9 +69,10 @@ def delete_version(binary: str, item: Deletion, project: str) -> None:
         "delete",
         item.name,
         f"--project={project}",
-        "--delete-tags",
         "--quiet",
     ]
+    if delete_tags:
+        command.append("--delete-tags")
     result = subprocess.run(command, text=True, capture_output=True)
     if result.returncode == 0:
         return

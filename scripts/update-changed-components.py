@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import importlib.util
 import json
@@ -11,6 +12,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -18,12 +20,20 @@ import tomllib
 from urllib.parse import unquote
 
 SCRIPTS = Path(__file__).resolve().parent
+WEBSITE = Path("/Users/homer/Projects/mn-website")
+INSTALL_SCRIPTS = ("install.sh", "uninstall.sh")
+DOCKER_PACKAGES = {
+    "core": "mirror-neuron-core",
+    "membrane": "membrane-context-engine",
+}
 VERSION = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
+DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
 
 
 def module(filename):
     spec = importlib.util.spec_from_file_location(filename, SCRIPTS / filename)
     loaded = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = loaded
     spec.loader.exec_module(loaded)
     return loaded
 
@@ -583,6 +593,20 @@ def publish_python(args, planned, directory):
         print(f"✓ Published {name}=={package['version']}", flush=True)
 
 
+def docker_image(args, kind):
+    return (
+        f"{args.location}-docker.pkg.dev/{args.project}/{args.docker_repository}/"
+        + DOCKER_PACKAGES[kind]
+    )
+
+
+def docker_tags(args, component):
+    tags = [component["version"], component["version"][1:]]
+    if args.update_latest:
+        tags.append("latest")
+    return tags
+
+
 def publish_component(args, workspace, component, directory):
     kind = component["kind"]
     with tempfile.TemporaryDirectory(prefix=f"mn-{kind}-repair-") as staging:
@@ -605,12 +629,11 @@ def publish_component(args, workspace, component, directory):
                 args.location,
                 "--repository",
                 args.npm_repository,
+                env={**os.environ, "MN_GCLOUD_BIN": args.gcloud},
             )
             return
-        image = (
-            f"{args.location}-docker.pkg.dev/{args.project}/{args.docker_repository}/"
-            + ("mirror-neuron-core" if kind == "core" else "membrane-context-engine")
-        )
+        image = docker_image(args, kind)
+        tags = docker_tags(args, component)
         run(
             args.gcloud,
             "auth",
@@ -648,11 +671,9 @@ def publish_component(args, workspace, component, directory):
             f"org.opencontainers.image.version={component['version']}",
             "--label",
             f"org.opencontainers.image.revision={git(workspace / component['repo'], 'rev-parse', 'HEAD')}",
-            "--tag",
-            image + ":" + component["version"],
-            "--tag",
-            image + ":" + component["version"][1:],
         ]
+        for tag in tags:
+            command += ["--tag", f"{image}:{tag}"]
         if kind == "membrane":
             command += ["--target", "runtime"]
         else:
@@ -665,14 +686,10 @@ def publish_component(args, workspace, component, directory):
                 "--build-arg",
                 "ERL_AFLAGS=+JMsingle true",
             ]
-        if args.update_latest:
-            command += ["--tag", image + ":latest"]
         command += [str(target)]
         run(*command)
         digest = json.loads(metadata.read_text())["containerimage.digest"]
-        for tag in [component["version"], component["version"][1:]] + (
-            ["latest"] if args.update_latest else []
-        ):
+        for tag in tags:
             manifest = json.loads(
                 run(
                     args.docker,
@@ -689,58 +706,358 @@ def publish_component(args, workspace, component, directory):
                 raise RuntimeError(f"GAR image verification failed: {image}:{tag}")
 
 
-def finish(workspace, planned):
+def deploy_changes(planned):
+    support = f"install_support/{planned['support']}"
+    return {
+        f"{support}/package-index/python-packages.toml": (None, planned["index"]),
+        f"{support}/docker-compose.yml": (None, planned["compose"]),
+        "package-index/python-packages.toml": (
+            planned["original_index"],
+            planned["index"],
+        ),
+        "package-index/component-sources.json": (
+            planned["original_manifest"],
+            json.dumps(planned["manifest"], indent=2) + "\n",
+        ),
+        "docker-compose.yml": (planned["original_compose"], planned["compose"]),
+        "install.sh": (planned["original_installer"], planned["installer"]),
+    }
+
+
+def write_file(path, content, *, mode=None):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".mn-release-", dir=path.parent) as staging:
+        staged = Path(staging) / path.name
+        staged.write_bytes(content)
+        if mode is not None:
+            staged.chmod(mode)
+        elif path.exists():
+            shutil.copymode(path, staged)
+        staged.replace(path)
+
+
+def write_json(path, value):
+    write_file(path, (json.dumps(value, indent=2) + "\n").encode())
+
+
+def finish(workspace, planned, previous_projects=None):
     deploy = workspace / "mn-deploy"
-    # Detect concurrent edits before installing any of the prepared metadata.
-    for filename, key in [
-        ("install.sh", "original_installer"),
-        ("docker-compose.yml", "original_compose"),
-        ("package-index/python-packages.toml", "original_index"),
-    ]:
-        if (deploy / filename).read_text() != planned[key]:
-            raise RuntimeError(
-                f"{filename} changed during publishing. Keep the artifacts and rerun the preview."
-            )
-    manifest = deploy / "package-index/component-sources.json"
-    if (manifest.read_text() if manifest.exists() else None) != planned[
-        "original_manifest"
-    ]:
-        raise RuntimeError(
-            "Component source records changed during publishing. Rerun the preview."
-        )
     support = deploy / "install_support" / planned["support"]
-    if support.exists():
+    if previous_projects is None and support.exists():
         raise RuntimeError(f"Immutable support snapshot already exists: {support}")
-    (support / "package-index").mkdir(parents=True)
-    (support / "package-index/python-packages.toml").write_text(planned["index"])
-    (support / "docker-compose.yml").write_text(planned["compose"])
-    for path, content in planned["metadata"].items():
-        (workspace / path).write_text(content)
-    (deploy / "package-index/python-packages.toml").write_text(planned["index"])
-    (deploy / "package-index/component-sources.json").write_text(
-        json.dumps(planned["manifest"], indent=2) + "\n"
+    changes = {
+        deploy / path: content for path, content in deploy_changes(planned).items()
+    }
+    for relative, content in planned["metadata"].items():
+        path = workspace / relative
+        previous = (
+            path.read_text()
+            if previous_projects is None
+            else previous_projects[relative]
+        )
+        changes[path] = (previous, content)
+    # A retry can encounter a mix of original and already finalized files.
+    # Check every input before replacing any file.
+    pending = {}
+    for path, (previous, content) in changes.items():
+        current = path.read_text() if path.exists() else None
+        if current != previous and (previous_projects is None or current != content):
+            raise RuntimeError(
+                f"{path.name} changed during publishing. Reconcile {path} and rerun."
+            )
+        if current != content:
+            pending[path] = content
+    for path, content in pending.items():
+        write_file(path, content.encode())
+
+
+def check_release_repo(repo, *clean_paths):
+    if not repo.is_dir() or git(repo, "rev-parse", "--show-toplevel") != str(
+        repo.resolve()
+    ):
+        raise RuntimeError(f"Expected a Git checkout at {repo}.")
+    if (
+        git(repo, "branch", "--show-current") != "main"
+        or "origin" not in git(repo, "remote").splitlines()
+    ):
+        raise RuntimeError(
+            f"Use the main branch with an origin remote in {repo} before applying."
+        )
+    if clean_paths and git(repo, "status", "--porcelain", "--", *clean_paths):
+        raise RuntimeError(
+            f"Commit or stash local changes to the release files in {repo} before applying."
+        )
+
+
+def commit_and_push(repo, paths, message):
+    # A path-limited commit keeps unrelated staged changes in the index.
+    if git(repo, "status", "--porcelain", "--", *paths):
+        staged = git(repo, "diff", "--cached", "--name-only", "--", *paths).splitlines()
+        if staged and git(repo, "diff", "--name-only", "--", *staged):
+            raise RuntimeError(
+                f"Reconcile staged and unstaged release changes in {repo}, then rerun."
+            )
+        git(repo, "add", "--", *paths)
+        run("git", "-C", repo, "commit", "-m", message, "--only", "--", *paths)
+    commit = git(repo, "rev-parse", "refs/heads/main")
+    if git(repo, "diff", "--name-only", commit, "--", *paths):
+        raise RuntimeError(
+            f"Release files in {repo} differ from main. Reconcile them and rerun."
+        )
+    print(f"==> Pushing {repo.name} to origin/main", flush=True)
+    run(
+        "git",
+        "-C",
+        repo,
+        "push",
+        "--no-follow-tags",
+        "origin",
+        f"{commit}:refs/heads/main",
+        env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
     )
-    (deploy / "docker-compose.yml").write_text(planned["compose"])
-    (deploy / "install.sh").write_text(planned["installer"])
+    return commit
+
+
+def file_hash(path):
+    return hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else None
+
+
+def website_scripts():
+    public = WEBSITE / "public"
+    if not public.is_dir() or public.is_symlink():
+        raise RuntimeError(f"Expected a public directory at {public}.")
+    paths = [f"public/{name}" for name in INSTALL_SCRIPTS]
+    if any((WEBSITE / path).is_symlink() for path in paths):
+        raise RuntimeError(f"Expected regular installer scripts in {public}.")
+    return paths
+
+
+def publish_scripts(deploy, commit, previous, support):
+    paths = website_scripts()
+    copies = []
+    for name, relative in zip(INSTALL_SCRIPTS, paths, strict=True):
+        target = WEBSITE / relative
+        current = file_hash(target)
+        entry = git(deploy, "ls-tree", commit, "--", name).partition(" ")[0]
+        if entry not in {"100644", "100755"}:
+            raise RuntimeError(
+                f"Expected a regular {name} in the pushed mn-deploy commit."
+            )
+        try:
+            data = subprocess.check_output(
+                ["git", "-C", str(deploy), "cat-file", "blob", f"{commit}:{name}"]
+            )
+        except subprocess.CalledProcessError as exc:
+            raise RuntimeError(
+                f"Cannot read {name} from the pushed mn-deploy commit."
+            ) from exc
+        digest = hashlib.sha256(data).hexdigest()
+        if current not in (previous[relative], digest):
+            raise RuntimeError(
+                f"{target} changed during publishing. Reconcile it and rerun."
+            )
+        mode = 0o755 if entry == "100755" else 0o644
+        if current != digest or stat.S_IMODE(target.stat().st_mode) != mode:
+            copies.append((target, data, mode))
+    for target, data, mode in copies:
+        write_file(target, data, mode=mode)
+    commit_and_push(WEBSITE, paths, f"Publish installer scripts for {support}")
+
+
+def registry_images(args, kind, gar):
+    image = docker_image(args, kind)
+    rows = gar.run_gcloud(
+        args.gcloud, "docker", "images", "list", image, "--include-tags"
+    )
+    return {
+        unquote(row["version"]): row["tags"] for row in rows if row["package"] == image
+    }
+
+
+def record_old_images(args, planned, directory):
+    # Record the old tag targets before any repair can move them. Keep this
+    # snapshot across retries, including failures after a buildx push.
+    snapshot = directory / "old-images.json"
+    if snapshot.exists():
+        return json.loads(snapshot.read_text())
+    gar = module("clean-gar.py")
+    images = {}
+    for component in planned["components"]:
+        kind = component["kind"]
+        if kind not in DOCKER_PACKAGES:
+            continue
+        if (directory / f"{kind}-image.json").exists():
+            print(
+                f"warning: No pre-repair digest recorded for {kind}; retaining its older images.",
+                flush=True,
+            )
+            continue
+        tags = set(docker_tags(args, component))
+        images[kind] = [
+            digest
+            for digest, aliases in registry_images(args, kind, gar).items()
+            if DIGEST.fullmatch(digest) and tags.intersection(aliases)
+        ]
+    write_json(snapshot, images)
+    return images
+
+
+def remove_old_versions(args, planned, old_images, directory):
+    from packaging.utils import canonicalize_name
+    from packaging.version import Version
+
+    gar = module("clean-gar.py")
+    root = f"projects/{args.project}/locations/{args.location}/repositories"
+    old = {
+        p["name"]: p["version"]
+        for p in tomllib.loads(planned["original_index"])["packages"]
+    }
+    packages = [
+        (
+            args.python_repository,
+            canonicalize_name(p["name"]),
+            str(Version(old[p["name"]])),
+            str(Version(p["version"])),
+        )
+        for p in planned["packages"]
+    ]
+    packages.extend(
+        (
+            args.npm_repository,
+            "mirrorneuron-web-ui",
+            c["previous"][1:],
+            c["version"][1:],
+        )
+        for c in planned["components"]
+        if c["kind"] == "web-ui"
+    )
+    deletions = []
+    for repo, name, previous, replacement in packages:
+        versions = f"{root}/{repo}/packages/{name}/versions/"
+        rows = gar.run_gcloud(
+            args.gcloud,
+            "versions",
+            "list",
+            f"--project={args.project}",
+            f"--location={args.location}",
+            f"--repository={repo}",
+            f"--package={name}",
+        )
+        available = {
+            unquote(gar.resource_name(row, versions)[len(versions) :]) for row in rows
+        }
+        if replacement not in available:
+            raise RuntimeError(
+                f"Replacement GAR version is missing: {name}@{replacement}."
+            )
+        if previous != replacement and previous in available:
+            deletions.append((versions + previous, True))
+    for component in planned["components"]:
+        kind = component["kind"]
+        if not old_images.get(kind):
+            continue
+        live = registry_images(args, kind, gar)
+        metadata = json.loads((directory / f"{kind}-image.json").read_text())
+        replacement = metadata["containerimage.digest"]
+        if not set(docker_tags(args, component)).issubset(live.get(replacement, [])):
+            raise RuntimeError(f"Replacement GAR tags changed for {kind}.")
+        versions = f"{root}/{args.docker_repository}/packages/{DOCKER_PACKAGES[kind]}/versions/"
+        for digest in old_images[kind]:
+            if DIGEST.fullmatch(digest) and digest != replacement and digest in live:
+                if live[digest]:
+                    print(
+                        f"==> Retaining {kind}@{digest} with tags {', '.join(live[digest])}",
+                        flush=True,
+                    )
+                else:
+                    deletions.append((versions + digest, False))
+    for version, delete_tags in deletions:
+        print(f"==> Deleting {version}", flush=True)
+        gar.delete_version(
+            args.gcloud,
+            gar.Deletion(version, ()),
+            args.project,
+            delete_tags=delete_tags,
+        )
+    print(f"✓ Removed {len(deletions)} superseded GAR version(s).", flush=True)
+
+
+def release_options(args):
+    return {
+        option: getattr(args, option)
+        for option in (
+            "project",
+            "location",
+            "python_repository",
+            "npm_repository",
+            "docker_repository",
+            "update_latest",
+            "publish_scripts",
+            "remove_old_versions",
+        )
+    }
+
+
+def complete_release(args, workspace, pending, state):
+    planned = state["plan"]
+    support = planned["support"]
+    deploy = workspace / "mn-deploy"
+    check_release_repo(deploy)
+    if args.publish_scripts:
+        check_release_repo(WEBSITE)
+        if (
+            git(deploy, "status", "--porcelain", "--", "uninstall.sh")
+            or file_hash(deploy / "uninstall.sh") != state["uninstaller"]
+        ):
+            raise RuntimeError(
+                "uninstall.sh changed during publishing. Reconcile it and rerun."
+            )
+    finish(workspace, planned, state["previous_projects"])
+    commit = commit_and_push(
+        deploy, list(deploy_changes(planned)), f"Update component support to {support}"
+    )
+    if args.publish_scripts:
+        publish_scripts(deploy, commit, state["website"], support)
+    if args.remove_old_versions:
+        remove_old_versions(
+            args, planned, state["old_images"], pending.parent / state["identity"]
+        )
+    pending.unlink()
+    print(f"✓ Published component updates and pushed support {support}.")
+    if planned["metadata"]:
+        print(
+            "Next: commit the updated pyproject.toml versions in the affected source repositories."
+        )
 
 
 def main():
     parser = argparse.ArgumentParser(
+        prog="update-changed-components.sh",
         description=__doc__,
         epilog=(
             "Default is a local preview; no builds, Git fetches, version edits or uploads. "
             "Requires Python 3.12+ with packaging (plus build/twine for --apply), clean committed "
             "component repositories, gcloud, npm/Node for Web UI, and Docker Buildx for images. "
-            "Apply leaves generated version metadata uncommitted for review."
+            "Apply commits generated mn-deploy support files and pushes origin/main."
         ),
     )
     parser.add_argument(
         "--apply",
         action="store_true",
-        help="Build, publish, verify, then update component pins/support.",
+        help="Build and verify GAR releases, then commit and push updated pins and support.",
     )
     parser.add_argument(
         "--plan", "--dry-run", action="store_true", help="Preview only (the default)."
+    )
+    parser.add_argument(
+        "--publish-scripts",
+        action="store_true",
+        help=f"With --apply, copy install.sh and uninstall.sh to {WEBSITE}/public, then commit and push them.",
+    )
+    parser.add_argument(
+        "--remove-old-versions",
+        action="store_true",
+        help="With --apply --publish-scripts, delete superseded GAR versions after both pushes.",
     )
     parser.add_argument(
         "--only",
@@ -778,7 +1095,47 @@ def main():
     args = parser.parse_args()
     if args.apply and args.plan:
         parser.error("--apply and --plan/--dry-run are mutually exclusive")
+    if (args.publish_scripts or args.remove_old_versions) and not args.apply:
+        parser.error(
+            "--publish-scripts and --remove-old-versions are apply-only options"
+        )
+    if args.remove_old_versions and not args.publish_scripts:
+        parser.error("--remove-old-versions requires --publish-scripts")
     workspace = args.workspace_root.resolve()
+    cache = workspace / "mn-deploy/dist/component-updates"
+    if not args.apply:
+        update(args, workspace, cache)
+        return
+    if not (workspace / "mn-deploy").is_dir():
+        raise RuntimeError(f"Cannot find mn-deploy in {workspace}.")
+    cache.mkdir(parents=True, exist_ok=True)
+    with (cache / ".apply.lock").open("a") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise RuntimeError(
+                "Another component apply is running in this checkout."
+            ) from exc
+        update(args, workspace, cache)
+
+
+def update(args, workspace, cache):
+    pending = cache / "pending-release.json"
+    if pending.exists():
+        state = json.loads(pending.read_text())
+        print(
+            f"==> Pending release finalization for {state['plan']['support']}",
+            flush=True,
+        )
+        if not args.apply:
+            print("Next: rerun the original --apply command to finish publishing.")
+            return
+        if state["options"] != release_options(args):
+            raise RuntimeError(
+                "Rerun with the original registry and publication options to finish the pending release."
+            )
+        complete_release(args, workspace, pending, state)
+        return
     planned = plan(workspace, set(args.only))
     print(
         f"Core stays {planned['core']}; installer stays {planned['runtime']}.",
@@ -822,7 +1179,22 @@ def main():
     if not args.apply:
         print("Next: rerun with --apply to publish this component set.")
         return
-    # Repository configuration/IAM and published package versions remain intact.
+    deploy = workspace / "mn-deploy"
+    deploy_paths = list(deploy_changes(planned))
+    if args.publish_scripts:
+        deploy_paths.append("uninstall.sh")
+    check_release_repo(deploy, *deploy_paths)
+    deploy_head = git(deploy, "rev-parse", "HEAD")
+    website = None
+    uninstaller = None
+    if args.publish_scripts:
+        paths = website_scripts()
+        check_release_repo(WEBSITE, *paths)
+        website = {path: file_hash(WEBSITE / path) for path in paths}
+        source = deploy / "uninstall.sh"
+        if not source.is_file() or source.is_symlink():
+            raise RuntimeError(f"Expected a regular uninstaller at {source}.")
+        uninstaller = file_hash(source)
     required = ["PYTHON"] if planned["packages"] else []
     if any(c["kind"] == "web-ui" for c in planned["components"]):
         required.append("NPM")
@@ -874,8 +1246,11 @@ def main():
             sort_keys=True,
         ).encode()
     ).hexdigest()[:20]
-    directory = workspace / "mn-deploy/dist/component-updates" / identity
+    directory = cache / identity
     directory.mkdir(parents=True, exist_ok=True)
+    old_images = (
+        record_old_images(args, planned, directory) if args.remove_old_versions else {}
+    )
     build_python(workspace, planned, directory)
     ensure_sources(workspace, planned)
     if native_app:
@@ -897,16 +1272,26 @@ def main():
         marker = directory / (component["kind"] + "-published.json")
         if not marker.exists():
             publish_component(args, workspace, component, directory)
-            marker.write_text(json.dumps(component) + "\n")
+            write_json(marker, component)
     ensure_sources(workspace, planned)
-    finish(workspace, planned)
-    print(
-        f"✓ Published component updates; Core {planned['core']} and installer {planned['runtime']} unchanged."
+    check_release_repo(deploy, *deploy_paths)
+    if git(deploy, "diff", "--name-only", deploy_head, "--", *deploy_paths):
+        raise RuntimeError(
+            "mn-deploy release files changed during publishing. Rerun the preview."
+        )
+    state = dict(
+        plan=planned,
+        identity=identity,
+        options=release_options(args),
+        previous_projects={
+            path: (workspace / path).read_text() for path in planned["metadata"]
+        },
+        website=website,
+        uninstaller=uninstaller,
+        old_images=old_images,
     )
-    print(
-        "Next: review, commit and push the generated metadata/support snapshot to distribute the updated installer. "
-        "Existing runtimes need reinstall/restart to use the fixes."
-    )
+    write_json(pending, state)
+    complete_release(args, workspace, pending, state)
 
 
 if __name__ == "__main__":

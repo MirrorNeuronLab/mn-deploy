@@ -332,19 +332,20 @@ Run its isolated Git regression test with:
 ```bash
 ./scripts/update-changed-components.sh --plan
 ./scripts/update-changed-components.sh --apply
-# Limit the update, if needed:
 ./scripts/update-changed-components.sh --apply --only python web-ui
+./scripts/update-changed-components.sh --apply --publish-scripts
+./scripts/update-changed-components.sh --apply --publish-scripts --remove-old-versions
 ```
 
 This helper keeps `MN_DEFAULT_CORE_VERSION` and `MN_DEFAULT_INSTALL_VERSION`
-unchanged (currently `v1.3.60`). Changed Python projects receive independent
+unchanged. Changed Python projects receive independent
 patch versions using the existing source fingerprints and dependency planner;
 the SDK and its components remain one version group. Changed Web UI source
 receives the next npm patch version. Unchanged packages retain their pins.
 Changed Core and Membrane images are rebuilt from committed HEAD and published
 under their existing numeric/`v` tags. Docker `latest` is updated only with
 `--update-latest`; Docker repositories with immutable tags reject repairs.
-Existing Python/npm versions are never deleted or overwritten.
+Published Python and npm versions are immutable.
 
 The default preview uses local Git history and writes no release metadata.
 It reports uncommitted work; commit or stash it before `--apply`. Fetch tags
@@ -366,13 +367,23 @@ Use `--help` for registry, platform and component selection options.
 
 After successful publication, the helper updates component defaults, the current
 Python inventory, static Python project versions and the current Compose
-template. It creates a **new** immutable support snapshot and advances only
+template. It creates a new immutable support snapshot and advances
 `MN_DEFAULT_INSTALL_SUPPORT_VERSION` and
-`MN_DEFAULT_AGENT_PACKAGE_INDEX_VERSION` to that snapshot. The runtime/Core
-release remains unchanged, and old snapshots and Git tags are preserved.
-Review, commit and push these generated source/installer changes so URL installs
-can fetch them. The helper does not commit, push, install or restart a runtime;
-existing installations must reinstall/restart to use the fixes.
+`MN_DEFAULT_AGENT_PACKAGE_INDEX_VERSION` to that snapshot. Apply commits the
+generated `mn-deploy` files and pushes `origin/main`. Commit the generated static
+Python version changes in their source repositories separately.
+
+`--publish-scripts` then copies `install.sh` and `uninstall.sh` to
+`/Users/homer/Projects/mn-website/public` and commits and pushes them to
+`origin/main`. Both publishing checkouts must be on `main` with an `origin`
+remote and clean release files before the apply starts.
+
+`--remove-old-versions` requires `--publish-scripts`. After all selected GAR
+publications and both Git pushes succeed, it deletes the previous Python and
+npm pins replaced by this run and the displaced Docker digests that have no
+remaining tags. Historical installs pinned to a deleted version can fail.
+If a commit, push, or deletion fails, resolve it and rerun the same command to
+resume using the pending release under `dist/component-updates/`.
 
 GAR npm cannot republish an existing name/version, even after deletion;
 see [Google's npm package contract](https://docs.cloud.google.com/artifact-registry/docs/nodejs/manage-packages).

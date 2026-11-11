@@ -180,12 +180,19 @@ Its default local preview is read-only. Apply advances changed Python/npm
 versions, keeps Core and the aggregate installer version fixed, and repairs
 changed Docker images under their current tags in a mutable-tag repository.
 It validates compatible Python pins and built wheels, verifies GAR publication,
-then writes reviewed component metadata and a new immutable support snapshot.
+then writes component metadata and a new immutable support snapshot. It commits
+the generated `mn-deploy` files and pushes `origin/main`.
 Support and package-index defaults advance independently of the installer/Core
 version; URL downloads honor those respective pins. Historical explicit
 installer versions continue selecting their historical support and inventory.
-No package deletion, Git tag replacement, commit/push or installed-runtime
-mutation is part of this helper. Source repositories must be clean for apply.
+`--publish-scripts` copies the finalized installer and uninstaller to
+`/Users/homer/Projects/mn-website/public` and commits and pushes them to
+`origin/main`. `--remove-old-versions` requires that flag. Cleanup starts after
+all selected releases are verified and both pushes succeed. Its scope is the
+previous Python and npm pins replaced by the apply and the recorded Docker
+digests whose tags moved and that have no remaining tags. Pending finalization
+can resume after a Git or GAR failure. Source repositories and the paths
+being published must be clean when starting apply.
 Python retry caches reuse complete, checksum-validated package builds across
 release plans only for matching package versions, source fingerprints and build
 formats. Existing uploads require exact GAR hashes; a rebuilt retry can restore
@@ -474,9 +481,11 @@ packages preserve hardware acceleration without requiring end-user compilers.
 The Compose Web UI proxy consumes the API's `mn.web_ui.transport.v1` owner route
 for HTTP assets, streams and WebSockets. It forwards the current execution and
 one relay hop using server-side API credentials, and strips those credentials
-from direct worker requests. Private Docker addresses are resolved on their
-hosting computer. Client disconnects dispose upstream connections; handshake
-deadlines do not become idle timeouts on established WebSockets. Keep this
+from direct worker requests. Same-origin API calls use the installed surface
+credential when the request has no Authorization header. Browser-facing job
+pages receive their local proxy path for companion connections. Private Docker
+addresses are resolved on their hosting computer. Client disconnects close
+upstream connections. Established WebSockets stay open after the handshake. Keep this
 contract aligned with the Python Web UI server.
 
 ## Native computer-use app releases

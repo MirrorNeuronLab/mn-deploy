@@ -35,12 +35,20 @@ def commit(repo):
     git(repo, "commit", "-qm", "fixture")
 
 
+def add_remote(repo):
+    remote = repo.parent / f"{repo.name}.git"
+    git(repo, "init", "--bare", "--initial-branch=main", "-q", str(remote))
+    git(repo, "remote", "add", "origin", str(remote))
+    git(repo, "push", "-q", "origin", "main")
+    return remote
+
+
 @pytest.fixture
 def workspace(tmp_path):
     for name in ("mn-api", "mn-web-ui", "MirrorNeuron", "Membrane", "mn-deploy"):
         repo = tmp_path / name
         repo.mkdir()
-        git(repo, "init", "-q")
+        git(repo, "init", "--initial-branch=main", "-q")
         git(repo, "config", "user.email", "test@example.invalid")
         git(repo, "config", "user.name", "Test")
         (repo / "source.txt").write_text("original\n")
@@ -72,6 +80,8 @@ def workspace(tmp_path):
         for name in ("PYTHON_SDK", "CLI", "API")
     )
     (deploy / "install.sh").write_text(source)
+    (deploy / "uninstall.sh").write_text("#!/bin/bash\n# Updated uninstaller\n")
+    (deploy / "uninstall.sh").chmod(0o755)
     (deploy / "docker-compose.yml").write_text(
         "MN_WEB_UI_PACKAGE_VERSION: ${MN_WEB_UI_PACKAGE_VERSION:-1.3.60}\n"
     )
@@ -595,6 +605,7 @@ def test_failed_upload_keeps_installer_and_source_versions_unmodified(
     workspace, monkeypatch
 ):
     change(workspace, "mn-api")
+    add_remote(workspace / "mn-deploy")
     installer = workspace / "mn-deploy/install.sh"
     before = installer.read_bytes()
     original_run = repair.run
@@ -634,6 +645,185 @@ def test_failed_upload_keeps_installer_and_source_versions_unmodified(
         == "1.0.0"
     )
     assert not (workspace / "mn-deploy/install_support/v1.3.61").exists()
+
+
+@pytest.mark.parametrize(
+    "publish,cleanup,failure",
+    [
+        (False, False, None),
+        (True, False, None),
+        (True, True, "mn-deploy"),
+        (True, True, "mn-website"),
+        (True, True, "delete"),
+    ],
+)
+def test_apply_pushes_only_release_files_and_resumes_before_cleanup(
+    workspace, monkeypatch, publish, cleanup, failure
+):
+    change(workspace, "mn-api", "mn-web-ui", "MirrorNeuron")
+    deploy = workspace / "mn-deploy"
+    website = workspace / "mn-website"
+    (website / "public").mkdir(parents=True)
+    git(website, "init", "--initial-branch=main", "-q")
+    git(website, "config", "user.email", "test@example.invalid")
+    git(website, "config", "user.name", "Test")
+    for name in repair.INSTALL_SCRIPTS:
+        (website / "public" / name).write_text("previous\n")
+    commit(website)
+    deploy_remote = add_remote(deploy)
+    website_remote = add_remote(website)
+    for repo in (deploy, website):
+        (repo / "unrelated.txt").write_text("staged\n")
+        git(repo, "add", "unrelated.txt")
+    monkeypatch.setattr(repair, "WEBSITE", website)
+
+    events = []
+    root = "projects/project/locations/region/repositories"
+    old_digest, shared_digest, new_digest = ["sha256:" + char * 64 for char in "abc"]
+    images = {
+        old_digest: ["v1.3.60"],
+        shared_digest: ["1.3.60", "latest"],
+    }
+    package_versions = {
+        "mirrorneuron-api": {"0.9.0", "1.0.0", "1.0.1"},
+        "mirrorneuron-web-ui": {"1.3.59", "1.3.60", "1.3.61"},
+    }
+    subprocess_run = subprocess.run
+    fail_once = failure
+
+    def fake_run(command, **kwargs):
+        nonlocal fail_once
+        if command[0] == "git" and command[3] == "push":
+            repo = Path(command[2]).name
+            if fail_once == repo:
+                fail_once = None
+                return subprocess.CompletedProcess(command, 1, "", "")
+            result = subprocess_run(command, **kwargs)
+            if result.returncode == 0:
+                events.append(repo)
+            return result
+        if command[0] not in {"fake-gcloud", "fake-docker"}:
+            return subprocess_run(command, **kwargs)
+        output = ""
+        action = tuple(command[1:4])
+        if action == ("artifacts", "repositories", "describe"):
+            output = json.dumps({"format": command[4].upper()})
+        elif action == ("artifacts", "docker", "images"):
+            assert (
+                command[5] == "region-docker.pkg.dev/project/docker/mirror-neuron-core"
+            )
+            output = json.dumps(
+                [
+                    {"package": command[5], "version": digest, "tags": tags}
+                    for digest, tags in images.items()
+                ]
+            )
+        elif action == ("artifacts", "versions", "list"):
+            flags = dict(arg.split("=", 1) for arg in command[4:])
+            name = flags["--package"]
+            prefix = f"{root}/{flags['--repository']}/packages/{name}/versions/"
+            output = json.dumps(
+                [
+                    {"name": prefix + version}
+                    for version in sorted(package_versions[name])
+                ]
+            )
+        elif action == ("artifacts", "versions", "delete"):
+            assert events[-2:] == ["mn-deploy", "mn-website"] or events[-1] == "delete"
+            name, version = command[4].split("/packages/")[1].split("/versions/")
+            assert "--quiet" in command
+            assert ("--delete-tags" in command) == (name != "mirror-neuron-core")
+            if fail_once == "delete" and name == "mirrorneuron-web-ui":
+                fail_once = None
+                return subprocess.CompletedProcess(command, 1, "", "error")
+            if name == "mirror-neuron-core":
+                assert not images.pop(version)
+            else:
+                package_versions[name].remove(version)
+            events.append("delete")
+        return subprocess.CompletedProcess(command, 0, output, "")
+
+    def fake_component(args, workspace, component, directory):
+        kind = component["kind"]
+        events.append(kind)
+        if kind == "core":
+            images.update(
+                {
+                    old_digest: [],
+                    shared_digest: ["latest"],
+                    new_digest: ["v1.3.60", "1.3.60"],
+                }
+            )
+            (directory / "core-image.json").write_text(
+                json.dumps({"containerimage.digest": new_digest})
+            )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(repair, "build_python", lambda *args: None)
+    monkeypatch.setattr(repair, "publish_python", lambda *args: events.append("python"))
+    monkeypatch.setattr(repair, "publish_component", fake_component)
+    argv = [
+        "update-changed-components.py",
+        "--apply",
+        "--workspace-root",
+        str(workspace),
+        "--project",
+        "project",
+        "--location",
+        "region",
+        "--python-repository",
+        "python",
+        "--npm-repository",
+        "npm",
+        "--docker-repository",
+        "docker",
+        "--gcloud",
+        "fake-gcloud",
+        "--docker",
+        "fake-docker",
+    ]
+    if publish:
+        argv.append("--publish-scripts")
+    if cleanup:
+        argv.append("--remove-old-versions")
+    monkeypatch.setattr(sys, "argv", argv)
+
+    pending = deploy / "dist/component-updates/pending-release.json"
+    if failure:
+        with pytest.raises(RuntimeError, match="failed"):
+            repair.main()
+        assert pending.exists()
+        assert events.count("delete") == int(failure == "delete")
+    repair.main()
+
+    assert events[:3] == ["python", "web-ui", "core"]
+    assert events.count("python") == events.count("core") == 1
+    assert events.count("delete") == (3 if cleanup else 0)
+    assert not pending.exists()
+    assert git(deploy, "rev-parse", "HEAD") == git(deploy_remote, "rev-parse", "main")
+    assert (
+        "install_support/v1.3.61/package-index/python-packages.toml"
+        in git(deploy_remote, "ls-tree", "-r", "--name-only", "main").splitlines()
+    )
+    for repo in (deploy, website):
+        assert git(repo, "diff", "--cached", "--name-only") == "unrelated.txt"
+    for name in repair.INSTALL_SCRIPTS:
+        script = website / "public" / name
+        assert script.read_bytes() == (
+            (deploy / name).read_bytes() if publish else b"previous\n"
+        )
+        if publish:
+            assert (
+                git(website_remote, "show", f"main:public/{name}")
+                == (deploy / name).read_text().strip()
+            )
+    assert bool(events.count("mn-website")) == publish
+    assert (old_digest not in images) == cleanup
+    assert set(images) >= {shared_digest, new_digest}
+    assert package_versions["mirrorneuron-api"] >= {"0.9.0", "1.0.1"}
+    assert package_versions["mirrorneuron-web-ui"] >= {"1.3.59", "1.3.61"}
+    assert ("1.0.0" not in package_versions["mirrorneuron-api"]) == cleanup
+    assert ("1.3.60" not in package_versions["mirrorneuron-web-ui"]) == cleanup
 
 
 def function(name):
