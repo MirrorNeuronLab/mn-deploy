@@ -19,15 +19,15 @@ exec 3>&1
 
 # MirrorNeuron releases by installation source.
 # Core is a GAR Docker image.
-MN_DEFAULT_CORE_VERSION="${MN_DEFAULT_CORE_VERSION:-v1.4.0}"
+MN_DEFAULT_CORE_VERSION="${MN_DEFAULT_CORE_VERSION:-v1.4.1}"
 # SDK, CLI, and API are pip packages.
-MN_DEFAULT_PYTHON_SDK_VERSION="${MN_DEFAULT_PYTHON_SDK_VERSION:-v1.4.7}"
-MN_DEFAULT_CLI_VERSION="${MN_DEFAULT_CLI_VERSION:-v1.3.69}"
-MN_DEFAULT_API_VERSION="${MN_DEFAULT_API_VERSION:-v1.3.69}"
+MN_DEFAULT_PYTHON_SDK_VERSION="${MN_DEFAULT_PYTHON_SDK_VERSION:-v1.4.8}"
+MN_DEFAULT_CLI_VERSION="${MN_DEFAULT_CLI_VERSION:-v1.4.8}"
+MN_DEFAULT_API_VERSION="${MN_DEFAULT_API_VERSION:-v1.4.8}"
 # Web UI is a GAR npm package (the installer strips the leading `v`).
 MN_DEFAULT_WEB_UI_VERSION="${MN_DEFAULT_WEB_UI_VERSION:-v1.4.1}"
 # Additional pip packages are selected from the versioned package index.
-MN_DEFAULT_AGENT_PACKAGE_INDEX_VERSION="${MN_DEFAULT_AGENT_PACKAGE_INDEX_VERSION:-v1.4.14}"
+MN_DEFAULT_AGENT_PACKAGE_INDEX_VERSION="${MN_DEFAULT_AGENT_PACKAGE_INDEX_VERSION:-v1.4.15}"
 # Membrane v2 context engine is a GAR Docker image.
 MN_DEFAULT_MEMBRANE_CONTEXT_ENGINE_VERSION="${MN_DEFAULT_MEMBRANE_CONTEXT_ENGINE_VERSION:-v1.4.0}"
 
@@ -84,6 +84,8 @@ MN_INSTALL_RESET="N"
 MN_INSTALL_DETECT_ONLY="N"
 MN_INSTALL_START_DOCKER="N"
 MN_NO_RUNTIME="N"
+MN_RUNTIME_ONLY="N"
+MN_INSTALL_ROLE="full"
 MN_BUILD_MEMBRANE="N"
 MN_BUILD_MEMBRANE_DIR=""
 MN_MEMBRANE_BUILD_PREPARED="N"
@@ -241,12 +243,13 @@ Install a local runtime, or a lightweight client for a remote node.
 Runs without prompts by default. Use --interactive to choose components.
 
 Common options:
-  --no-runtime       Client mode: CLI and API only; no Docker or local services.
-                     Binary only. Home: ~/.mn-client (override with MN_HOME).
+  --no-runtime       Client mode: CLI/API only. Home: ~/.mn-client.
+  --runtime-only     Runtime mode: execution services only. Home: ~/.mn-runtime.
+                     Binary only. Override either home with MN_HOME.
   --mode MODE        binary (default), github, or local source.
   --interactive      Choose components and startup interactively.
   --yes, -y          Use defaults and flags without prompts (the default).
-  --no-start         Leave runtime startup manual; selected services may start.
+  --no-start         Prepare selected services without starting them.
   --no-web-ui        Skip the Web UI.
   --version TAG      Select a release (binary or GitHub mode).
   --reset            Permanently clear existing data; always requires typing YES.
@@ -271,6 +274,7 @@ MirrorNeuron installer: full option reference
 Common controls (available before mode-specific setup):
   --mode MODE          binary (released packages, default), github, or local.
   --no-runtime         Client mode: install CLI/API for remote execution only.
+  --runtime-only       Runtime mode: execution services without CLI/API or Web UI.
                        Default home: ~/.mn-client. Ignored in source modes.
   --start-docker       Start existing Docker only; install nothing.
   --detect-only        Print installation status as JSON; make no changes.
@@ -448,7 +452,7 @@ function mn_detect_runtime_is_ready() {
   local report=""
 
   [ -x "$cli" ] || return 1
-  if report="$(MN_CLI_OUTPUT=plain MN_DISABLE_UPDATE_CHECK=1 "$cli" runtime status --json 2>/dev/null)"; then
+  if report="$(MN_DISABLE_UPDATE_CHECK=1 "$cli" status --json 2>/dev/null)"; then
     return 0
   fi
   if printf '%s' "$report" | grep -q 'MN_NODE_IDENTITY_INVALID'; then
@@ -460,6 +464,8 @@ function mn_detect_runtime_is_ready() {
 function mn_detect_runtime() {
   local install_dir="${MN_HOME:-${HOME}/.mn}"
   local metadata_file="${install_dir}/install_metadata.json"
+  local detected_role="$MN_INSTALL_ROLE"
+  if [ -f "$metadata_file" ] && grep -Eq '"install_role"[[:space:]]*:[[:space:]]*"runtime"' "$metadata_file"; then detected_role="runtime"; fi
   if [ "$MN_NO_RUNTIME" = "Y" ] || mn_is_client_home "$install_dir"; then
     local client_installed=false client_version=null
     if mn_is_client_home "$install_dir" && [ -x "$install_dir/bin/mn" ] && [ -x "$install_dir/bin/mn-api" ]; then
@@ -499,10 +505,10 @@ function mn_detect_runtime() {
     installed="true"
   fi
 
-  if [ -x "${install_dir}/bin/mn" ]; then
-    cli="${install_dir}/bin/mn"
-  elif [ -x "${install_dir}/venv/bin/mn" ]; then
-    cli="${install_dir}/venv/bin/mn"
+  if [ -x "${install_dir}/bin/mn-runtime" ]; then
+    cli="${install_dir}/bin/mn-runtime"
+  elif [ -x "${install_dir}/venv/bin/mn-runtime" ]; then
+    cli="${install_dir}/venv/bin/mn-runtime"
   fi
 
   if [ "$installed" = "true" ] && [ -n "$cli" ] && mn_detect_runtime_is_ready "$cli"; then
@@ -533,11 +539,11 @@ function mn_detect_runtime() {
   fi
 
   if [ -n "$version" ]; then
-    printf '{"installed":%s,"running":%s,"runtime_ready":%s,"status":"%s","version":"%s","docker_installed":%s,"docker_running":%s}\n' \
-      "$installed" "$running" "$runtime_ready" "$status" "$version" "$docker_installed" "$docker_running"
+    printf '{"installed":%s,"install_role":"%s","running":%s,"runtime_ready":%s,"status":"%s","version":"%s","docker_installed":%s,"docker_running":%s}\n' \
+      "$installed" "$detected_role" "$running" "$runtime_ready" "$status" "$version" "$docker_installed" "$docker_running"
   else
-    printf '{"installed":%s,"running":%s,"runtime_ready":%s,"status":"%s","version":null,"docker_installed":%s,"docker_running":%s}\n' \
-      "$installed" "$running" "$runtime_ready" "$status" "$docker_installed" "$docker_running"
+    printf '{"installed":%s,"install_role":"%s","running":%s,"runtime_ready":%s,"status":"%s","version":null,"docker_installed":%s,"docker_running":%s}\n' \
+      "$installed" "$detected_role" "$running" "$runtime_ready" "$status" "$docker_installed" "$docker_running"
   fi
 }
 
@@ -1080,7 +1086,7 @@ function mn_write_shell_environment() {
     fi
   done
   if [ "$updated" = "Y" ]; then
-    print_step "Shell startup configured. New terminals can use mn directly."
+    print_step "Shell startup configured. New terminals can use the installed commands."
   fi
   if [ "$MN_INSTALL_VERBOSE" = "Y" ]; then
     printf '    For this terminal: %s %s\n' "$MN_SHELL_PROFILE_SOURCE_COMMAND" "$(mn_shell_quote "$MN_SHELL_PROFILE_PATH" "$syntax")" >&3
@@ -1099,7 +1105,7 @@ function mn_print_next_shell_command() {
 
 # Presentation only: report the resolved selections after interactive prompts.
 function mn_print_install_summary() {
-  local components="Core" services="" mode="Runtime" source_label display_home="$INSTALL_DIR"
+  local components="Core, Runtime" services="" mode="Full" source_label display_home="$INSTALL_DIR"
   case "$MN_INSTALL_MODE" in
   binary) source_label="released packages" ;;
   github) source_label="GitHub source" ;;
@@ -1129,6 +1135,8 @@ function mn_print_install_summary() {
     mode="Client"
     components="CLI, API"
     services=""
+  elif [ "$MN_RUNTIME_ONLY" = "Y" ]; then
+    mode="Runtime"
   fi
   printf '  %sMode%s     %s (%s)\n' "$DIM" "$RESET" "$mode" "$source_label" >&3
   printf '  %sHome%s     %s\n' "$DIM" "$RESET" "$display_home" >&3
@@ -1142,7 +1150,7 @@ function mn_print_install_summary() {
     MN_INSTALL_STAGES=4
     printf '  %sStartup%s  Automatic\n' "$DIM" "$RESET" >&3
   else
-    printf '  %sStartup%s  Manual (selected Docker services may still start)\n' "$DIM" "$RESET" >&3
+    printf '  %sStartup%s  Manual; no services started\n' "$DIM" "$RESET" >&3
   fi
   printf '\n' >&3
 }
@@ -1160,10 +1168,10 @@ function mn_print_install_complete() {
     printf '  Blueprints run on your remote node.\n' >&3
     printf '  Optional local API: mn-api (foreground)\n' >&3
     print_detail "Local API bearer credential: ${INSTALL_DIR}/api.token"
-    if [ -f "$INSTALL_DIR/client.json" ]; then
+    if [ -f "$INSTALL_DIR/client.json" ] && ! grep -q '"api_url"' "$INSTALL_DIR/client.json"; then
       mn_print_next_shell_command "mn node list"
     else
-      mn_print_next_shell_command 'mn node add <REMOTE_API_URL> --token <REMOTE_API_TOKEN>'
+      mn_print_next_shell_command 'mn node add <HOST> --token <RUNTIME_NODE_TOKEN>'
     fi
   else
     if [ "$START_NOW" = "Y" ]; then
@@ -1179,6 +1187,13 @@ function mn_print_install_complete() {
         mn_print_next_shell_command "mn node list"
       else
         mn_print_next_shell_command "mn runtime start"
+      fi
+    elif [ "$MN_INSTALL_ROLE" = "runtime" ]; then
+      print_detail "Runtime credential: ${INSTALL_DIR}/runtime.token"
+      if [ "$START_NOW" = "Y" ]; then
+        printf '  Connect from a surface: mn node add <HOST> --token <RUNTIME_NODE_TOKEN>\n' >&3
+      else
+        mn_print_next_shell_command "mn-runtime start"
       fi
     fi
   fi
@@ -1233,9 +1248,8 @@ function mn_run_runtime_start_command() {
   if MN_DISABLE_UPDATE_CHECK=1 MN_CLI_OUTPUT=plain "$@" </dev/null >"$log_file" 2>&1; then
     grep -E '(^|[[:space:]])(! Warning:|warning:|× Error:|error:)' "$log_file" >&3 2>/dev/null || true
     awk '
-            /^Runtime node ready (successful|confirmed)[.]$/ { showing = 1 }
-            showing { print }
-            showing && /^Next: mn node add / { showing = 0 }
+            /^Runtime endpoint:/ { showing = 3 }
+            showing > 0 { print; showing-- }
         ' "$log_file" >&3
     rm -f "$log_file"
     return 0
@@ -1245,6 +1259,20 @@ function mn_run_runtime_start_command() {
 
   MN_RUNTIME_START_LOG="$log_file"
   return "$status"
+}
+
+function mn_configure_installed_runtime() {
+  run_quiet "runtime-installation" "$VENV_DIR/bin/python" -m mn_runtime.lifecycle prepare --role "$MN_INSTALL_ROLE"
+  "$VENV_DIR/bin/python" - "$INSTALL_DIR" <<'PY_LAUNCHER'
+from pathlib import Path
+import shlex, sys
+home = Path(sys.argv[1]).resolve()
+(home / "bin").mkdir(exist_ok=True)
+command = "#!/usr/bin/env bash\nset -euo pipefail\nexport MN_HOME=" + shlex.quote(str(home)) + "\nexec " + shlex.quote(str(home / "venv/bin/python")) + ' -m mn_runtime.lifecycle "$@"\n'
+for target in (home / "bin/mn-runtime", home / "server.sh"):
+    target.write_text(command)
+    target.chmod(0o700)
+PY_LAUNCHER
 }
 
 function mn_is_client_home() {
@@ -1304,6 +1332,9 @@ while [ "$#" -gt 0 ]; do
   --no-runtime)
     MN_NO_RUNTIME="Y"
     ;;
+  --runtime-only)
+    MN_RUNTIME_ONLY="Y"
+    ;;
   *)
     MN_INSTALL_ARGS+=("$1")
     ;;
@@ -1311,20 +1342,30 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
-if [ "$MN_NO_RUNTIME" = "Y" ]; then
-  case "$MN_INSTALL_MODE" in
-  binary) export MN_HOME="${MN_HOME:-${HOME}/.mn-client}" ;;
-  github | local)
-    printf 'warning: --no-runtime is ignored in %s source mode; the development runtime is installed.\n' "$MN_INSTALL_MODE" >&3
-    MN_NO_RUNTIME="N"
-    ;;
-  esac
+if [ "$MN_NO_RUNTIME" = "Y" ] && [ "$MN_RUNTIME_ONLY" = "Y" ]; then
+  printf 'error: --no-runtime and --runtime-only cannot be combined.\n' >&3
+  exit 1
 fi
+if [ "$MN_INSTALL_MODE" != binary ]; then
+  if [ "$MN_NO_RUNTIME" = "Y" ] || [ "$MN_RUNTIME_ONLY" = "Y" ]; then
+    if [ "$MN_NO_RUNTIME" = "Y" ]; then role_flag="--no-runtime"; else role_flag="--runtime-only"; fi
+    printf 'notice: %s is ignored in %s source mode; both the surface and runtime are installed.\n' "$role_flag" "$MN_INSTALL_MODE" >&3
+    MN_NO_RUNTIME="N"
+    MN_RUNTIME_ONLY="N"
+  fi
+elif [ "$MN_NO_RUNTIME" = "Y" ]; then
+  MN_INSTALL_ROLE="client"
+  export MN_HOME="${MN_HOME:-${HOME}/.mn-client}"
+elif [ "$MN_RUNTIME_ONLY" = "Y" ]; then
+  MN_INSTALL_ROLE="runtime"
+  export MN_HOME="${MN_HOME:-${HOME}/.mn-runtime}"
+fi
+export MN_INSTALL_ROLE
 
 if [ "$MN_INSTALL_START_DOCKER" = "Y" ]; then
   if [ "$MN_INSTALL_MODE_EXPLICIT" = "Y" ] || [ -n "$MN_INSTALL_VERSION" ] ||
     [ "$MN_INSTALL_DETECT_ONLY" = "Y" ] || [ "$MN_INSTALL_RESET" = "Y" ] ||
-    [ "$MN_BUILD_MEMBRANE" = "Y" ] || [ "$MN_NO_RUNTIME" = "Y" ] || [ "${#MN_INSTALL_ARGS[@]}" -ne 0 ]; then
+    [ "$MN_BUILD_MEMBRANE" = "Y" ] || [ "$MN_NO_RUNTIME" = "Y" ] || [ "$MN_RUNTIME_ONLY" = "Y" ] || [ "${#MN_INSTALL_ARGS[@]}" -ne 0 ]; then
     printf 'error: --start-docker cannot be combined with detection or installation options.\n' >&3
     exit 1
   fi
@@ -1395,9 +1436,18 @@ fi
 export MN_INSTALL_VERSION
 export MN_HOME="${MN_HOME:-${HOME}/.mn}"
 
-if [ "$MN_INSTALL_HELP_REQUESTED" != "Y" ] && [ "$MN_NO_RUNTIME" != "Y" ] && mn_is_client_home "$MN_HOME"; then
-  printf 'error: MN_HOME contains a client installation. Use --no-runtime to update it, or choose another MN_HOME for a runtime.\n' >&3
-  exit 1
+if [ "$MN_INSTALL_HELP_REQUESTED" != "Y" ]; then
+  MN_EXISTING_ROLE=""
+  if [ -f "$MN_HOME/install_metadata.json" ]; then
+    MN_EXISTING_ROLE="$(sed -n 's/.*"install_role"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$MN_HOME/install_metadata.json" | head -n 1)"
+    MN_EXISTING_ROLE="${MN_EXISTING_ROLE:-full}"
+  elif [ -e "$MN_HOME/docker-compose.yml" ] || [ -e "$MN_HOME/docker-compose.env" ]; then
+    MN_EXISTING_ROLE="full"
+  fi
+  if [ -n "$MN_EXISTING_ROLE" ] && [ "$MN_EXISTING_ROLE" != "$MN_INSTALL_ROLE" ]; then
+    printf 'error: MN_HOME contains a %s installation. Use its existing role flag to reinstall. Choose an empty directory for MN_HOME to install %s mode.\n' "$MN_EXISTING_ROLE" "$MN_INSTALL_ROLE" >&3
+    exit 1
+  fi
 fi
 
 # Preserve the last configured identity before any mode rewrites Compose env.
@@ -1896,6 +1946,9 @@ for pattern in ("pids/*.pid", "runs/*/event_relay.json", "runs/*/pre_launch_proc
             continue
 
 modules = ("mn_sdk.blueprint_support.event_relay", "mn_sdk_rag.shared_service",
+           "mn_runtime.host.watchdog", "mn_runtime.host.model_sync_monitor",
+           "mn_runtime.host.storage_sync_monitor", "mn_runtime.native_service",
+           # Same-home cleanup must also recognize pre-split installed services.
            "mn_cli.runtime.watchdog", "mn_cli.runtime.model_sync_monitor",
            "mn_cli.runtime.storage_sync_monitor", "mn_sdk.native_runtime_service")
 executables = ("mn-api", "mn-native-sdk-grpc", "mn-web-ui-server", "model-runner", "llama-server")
@@ -2447,7 +2500,7 @@ PY
     if [ -e "$VENV_DIR" ]; then mv "$VENV_DIR" "$client_backup"; fi
     install_python_packages
     # Fail an incompatible old package selection before replacing command links.
-    run_quiet "client-package-check" "$VENV_DIR/bin/python" -c 'from mn_sdk.client_install import is_client_install; from mn_sdk.remote_api import RemoteApiClient; from mn_cli.client_commands import bind_client_commands; from mn_cli.main import app; from mn_api.client_app import create_client_app; assert is_client_install(); create_client_app()'
+    run_quiet "client-package-check" "$VENV_DIR/bin/python" -c 'from mn_sdk.runtime_connection import installation_role; from mn_sdk.runtime_control import RuntimeControlClient; from mn_cli.main import app; from mn_api.app import create_app; assert installation_role() == "client"; create_app()'
     client_success="Y"
     rm -rf "$client_backup"
   )
@@ -3122,10 +3175,6 @@ EOF
   }
 
   function validate_selections() {
-    if [ "$START_NOW" = "Y" ] && [ "$INSTALL_CLI" != "Y" ]; then
-      print_warning "Automatic start requires the CLI package; disabling start."
-      START_NOW="N"
-    fi
     if [ "$INSTALL_WEB_UI" = "Y" ] && [ "$INSTALL_API" != "Y" ]; then
       print_warning "Installing Web UI without the API package. The UI will need an API service from another install."
     fi
@@ -4134,6 +4183,7 @@ EOF
       if [ "$INSTALL_CLI" = "Y" ]; then
         run_quiet "install-mn-cli-github" "$VENV_DIR/bin/pip" install "git+https://github.com/MirrorNeuronLab/mn-cli.git$(github_ref_suffix)"
       fi
+      run_quiet "install-mn-runtime-github" "$VENV_DIR/bin/pip" install "mirrorneuron-runtime @ git+https://github.com/MirrorNeuronLab/mn-python-sdk.git$(github_ref_suffix)#subdirectory=packages/runtime"
       if [ "$INSTALL_API" = "Y" ]; then
         run_quiet "install-mn-api-github" "$VENV_DIR/bin/pip" install "git+https://github.com/MirrorNeuronLab/mn-api.git$(github_ref_suffix)"
       fi
@@ -4182,15 +4232,17 @@ EOF
     spinner $! "Preparing Web UI source"
   fi
 
+  mn_configure_installed_runtime
   mn_print_stage "Configuring commands and services"
   if [ "$INSTALL_REDIS" = "Y" ] || [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] || [ "$INSTALL_OPENSHELL" = "Y" ] || [ "$INSTALL_WEB_UI" = "Y" ]; then
     if [ "$START_NOW" = "Y" ]; then
       prepare_runtime_compose_sidecars
-      print_detail "Docker services are prepared; automatic startup is deferred to mn runtime start."
+      print_detail "Docker services are prepared; automatic startup uses the installed runtime lifecycle entry point."
     else
-      print_step "Starting selected Docker runtime services"
-      (start_runtime_compose_sidecars) &
-      spinner $! "Selected Docker runtime services are available"
+      if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
+        mn_prepare_membrane_image
+      fi
+      print_detail "Services are configured and remain stopped (--no-start)."
     fi
   fi
 
@@ -4235,9 +4287,9 @@ EOF
   if [ "$START_NOW" = "Y" ]; then
     mn_print_stage "Starting MirrorNeuron services"
     mn_prepare_openshell_gateway_for_start
-    if ! mn_run_runtime_start_command "$VENV_DIR/bin/mn" runtime start; then
-      [ -n "$MN_RUNTIME_START_LOG" ] && print_warning "CLI startup details: $MN_RUNTIME_START_LOG"
-      print_error "Runtime startup failed. Restore the original node identity/configuration, then retry mn runtime start."
+    if ! mn_run_runtime_start_command "$BIN_DIR/mn-runtime" start; then
+      [ -n "$MN_RUNTIME_START_LOG" ] && print_warning "Runtime startup details: $MN_RUNTIME_START_LOG"
+      print_error "Runtime startup failed. Restore the original node identity/configuration, then retry mn-runtime start."
       return 1
     fi
     if [ "$INSTALL_OPENSHELL" = "Y" ]; then
@@ -5158,7 +5210,7 @@ finally:
 
   function restart_core_container() {
     # Resolve and validate the persistent identity before replacing a container.
-    mn_run_runtime_start_command "$VENV_DIR/bin/mn" runtime start
+    mn_run_runtime_start_command "$BIN_DIR/mn-runtime" start
   }
 
   function setup_context_engine() {
@@ -5779,11 +5831,6 @@ EOF
   fi
   print_step "Dependencies look good."
 
-  CORE_WAS_RUNNING="N"
-  if core_container_running; then
-    CORE_WAS_RUNNING="Y"
-  fi
-
   mn_print_stage "Installing components"
   print_step "Preparing local install state"
   mkdir -p "$INSTALL_DIR" "$BIN_DIR" "$INSTALL_DIR/.pids" "$INSTALL_DIR/.logs"
@@ -5924,24 +5971,18 @@ EOF
     replace_symlink "$WEB_UI_DIR" "$INSTALL_DIR/web-ui-source"
   fi
 
+  mn_configure_installed_runtime
   mn_print_stage "Configuring commands and services"
   if [ "$INSTALL_REDIS" = "Y" ] || [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] || [ "$INSTALL_OPENSHELL" = "Y" ] || [ "$INSTALL_WEB_UI" = "Y" ]; then
     if [ "$START_NOW" = "Y" ]; then
       prepare_runtime_compose_sidecars
-      print_detail "Docker services are prepared; automatic startup is deferred to mn runtime start."
+      print_detail "Docker services are prepared; automatic startup uses the installed runtime lifecycle entry point."
     else
-      print_step "Starting selected Docker runtime services"
-      start_runtime_compose_sidecars
-      print_step "Selected Docker runtime services are available."
+      if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
+        mn_prepare_membrane_image
+      fi
+      print_detail "Services are configured and remain stopped (--no-start)."
     fi
-  fi
-
-  if [ "$CORE_WAS_RUNNING" = "Y" ] && [ "$START_NOW" != "Y" ]; then
-    print_step "Restarting MirrorNeuron gRPC Core from rebuilt image"
-    (
-      restart_core_container
-    ) &
-    spinner $! "Restarted MirrorNeuron gRPC Core"
   fi
 
   print_step "Creating command symlinks"
@@ -5958,9 +5999,9 @@ EOF
     mn_print_stage "Starting MirrorNeuron services"
     "$VENV_DIR/bin/mn" runtime stop >/dev/null 2>&1 || true
     mn_prepare_openshell_gateway_for_start
-    if ! mn_run_runtime_start_command "$VENV_DIR/bin/mn" runtime start; then
-      [ -n "$MN_RUNTIME_START_LOG" ] && print_warning "CLI startup details: $MN_RUNTIME_START_LOG"
-      print_error "Runtime startup failed. Restore the original node identity/configuration, then retry mn runtime start."
+    if ! mn_run_runtime_start_command "$BIN_DIR/mn-runtime" start; then
+      [ -n "$MN_RUNTIME_START_LOG" ] && print_warning "Runtime startup details: $MN_RUNTIME_START_LOG"
+      print_error "Runtime startup failed. Restore the original node identity/configuration, then retry mn-runtime start."
       return 1
     fi
     if [ "$INSTALL_OPENSHELL" = "Y" ]; then
@@ -6700,10 +6741,6 @@ EOF
   }
 
   function validate_selections() {
-    if [ "$START_NOW" = "Y" ] && [ "$INSTALL_CLI" != "Y" ]; then
-      print_warning "Automatic start requires the CLI package; disabling start."
-      START_NOW="N"
-    fi
 
     if [ "$INSTALL_WEB_UI" = "Y" ] && [ "$INSTALL_API" != "Y" ]; then
       print_warning "Installing Web UI without the API package. The UI will need an API service from another install."
@@ -6755,15 +6792,21 @@ EOF
 
     docker image tag "$image" mirror-neuron-core:latest
     mkdir -p "$INSTALL_DIR"
-    cat >"$INSTALL_METADATA_FILE" <<EOF
-{
-  "core_release_tag": "$tag",
-  "core_image": "$image",
-  "core_image_digest": "$image_digest",
-  "core_image_revision": "$image_revision",
-  "updated_at": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-}
-EOF
+    "$MN_PYTHON_BIN" - "$INSTALL_METADATA_FILE" "$tag" "$image" "$image_digest" "$image_revision" <<'PY_METADATA'
+import json, os, sys, tempfile
+from pathlib import Path
+from datetime import datetime, timezone
+path = Path(sys.argv[1])
+metadata = json.loads(path.read_text()) if path.exists() else {}
+metadata.update(dict(zip(("core_release_tag", "core_image", "core_image_digest", "core_image_revision"), sys.argv[2:])))
+metadata["updated_at"] = datetime.now(timezone.utc).isoformat()
+metadata["install_role"] = os.environ["MN_INSTALL_ROLE"]
+fd, name = tempfile.mkstemp(dir=path.parent, prefix=".install-metadata-")
+with os.fdopen(fd, "w") as stream:
+    json.dump(metadata, stream, indent=2)
+    stream.write("\n")
+os.replace(name, path)
+PY_METADATA
   }
 
   function install_core_from_release() {
@@ -6945,6 +6988,9 @@ for package in tomllib.loads(open(sys.argv[1]).read())["packages"]:
 PYTHON
     if [ "$INSTALL_PYTHON_SDK" = "Y" ]; then
       install_indexed_group sdk
+    fi
+    if [ "$MN_INSTALL_ROLE" != "client" ]; then
+      install_indexed_group runtime-node
     fi
     if [ "$INSTALL_CLI" = "Y" ]; then
       install_indexed_group cli
@@ -7736,6 +7782,22 @@ EOF
     return
   fi
 
+  if [ "$MN_RUNTIME_ONLY" = "Y" ]; then
+    for arg in "${MN_INSTALL_ARGS[@]:-}"; do
+      case "$arg" in
+      --cli | --api | --web-ui)
+        print_error "${arg} conflicts with --runtime-only."
+        return 1
+        ;;
+      esac
+    done
+    INSTALL_CLI="N"
+    INSTALL_API="N"
+    INSTALL_WEB_UI="N"
+    NON_INTERACTIVE="Y"
+  fi
+  INSTALL_PYTHON_SDK="Y"
+
   mn_prepare_installer_paths
   print_header
 
@@ -7808,15 +7870,17 @@ EOF
     mkdir -p "$MN_WEB_UI_SOURCE_MOUNT"
   fi
 
+  mn_configure_installed_runtime
   mn_print_stage "Configuring commands and services"
   if [ "$INSTALL_REDIS" = "Y" ] || [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] || [ "$INSTALL_OPENSHELL" = "Y" ] || [ "$INSTALL_WEB_UI" = "Y" ]; then
     if [ "$START_NOW" = "Y" ]; then
       prepare_runtime_compose_sidecars
-      print_detail "Docker services are prepared; automatic startup is deferred to mn runtime start."
+      print_detail "Docker services are prepared; automatic startup uses the installed runtime lifecycle entry point."
     else
-      print_step "Starting selected Docker runtime services"
-      (start_runtime_compose_sidecars) &
-      spinner $! "Selected Docker runtime services are available"
+      if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
+        mn_prepare_membrane_image
+      fi
+      print_detail "Services are configured and remain stopped (--no-start)."
     fi
   fi
 
@@ -7839,9 +7903,9 @@ EOF
   if [ "$START_NOW" = "Y" ]; then
     mn_print_stage "Starting MirrorNeuron services"
     mn_prepare_openshell_gateway_for_start
-    if ! mn_run_runtime_start_command "$VENV_DIR/bin/mn" runtime start; then
-      [ -n "$MN_RUNTIME_START_LOG" ] && print_warning "CLI startup details: $MN_RUNTIME_START_LOG"
-      print_error "Runtime startup failed. Restore the original node identity/configuration, then retry mn runtime start."
+    if ! mn_run_runtime_start_command "$BIN_DIR/mn-runtime" start; then
+      [ -n "$MN_RUNTIME_START_LOG" ] && print_warning "Runtime startup details: $MN_RUNTIME_START_LOG"
+      print_error "Runtime startup failed. Restore the original node identity/configuration, then retry mn-runtime start."
       return 1
     fi
     if [ "$INSTALL_OPENSHELL" = "Y" ]; then

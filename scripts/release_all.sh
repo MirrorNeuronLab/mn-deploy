@@ -552,11 +552,13 @@ fi
 
 if [[ "$RESUME_FROM" == "prepare" ]]; then
   check_workspace
+  bash "${SCRIPT_DIR}/validate-runtime-split.sh" --two-runtimes
   CURRENT_PHASE="prepare"
   prepare_release_metadata
   create_release_tags
 else
   check_resume_workspace
+  bash "${SCRIPT_DIR}/validate-runtime-split.sh" --two-runtimes
 fi
 
 if should_run_phase computer-use || should_run_phase python || should_run_phase web-ui ||

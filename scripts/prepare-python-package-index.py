@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import re
 import hashlib
+import os
 import subprocess
 import sys
 import tomllib
@@ -58,9 +59,48 @@ def source_fingerprint(
     parts = Path(relative).parts
     repo = workspace / parts[0]
     scope = Path(*parts[1:]).as_posix() if len(parts) > 1 else "."
-    rows = git(repo, "ls-tree", "-r", ref, "--", scope).splitlines()
-    if scope != ".":
-        rows += git(repo, "ls-tree", ref).splitlines()
+    if ref == "WORKTREE":
+        names = (
+            subprocess.check_output(
+                [
+                    "git",
+                    "-C",
+                    str(repo),
+                    "ls-files",
+                    "-z",
+                    "--cached",
+                    "--others",
+                    "--exclude-standard",
+                ],
+            )
+            .decode()
+            .split("\0")
+        )
+        rows = []
+        for name in set(names) - {""}:
+            if scope != "." and not name.startswith(scope + "/") and "/" in name:
+                continue
+            path = repo / name
+            if not path.is_file() and not path.is_symlink():
+                continue
+            content = (
+                os.readlink(path).encode() if path.is_symlink() else path.read_bytes()
+            )
+            mode = (
+                "120000"
+                if path.is_symlink()
+                else "100755"
+                if path.stat().st_mode & 0o111
+                else "100644"
+            )
+            oid = hashlib.sha1(
+                b"blob " + str(len(content)).encode() + b"\0" + content
+            ).hexdigest()
+            rows.append(f"{mode} blob {oid}\t{name}")
+    else:
+        rows = git(repo, "ls-tree", "-r", ref, "--", scope).splitlines()
+        if scope != ".":
+            rows += git(repo, "ls-tree", ref).splitlines()
     digest = hashlib.sha256()
     # Raw tree rows contain blob IDs; sorting those before normalization makes
     # a version-only edit reorder otherwise identical inputs.
@@ -73,7 +113,11 @@ def source_fingerprint(
         ):
             continue
         if name.endswith("pyproject.toml"):
-            content = git(repo, "show", f"{ref}:{name}")
+            content = (
+                (repo / name).read_text().strip()
+                if ref == "WORKTREE"
+                else git(repo, "show", f"{ref}:{name}")
+            )
             content = re.sub(
                 r'(?m)^version\s*=\s*"[^"\n]+"', 'version = "<release>"', content
             )
@@ -402,7 +446,9 @@ def synchronize(
     return max(comparable, key=numeric_version_key).lstrip("vV")
 
 
-def verify_sources(index_file: Path, workspace_root: Path) -> None:
+def verify_sources(
+    index_file: Path, workspace_root: Path, *, worktree: bool = False
+) -> None:
     for package in tomllib.loads(index_file.read_text())["packages"]:
         expected = package.get("source_hash")
         if not expected:
@@ -410,11 +456,16 @@ def verify_sources(index_file: Path, workspace_root: Path) -> None:
         sdk = Path(package["path"]).parts[0] == "mn-python-sdk"
         scope = "mn-python-sdk" if sdk else package["path"]
         repo = workspace_root / Path(scope).parts[0]
-        if git(repo, "status", "--porcelain"):
+        if not worktree and git(repo, "status", "--porcelain"):
             raise SystemExit(
                 f"Uncommitted source changes in {repo}; publishing requires the prepared source."
             )
-        if not source_matches(workspace_root, scope, expected, include_nested=sdk):
+        if expected != source_fingerprint(
+            workspace_root,
+            scope,
+            "WORKTREE" if worktree else "HEAD",
+            include_nested=sdk,
+        ):
             raise SystemExit(
                 f"Source changed after version preparation: {package['name']}; prepare a new release."
             )
@@ -428,11 +479,18 @@ def main() -> None:
     parser.add_argument("--independent", action="store_true")
     parser.add_argument("--baseline", default="")
     parser.add_argument("--verify-source", action="store_true")
+    parser.add_argument(
+        "--verify-worktree",
+        action="store_true",
+        help="Check reviewable working sources; does not authorize publishing dirty sources.",
+    )
     parser.add_argument("--verify-dependencies", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
-    if args.verify_source:
-        verify_sources(args.index_file, args.workspace_root)
+    if args.verify_source or args.verify_worktree:
+        verify_sources(
+            args.index_file, args.workspace_root, worktree=args.verify_worktree
+        )
     if args.verify_dependencies:
         try:
             verify_dependencies(args.index_file, args.workspace_root)
@@ -441,7 +499,7 @@ def main() -> None:
             raise SystemExit(
                 65
             ) from exc  # Invalid frozen release data, not a retryable publishing failure.
-    if args.verify_source or args.verify_dependencies:
+    if args.verify_source or args.verify_worktree or args.verify_dependencies:
         return
     print(
         synchronize(

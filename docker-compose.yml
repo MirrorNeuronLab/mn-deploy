@@ -708,7 +708,7 @@ services:
       - "${MN_ARTIFACT_PUBLISH_HOST:-127.0.0.1}:${MN_ARTIFACT_PORT:-55660}:${MN_ARTIFACT_PORT:-55660}"
     command: >
       sh -c 'case "$${MN_NODE_NAME:-}" in ""|nonode@nohost|*[!a-zA-Z0-9_.@-]*|@*|*@|*@*@*|[!a-zA-Z0-9_]*)
-      echo "error: invalid MN_NODE_NAME; run mn runtime start to repair configuration" >&2; exit 1;; esac;
+      echo "error: invalid MN_NODE_NAME; run mn-runtime start to repair configuration" >&2; exit 1;; esac;
       case "$$MN_NODE_NAME" in *@*) ;; *) echo "error: MN_NODE_NAME requires name@host" >&2; exit 1;; esac;
       case "$${MN_NODE_NAME#*@}" in [!a-zA-Z0-9]*) echo "error: invalid node hostname" >&2; exit 1;; esac;
       if [ -x "bin/mirror_neuron" ]; then
@@ -851,6 +851,7 @@ services:
       ERL_AFLAGS: ${ERL_AFLAGS:-}
       MN_COOKIE: ${MN_COOKIE:-}
       MN_GRPC_AUTH_TOKEN: ${MN_GRPC_AUTH_TOKEN:?Core auth credential is required}
+      MN_RUNTIME_CONTROL_TOKEN: ${MN_RUNTIME_CONTROL_TOKEN:-}
       MN_GRPC_ADMIN_TOKEN: ${MN_GRPC_ADMIN_TOKEN:?Core admin credential is required}
       SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
       SLACK_DEFAULT_CHANNEL: ${SLACK_DEFAULT_CHANNEL:-}
