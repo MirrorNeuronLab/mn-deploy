@@ -22,5 +22,8 @@
   },
   "web-ui:v1.4.2": {
     "tree": "baa44bf8cfe4501deaa3dcf32e0404e352015945"
+  },
+  "core:v1.4.1": {
+    "tree": "4cdf723a54d82cfae0132442545974db4249b439"
   }
 }
