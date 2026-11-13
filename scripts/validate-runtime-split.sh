@@ -26,6 +26,7 @@ export PYTHONPATH="$WORKSPACE_ROOT/mn-python-sdk/packages/runtime/src:$WORKSPACE
   tests/integration/contracts/test_api_contracts.py \
   tests/integration/contracts/test_worker_supervision_transport.py \
   tests/integration/contracts/test_surface_proxy_publication.py \
+  tests/integration/contracts/test_runtime_retirement_transport.py \
   tests/integration/contracts/test_cli_contracts.py \
   tests/integration/contracts/test_model_replica_contracts.py \
   tests/integration/contracts/test_provider_default_overrides.py \
