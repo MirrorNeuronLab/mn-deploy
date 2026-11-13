@@ -842,3 +842,10 @@ remains `binary_default = false`. Co-worker dependencies opt in with
 `setup: on_install`; the SDK invokes setup during API hiring or CLI blueprint add.
 Customer setup downloads and verifies the notarized artifact without a compiler,
 Xcode or gcloud. Existing immutable install-support snapshots remain unchanged.
+
+The runtime separation release gate (`scripts/validate-runtime-split.sh`) requires
+Node for the shipped browser proxy and Elixir for execution credential binding.
+Its offline phase runs worker SDK supervision
+and endpoint-publication contracts plus `scripts/test_job_ui_proxy.py`. The
+`--two-runtimes` phase exercises the browser URL through the real HTTP surface
+and both native gateways, including assets, video streaming and WebSockets.

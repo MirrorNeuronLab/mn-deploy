@@ -24,16 +24,19 @@ export PYTHONPATH="$WORKSPACE_ROOT/mn-python-sdk/packages/runtime/src:$WORKSPACE
 (cd "$WORKSPACE_ROOT/mn-system-tests" && "$VALIDATION_PYTHON" -m pytest tests/integration/installer -q)
 (cd "$WORKSPACE_ROOT/mn-system-tests" && "$VALIDATION_PYTHON" -m pytest \
   tests/integration/contracts/test_api_contracts.py \
+  tests/integration/contracts/test_worker_supervision_transport.py \
+  tests/integration/contracts/test_surface_proxy_publication.py \
   tests/integration/contracts/test_cli_contracts.py \
   tests/integration/contracts/test_model_replica_contracts.py \
   tests/integration/contracts/test_provider_default_overrides.py \
   tests/integration/contracts/test_run_admission_contracts.py \
   tests/integration/contracts/test_federated_model_status_contract.py \
   tests/integration/contracts/test_blueprint_runtime_model_preflight_contract.py -q)
+(cd "$DEPLOY_DIR" && "$VALIDATION_PYTHON" -m pytest scripts/test_job_ui_proxy.py -q)
 (cd "$WORKSPACE_ROOT/mn-python-sdk" && "$VALIDATION_PYTHON" -m pytest tests packages/runtime/tests_runtime -q)
 (cd "$WORKSPACE_ROOT/mn-cli" && "$VALIDATION_PYTHON" -m pytest -q)
 (cd "$WORKSPACE_ROOT/mn-api" && "$VALIDATION_PYTHON" -m pytest -q)
-(cd "$WORKSPACE_ROOT/MirrorNeuron" && mix test --no-start tests/unit/grpc/runtime_control_auth_test.exs tests/unit/grpc/runtime_membership_test.exs tests/unit/grpc/runtime_control_route_test.exs)
+(cd "$WORKSPACE_ROOT/MirrorNeuron" && mix test --no-start tests/unit/grpc/runtime_control_auth_test.exs tests/unit/grpc/runtime_membership_test.exs tests/unit/grpc/runtime_control_route_test.exs tests/unit/core_environment_test.exs tests/e2e/runner/core_connection_test.exs)
 "$VALIDATION_PYTHON" "$DEPLOY_DIR/scripts/validate-runtime-wheels.py"
 "$VALIDATION_PYTHON" "$DEPLOY_DIR/scripts/prepare-python-package-index.py" \
   "$DEPLOY_DIR/package-index/python-packages.toml" "$WORKSPACE_ROOT" 1.4.8 --verify-worktree --verify-dependencies
