@@ -164,10 +164,33 @@ warning. For an already-open terminal, run the printed one-time reload command:
 OpenShell runs through the managed containers in every install mode; the
 installer does not run the upstream host package installer.
 
-Docker must already be running. When Model Runner is required but disabled, the
-installer enables it with `docker desktop enable model-runner`. Docker Desktop
-may request the platform permission needed to update that setting. Docker
-manages its own images, volumes, and platform permissions outside `MN_HOME`.
+When Model Runner is required but disabled, the installer enables it with
+`docker desktop enable model-runner`. Docker Desktop may request the platform
+permission needed to update that setting.
+
+## Automatic Docker setup (unreleased)
+
+Runtime installs wait for Docker before preparing MirrorNeuron, including with
+`--no-start`. The installer starts an existing Docker daemon when needed. On
+a fresh setup it downloads Docker Desktop for Apple silicon or Intel on macOS,
+or installs native Docker Engine and its Compose plugin on Linux distributions
+supported by Docker's installer. Client-only installs require only Python
+tooling.
+
+On macOS, the installer uses Docker's `--accept-license` flag with authorized
+sudo. When sudo needs authentication and the current user can write to
+Applications, the installer copies Docker Desktop there. Complete any
+first-launch prompts in Docker Desktop.
+[Docker Desktop installation](https://docs.docker.com/desktop/setup/install/mac-install/)
+
+Linux Engine installation requires root or sudo. Run `sudo -v` in the same
+terminal before a default install, or use `--interactive` to allow sudo to
+prompt. A fresh installation adds the invoking account to the `docker` group
+if needed and continues with that group active. Start a new login session to
+use the group from your shell.
+Members of the `docker` group have root-level access.
+[Docker Engine installation](https://docs.docker.com/engine/install/)
+[Docker group permissions](https://docs.docker.com/engine/install/linux-postinstall/)
 
 ## Quick Start
 
@@ -185,8 +208,7 @@ services use non-interactive sudo when needed; if permission is unavailable,
 the command prints the manual startup command. Remote endpoints must be started
 on their host. Installation/reset options cannot be combined with this flag.
 The readiness wait defaults to 60 attempts spaced two seconds apart; override
-with `MN_DOCKER_START_ATTEMPTS`. Normal installation still requires Docker to be
-running first.
+with `MN_DOCKER_START_ATTEMPTS`.
 
 Inspect installer options:
 

@@ -2,6 +2,16 @@
 
 set -euo pipefail
 
+# Keep a streamed Linux installer available if it has to restart in the
+# Docker group after provisioning the engine. The stream itself is one-shot.
+if [ -z "${BASH_SOURCE[0]:-}" ] && [ -z "${BASH_EXECUTION_STRING:-}" ] && [ "$(uname -s)" = "Linux" ]; then
+  mn_streamed_installer="$(mktemp "${TMPDIR:-/tmp}/mn-install.XXXXXX")"
+  trap 'rm -f "$mn_streamed_installer"' EXIT
+  cat >"$mn_streamed_installer"
+  MN_INSTALL_STREAM_NAME="$0" "$BASH" -euo pipefail "$mn_streamed_installer" "$@" </dev/null
+  exit
+fi
+
 # Keep installer output visible even when a subcommand redirects stdout/stderr.
 exec 3>&1
 
@@ -95,7 +105,8 @@ MN_DEFAULT_INSTALL_VERSION="${MN_DEFAULT_INSTALL_VERSION:-v1.4.0}"
 # Support snapshots can advance independently when repairing component packages.
 MN_DEFAULT_INSTALL_SUPPORT_VERSION="${MN_DEFAULT_INSTALL_SUPPORT_VERSION:-v1.4.22}"
 MN_INSTALL_VERSION="${MN_INSTALL_VERSION:-}"
-MN_INSTALL_SCRIPT_NAME="$(basename "$0")"
+MN_INSTALL_SCRIPT_NAME="$(basename "${MN_INSTALL_STREAM_NAME:-$0}")"
+MN_INSTALL_ORIGINAL_ARGS=("$@")
 MN_INSTALL_ARGS=()
 
 # Presentation is shared by every mode and stays self-contained for curl | bash.
@@ -242,7 +253,7 @@ MirrorNeuron installer
 
 Usage: ./$MN_INSTALL_SCRIPT_NAME [--mode github|local|binary] [options]
 
-Install a local runtime, or a lightweight client for a remote node.
+Install a local runtime with Docker setup, or a client for a remote node.
 Runs without prompts by default. Use --interactive to choose components.
 
 Common options:
@@ -256,6 +267,7 @@ Common options:
   --no-web-ui        Skip the Web UI.
   --version TAG      Select a release (binary or GitHub mode).
   --reset            Permanently clear existing data; always requires typing YES.
+  --start-docker     Start an existing Docker installation and exit.
   --detect-only      Print installation status as JSON without making changes.
   -v, --verbose      Show component details and diagnostics.
   -h, --help         Show this help; add --mode MODE for mode-specific options.
@@ -291,11 +303,12 @@ EOF
 }
 
 # =============================================================================
-# DOCKER STARTUP ONLY
+# DOCKER INSTALLATION AND STARTUP
 # =============================================================================
 
 function mn_start_docker() {
   local host_os endpoint context attempts
+  local startup_mode="${1:-only}" desktop_app="${2:-Docker}"
   attempts="${MN_DOCKER_START_ATTEMPTS:-60}"
   if ! [[ "$attempts" =~ ^[1-9][0-9]*$ ]]; then
     printf 'error: MN_DOCKER_START_ATTEMPTS must be a positive integer.\n' >&3
@@ -306,7 +319,9 @@ function mn_start_docker() {
     return 1
   fi
   if docker info >/dev/null 2>&1; then
-    printf '✓ Docker is already running.\n' >&3
+    if [ "$startup_mode" = only ]; then
+      print_success "Docker is already running."
+    fi
     return 0
   fi
 
@@ -327,7 +342,7 @@ function mn_start_docker() {
   printf '==> Starting Docker\n' >&3
   case "$host_os" in
   Darwin)
-    if ! open -a Docker; then
+    if ! open -a "$desktop_app"; then
       printf 'error: Could not launch Docker Desktop.\nNext: open the installed Docker Desktop application, then retry.\n' >&3
       return 1
     fi
@@ -340,7 +355,7 @@ function mn_start_docker() {
     rootless:* | *:*/run/user/*/docker.sock)
       mn_start_docker_service user docker || return 1
       ;;
-    *) mn_start_docker_service system docker || return 1 ;;
+    *) mn_start_docker_service system docker "$startup_mode" || return 1 ;;
     esac
     ;;
   MINGW* | MSYS* | CYGWIN*)
@@ -364,12 +379,17 @@ function mn_start_docker() {
     attempts=$((attempts - 1))
     [ "$attempts" -eq 0 ] || sleep 2
   done
-  printf 'error: Docker did not become accessible before the startup timeout.\nNext: check Docker startup, socket permissions, and the selected context with docker info, then retry.\n' >&3
+  print_error "Docker did not become accessible before the startup timeout."
+  if [ "$startup_mode" = install ] && [ "$host_os" = Darwin ]; then
+    printf 'Next: complete any Docker Desktop first-launch prompts and verify docker info, then retry.\n' >&3
+  else
+    printf 'Next: check Docker startup, socket permissions, and the selected context with docker info, then retry.\n' >&3
+  fi
   return 1
 }
 
 function mn_start_docker_service() {
-  local scope="$1" service_name="$2"
+  local scope="$1" service_name="$2" startup_mode="${3:-only}"
   local -a command_args=() privilege=()
   if [ "$scope" = user ]; then
     command_args=(systemctl --user start "$service_name")
@@ -387,6 +407,9 @@ function mn_start_docker_service() {
       return 1
     fi
     privilege=(sudo -n)
+    if [ "$startup_mode" = install ] && [ "${NON_INTERACTIVE:-Y}" = "N" ]; then
+      privilege=(sudo)
+    fi
   fi
   if ! ${privilege[@]+"${privilege[@]}"} "${command_args[@]}" </dev/null; then
     printf 'error: Could not start the Docker service.\nNext: run the following command with the required permissions, then retry:\n  ' >&3
@@ -395,6 +418,196 @@ function mn_start_docker_service() {
     printf '\n' >&3
     return 1
   fi
+}
+
+function mn_docker_admin() {
+  if [ "$(id -u)" -eq 0 ]; then
+    "$@"
+  elif [ "${NON_INTERACTIVE:-Y}" = "N" ]; then
+    sudo "$@"
+  else
+    sudo -n "$@"
+  fi
+}
+
+function mn_require_docker_admin() {
+  if [ "$(id -u)" -eq 0 ]; then return 0; fi
+  if command -v sudo >/dev/null 2>&1; then
+    if [ "${NON_INTERACTIVE:-Y}" = "N" ] && sudo -v; then return 0; fi
+    if sudo -n -v 2>/dev/null; then return 0; fi
+  fi
+  print_error "Installing Docker requires administrator access."
+  printf 'Next: authorize sudo in this terminal with sudo -v, then rerun the installer.\n' >&3
+  return 1
+}
+
+function mn_find_docker_desktop() {
+  local app
+  for app in /Applications/Docker.app "$HOME/Applications/Docker.app"; do
+    if [ -x "$app/Contents/Resources/bin/docker" ]; then
+      printf '%s\n' "$app"
+      return 0
+    fi
+  done
+  return 1
+}
+
+function mn_install_docker_desktop() (
+  local architecture work_dir mount_dir app stage_dir="" mounted="N" use_admin="Y"
+  case "$(uname -m)" in
+  arm64) architecture=arm64 ;;
+  x86_64)
+    architecture=amd64
+    if [ "$(sysctl -n hw.optional.arm64 2>/dev/null || true)" = 1 ]; then
+      architecture=arm64
+    fi
+    ;;
+  *)
+    print_error "Automatic Docker Desktop installation requires an Apple silicon or Intel Mac."
+    return 1
+    ;;
+  esac
+
+  if [ -w /Applications ] && [ "$(id -u)" -ne 0 ] && ! sudo -n -v 2>/dev/null; then
+    use_admin="N"
+  else
+    mn_require_docker_admin || return 1
+  fi
+  work_dir="$(mktemp -d "${TMPDIR:-/tmp}/mn-docker-desktop.XXXXXX")" || return 1
+  mount_dir="$work_dir/mount"
+  trap '
+    if [ -n "$stage_dir" ]; then rm -rf "$stage_dir"; fi
+    if [ "$mounted" = "Y" ] && ! hdiutil detach "$mount_dir" >/dev/null 2>&1 &&
+      ! hdiutil detach "$mount_dir" -force >/dev/null; then
+      print_warning "Could not detach the Docker disk image at $mount_dir."
+    else
+      rm -rf "$work_dir"
+    fi
+  ' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+
+  printf '==> Installing Docker Desktop\n' >&3
+  curl -fsSL --retry 3 --connect-timeout 15 \
+    "https://desktop.docker.com/mac/main/$architecture/Docker.dmg" -o "$work_dir/Docker.dmg" || return 1
+  mkdir "$mount_dir" || return 1
+  hdiutil attach "$work_dir/Docker.dmg" -readonly -nobrowse -mountpoint "$mount_dir" >/dev/null || return 1
+  mounted="Y"
+  app="$mount_dir/Docker.app"
+  if [ "$use_admin" = "Y" ]; then
+    print_step "Running the Docker Desktop installer with --accept-license"
+    mn_run_logged "Docker Desktop installation" mn_docker_admin \
+      "$app/Contents/MacOS/install" --accept-license --user="${SUDO_USER:-$(id -un)}" </dev/null
+  else
+    # Copy the bundle as in the drag-to-Applications installer. Docker Desktop
+    # presents its agreement on first launch when the account has yet to accept.
+    stage_dir="$(mktemp -d /Applications/.mn-docker.XXXXXX)" || return 1
+    ditto "$app" "$stage_dir/Docker.app" || return 1
+    mv "$stage_dir/Docker.app" /Applications/
+  fi
+)
+
+function mn_install_docker_engine() (
+  local work_dir
+  mn_require_docker_admin || return 1
+  work_dir="$(mktemp -d "${TMPDIR:-/tmp}/mn-docker-engine.XXXXXX")" || return 1
+  trap 'rm -rf "$work_dir"' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+
+  printf '==> Installing Docker Engine\n' >&3
+  curl -fsSL --retry 3 --connect-timeout 15 https://get.docker.com -o "$work_dir/install.sh" || return 1
+  mn_run_logged "Docker Engine installation" mn_docker_admin sh "$work_dir/install.sh" </dev/null
+)
+
+function mn_enter_docker_group() {
+  local user command_line arg
+  if [ "$(id -u)" -eq 0 ]; then return 0; fi
+  case " $(id -nG) " in *" docker "*) return 0 ;; esac
+  user="$(id -un)"
+  case " $(id -nG "$user") " in *" docker "*) ;; *) return 0 ;; esac
+
+  if ! command -v sg >/dev/null 2>&1; then
+    print_error "The current login session has not picked up the Docker group."
+    printf 'Next: log out and back in, then rerun the installer.\n' >&3
+    return 1
+  fi
+  command_line="exec $(mn_shell_quote "$BASH") -euo pipefail $(mn_shell_quote "${BASH_SOURCE[0]}")"
+  for arg in ${MN_INSTALL_ORIGINAL_ARGS[@]+"${MN_INSTALL_ORIGINAL_ARGS[@]}"}; do
+    command_line="$command_line $(mn_shell_quote "$arg")"
+  done
+  printf '==> Continuing in the Docker group. Start a new login session to use Docker from your shell.\n' >&3
+  # The new process acquires its own lifecycle lock before touching MN_HOME.
+  mn_reset_release_lock
+  exec sg docker -c "$command_line"
+}
+
+function mn_prepare_runtime_docker() {
+  local host_os desktop_app="" installed_engine="N" user
+  host_os="$(uname -s)"
+  if [ "$host_os" = Darwin ] && ! command -v docker >/dev/null 2>&1; then
+    desktop_app="$(mn_find_docker_desktop || true)"
+    if [ -n "$desktop_app" ]; then
+      export PATH="$PATH:$desktop_app/Contents/Resources/bin"
+    fi
+  fi
+
+  if ! command -v docker >/dev/null 2>&1; then
+    if ! command -v curl >/dev/null 2>&1; then
+      print_error "curl is required to download Docker."
+      printf 'Next: install curl and rerun the installer.\n' >&3
+      return 1
+    fi
+    case "$host_os" in
+    Darwin)
+      if ! mn_install_docker_desktop; then
+        print_error "Docker Desktop installation failed."
+        printf 'Next: resolve the error above, then retry. See https://docs.docker.com/desktop/setup/install/mac-install/\n' >&3
+        return 1
+      fi
+      desktop_app="$(mn_find_docker_desktop)" || {
+        print_error "Docker Desktop was not found after installation. Check /Applications/Docker.app and retry."
+        return 1
+      }
+      export PATH="$PATH:$HOME/.docker/bin:$desktop_app/Contents/Resources/bin"
+      ;;
+    Linux)
+      if ! mn_install_docker_engine; then
+        print_error "Docker Engine installation failed."
+        printf 'Next: resolve the error above, then retry. See https://docs.docker.com/engine/install/\n' >&3
+        return 1
+      fi
+      installed_engine="Y"
+      ;;
+    *)
+      print_error "Automatic Docker installation is supported on macOS and Linux."
+      printf 'Next: install Docker for your OS and rerun the installer.\n' >&3
+      return 1
+      ;;
+    esac
+    hash -r
+  fi
+
+  if [ "$host_os" = Linux ] && ! docker info >/dev/null 2>&1; then
+    if [ "$installed_engine" = "Y" ] && [ "$(id -u)" -ne 0 ]; then
+      user="$(id -un)"
+      if ! mn_docker_admin usermod -aG docker "$user"; then
+        print_error "Could not add the current user to the Docker group."
+        printf 'Next: configure Docker socket access for your account, then rerun the installer.\n' >&3
+        return 1
+      fi
+    fi
+    mn_enter_docker_group || return 1
+  fi
+  mn_start_docker install "${desktop_app:-Docker}" || return 1
+
+  DOCKER_HOST_SOCKET="${DOCKER_HOST_SOCKET:-$(mn_resolve_docker_host_socket)}"
+  if [ -z "${OPENSHELL_GATEWAY_DOCKER_GROUP:-}" ] && [ "$host_os" = "Darwin" ]; then
+    OPENSHELL_GATEWAY_DOCKER_GROUP="0"
+  elif [ -z "${OPENSHELL_GATEWAY_DOCKER_GROUP:-}" ] && [ -S "$DOCKER_HOST_SOCKET" ]; then
+    OPENSHELL_GATEWAY_DOCKER_GROUP="$(stat -c '%g' "$DOCKER_HOST_SOCKET" 2>/dev/null || stat -f '%g' "$DOCKER_HOST_SOCKET" 2>/dev/null || true)"
+  fi
+  OPENSHELL_GATEWAY_DOCKER_GROUP="${OPENSHELL_GATEWAY_DOCKER_GROUP:-0}"
 }
 
 # =============================================================================
@@ -1490,6 +1703,10 @@ if [ "$MN_INSTALL_RESET" != "Y" ] && [ -z "${MN_NODE_NAME:-}" ] && [ -f "${MN_HO
 fi
 
 function mn_script_dir() {
+  if [ -n "${MN_INSTALL_STREAM_NAME:-}" ]; then
+    pwd
+    return
+  fi
   local source_path=""
   if [ "${BASH_SOURCE+x}" = "x" ]; then
     source_path="${BASH_SOURCE[0]:-}"
@@ -2934,13 +3151,6 @@ EOF
   MN_HOST_OPENSHELL_CONFIG_DIR="${OPENSHELL_CONTAINER_CONFIG_DIR:-${INSTALL_DIR}/.config/openshell-mirror-neuron}"
   MN_HOST_OPENSHELL_STATE_DIR="${MN_HOST_OPENSHELL_STATE_DIR:-${INSTALL_DIR}/openshell-state}"
   OPENSHELL_GATEWAY_USER="${OPENSHELL_GATEWAY_USER:-$(id -u):$(id -g)}"
-  DOCKER_HOST_SOCKET="${DOCKER_HOST_SOCKET:-$(mn_resolve_docker_host_socket)}"
-  if [ -z "${OPENSHELL_GATEWAY_DOCKER_GROUP:-}" ] && [ "$(uname -s)" = "Darwin" ]; then
-    OPENSHELL_GATEWAY_DOCKER_GROUP="0"
-  elif [ -z "${OPENSHELL_GATEWAY_DOCKER_GROUP:-}" ] && [ -S "${DOCKER_HOST_SOCKET}" ]; then
-    OPENSHELL_GATEWAY_DOCKER_GROUP="$(stat -c '%g' "${DOCKER_HOST_SOCKET}" 2>/dev/null || stat -f '%g' "${DOCKER_HOST_SOCKET}" 2>/dev/null || true)"
-  fi
-  OPENSHELL_GATEWAY_DOCKER_GROUP="${OPENSHELL_GATEWAY_DOCKER_GROUP:-0}"
   MN_DYNAMIC_REDIS_PORT_START="${MN_DYNAMIC_REDIS_PORT_START:-56379}"
   MN_DYNAMIC_REDIS_PORT_END="${MN_DYNAMIC_REDIS_PORT_END:-56478}"
 
@@ -3156,6 +3366,7 @@ EOF
 
   finalize_github_install_version
 
+  mn_prepare_runtime_docker || exit 1
   mn_prepare_installer_paths
   print_header
 
@@ -4125,15 +4336,9 @@ EOF
 
   require_cmd git
   require_cmd curl
-  require_cmd docker
   configure_github_git_auth
   if should_install_python_packages; then
     resolve_python_runtime
-  fi
-
-  if ! docker info >/dev/null 2>&1; then
-    print_error "Docker is not running. Please start Docker first."
-    exit 1
   fi
 
   print_step "All dependencies found or installed."
@@ -4377,13 +4582,6 @@ run_install_local() {
   MN_HOST_OPENSHELL_CONFIG_DIR="${OPENSHELL_CONTAINER_CONFIG_DIR:-${INSTALL_DIR}/.config/openshell-mirror-neuron}"
   MN_HOST_OPENSHELL_STATE_DIR="${MN_HOST_OPENSHELL_STATE_DIR:-${INSTALL_DIR}/openshell-state}"
   OPENSHELL_GATEWAY_USER="${OPENSHELL_GATEWAY_USER:-$(id -u):$(id -g)}"
-  DOCKER_HOST_SOCKET="${DOCKER_HOST_SOCKET:-$(mn_resolve_docker_host_socket)}"
-  if [ -z "${OPENSHELL_GATEWAY_DOCKER_GROUP:-}" ] && [ "$(uname -s)" = "Darwin" ]; then
-    OPENSHELL_GATEWAY_DOCKER_GROUP="0"
-  elif [ -z "${OPENSHELL_GATEWAY_DOCKER_GROUP:-}" ] && [ -S "${DOCKER_HOST_SOCKET}" ]; then
-    OPENSHELL_GATEWAY_DOCKER_GROUP="$(stat -c '%g' "${DOCKER_HOST_SOCKET}" 2>/dev/null || stat -f '%g' "${DOCKER_HOST_SOCKET}" 2>/dev/null || true)"
-  fi
-  OPENSHELL_GATEWAY_DOCKER_GROUP="${OPENSHELL_GATEWAY_DOCKER_GROUP:-0}"
   MN_DYNAMIC_REDIS_PORT_START="${MN_DYNAMIC_REDIS_PORT_START:-56379}"
   MN_DYNAMIC_REDIS_PORT_END="${MN_DYNAMIC_REDIS_PORT_END:-56478}"
   MN_PYTHON_BIN=""
@@ -5804,13 +6002,9 @@ EOF
     mn_write_shell_environment
   }
 
-  mn_prepare_installer_paths
-  print_header
-
   require_install_dir_not_source
   require_dir "$CORE_DIR" "MirrorNeuron core"
   require_file "$CORE_DIR/Dockerfile" "MirrorNeuron Dockerfile"
-  require_mix_project_file "$CORE_DIR/mix.exs"
   require_dir "$CLI_DIR" "mn-cli"
   require_dir "$API_DIR" "mn-api"
   require_dir "$PY_SDK_DIR" "mn-python-sdk"
@@ -5820,6 +6014,11 @@ EOF
 
   if [ "$INSTALL_WEB_UI" = "Y" ]; then require_dir "$WEB_UI_DIR" "mn-web-ui"; fi
   if [ "$INSTALL_SKILLS" = "Y" ]; then require_dir "$SKILLS_DIR" "mn-skills"; fi
+
+  mn_prepare_runtime_docker || exit 1
+  require_mix_project_file "$CORE_DIR/mix.exs"
+  mn_prepare_installer_paths
+  print_header
 
   if [ "$MN_INSTALL_RESET" != "Y" ] &&
     { [ -d "$INSTALL_DIR" ] || [ -L "$INSTALL_DIR" ] || [ -d "$VENV_DIR" ] || [ -f "$BIN_DIR/mn" ]; }; then
@@ -5842,7 +6041,6 @@ EOF
   mn_print_stage "Checking requirements"
   resolve_python_runtime
   print_step "Checking dependencies"
-  require_cmd docker
   resolve_python_runtime
 
   if [ "$INSTALL_OPENSHELL" = "Y" ] && ! command -v openshell >/dev/null 2>&1; then
@@ -5853,10 +6051,6 @@ EOF
     require_file "$MEMBRANE_DIR/Dockerfile" "Membrane Dockerfile"
   fi
 
-  if ! docker info >/dev/null 2>&1; then
-    print_error "Docker is not running. Please start Docker first."
-    exit 1
-  fi
   print_step "Dependencies look good."
 
   mn_print_stage "Installing components"
@@ -6115,15 +6309,6 @@ run_install_binary() {
   MN_HOST_OPENSHELL_CONFIG_DIR="${OPENSHELL_CONTAINER_CONFIG_DIR:-${INSTALL_DIR}/.config/openshell-mirror-neuron}"
   MN_HOST_OPENSHELL_STATE_DIR="${MN_HOST_OPENSHELL_STATE_DIR:-${INSTALL_DIR}/openshell-state}"
   OPENSHELL_GATEWAY_USER="${OPENSHELL_GATEWAY_USER:-$(id -u):$(id -g)}"
-  if [ "$MN_NO_RUNTIME" != "Y" ]; then
-    DOCKER_HOST_SOCKET="${DOCKER_HOST_SOCKET:-$(mn_resolve_docker_host_socket)}"
-    if [ -z "${OPENSHELL_GATEWAY_DOCKER_GROUP:-}" ] && [ "$(uname -s)" = "Darwin" ]; then
-      OPENSHELL_GATEWAY_DOCKER_GROUP="0"
-    elif [ -z "${OPENSHELL_GATEWAY_DOCKER_GROUP:-}" ] && [ -S "${DOCKER_HOST_SOCKET}" ]; then
-      OPENSHELL_GATEWAY_DOCKER_GROUP="$(stat -c '%g' "${DOCKER_HOST_SOCKET}" 2>/dev/null || stat -f '%g' "${DOCKER_HOST_SOCKET}" 2>/dev/null || true)"
-    fi
-  fi
-  OPENSHELL_GATEWAY_DOCKER_GROUP="${OPENSHELL_GATEWAY_DOCKER_GROUP:-0}"
   MN_DYNAMIC_REDIS_PORT_START="${MN_DYNAMIC_REDIS_PORT_START:-56379}"
   MN_DYNAMIC_REDIS_PORT_END="${MN_DYNAMIC_REDIS_PORT_END:-56478}"
   INSTALL_METADATA_FILE="${INSTALL_DIR}/install_metadata.json"
@@ -7826,6 +8011,7 @@ EOF
   fi
   INSTALL_PYTHON_SDK="Y"
 
+  mn_prepare_runtime_docker || exit 1
   mn_prepare_installer_paths
   print_header
 
@@ -7850,17 +8036,11 @@ EOF
   mn_print_install_summary
   mn_print_stage "Checking requirements"
   require_cmd curl
-  require_cmd docker
   if should_install_python_packages; then
     mn_ensure_python_package_index_file
     resolve_python_runtime
     ensure_pip
   fi
-  if ! docker info >/dev/null 2>&1; then
-    print_error "Docker is not running. Please start Docker first."
-    exit 1
-  fi
-
   print_step "System ready."
 
   if [ "$MN_EXISTING_INSTALL" = "Y" ]; then

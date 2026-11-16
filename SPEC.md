@@ -73,6 +73,16 @@ must not silently cross into another source type. Explicit component-version
 overrides take precedence over the shared release version only for their named
 component.
 
+Runtime installation checks Docker after argument validation and waits for its
+daemon before preparing install paths, pulling images, or setting up Model
+Runner. On macOS it installs the Docker Desktop app from the official disk image
+and uses Docker's `--accept-license` installer flag when sudo is authorized.
+On supported Linux systems it uses Docker's native Engine
+installer. A newly provisioned Linux account can continue in the Docker group
+in the same invocation, including when the script was streamed to Bash.
+Client-only installation requires Python tooling. Reset cleanup requires an
+accessible Docker daemon before touching existing runtime data.
+
 All modes use the single `mn runtime start` contract. There is no worker-only
 runtime, and worker-only installer flags are rejected.
 
