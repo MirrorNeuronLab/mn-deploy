@@ -1471,7 +1471,33 @@ function mn_run_runtime_compose() {
   return "$status"
 }
 
-MN_RUNTIME_START_LOG=""
+function mn_read_env_value() {
+  local file="$1" key="$2"
+  [ -f "$file" ] || return 0
+  awk -F= -v key="$key" '$1 == key {print substr($0, index($0, "=") + 1); exit}' "$file"
+}
+
+function mn_runtime_port_settings() {
+  local compose_env="$1" prefix
+  local start_key end_key policy_key start end policy
+
+  # The runtime selects the default ranges at startup. Keep saved values and
+  # their allocation policy when a reinstall regenerates the Compose env file.
+  for prefix in MN_BLUEPRINT_WEB_UI_PORT MN_AUTO_PORT; do
+    start_key="${prefix}_START"
+    end_key="${prefix}_END"
+    policy_key="${prefix}_RANGE_POLICY"
+    start="${!start_key:-$(mn_read_env_value "$compose_env" "$start_key")}" || return
+    end="${!end_key:-$(mn_read_env_value "$compose_env" "$end_key")}" || return
+    if [ -n "${!start_key:-}${!end_key:-}" ]; then
+      policy=fixed
+    else
+      policy="$(mn_read_env_value "$compose_env" "$policy_key")" || return
+    fi
+    printf '%s=%s\n' "$start_key" "$start" "$end_key" "$end" "$policy_key" "$policy"
+  done
+}
+
 function mn_prepare_openshell_gateway_for_start() {
   [ "$INSTALL_OPENSHELL" = "Y" ] || return 0
   # Compose creates its network before we resolve the Linux bridge address.
@@ -1483,25 +1509,38 @@ function mn_prepare_openshell_gateway_for_start() {
 function mn_run_runtime_start_command() {
   local log_dir="${TMPDIR:-/tmp}/mirror_neuron_install"
   local log_file="${log_dir}/runtime-start.$$.log"
-  local status
+  local status busy_port="" bind_error
+  local bind_error_pattern='(failed to bind host port |Bind for |listen tcp[46]? )[^[:space:]]+:([0-9]+)(/tcp: address already in use| failed: port is already allocated|: bind: address already in use)'
 
   # Never hide command output while leaving it attached to interactive input.
   # A future CLI prompt must be visible instead of appearing as an installer hang.
   if [ "$MN_INSTALL_VERBOSE" = "Y" ] || [ "${NON_INTERACTIVE:-N}" != "Y" ]; then
-    MN_DISABLE_UPDATE_CHECK=1 "$@"
-    return
-  fi
-
-  mkdir -p "$log_dir"
-  if MN_DISABLE_UPDATE_CHECK=1 MN_CLI_OUTPUT=plain "$@" </dev/null >"$log_file" 2>&1; then
-    grep -E '(^|[[:space:]])(! Warning:|warning:|× Error:|error:)' "$log_file" >&3 2>/dev/null || true
-    rm -f "$log_file"
-    return 0
+    if MN_DISABLE_UPDATE_CHECK=1 "$@"; then
+      return 0
+    else
+      status=$?
+    fi
   else
-    status=$?
+    mkdir -p "$log_dir"
+    if MN_DISABLE_UPDATE_CHECK=1 MN_CLI_OUTPUT=plain "$@" </dev/null >"$log_file" 2>&1; then
+      grep -E '(^|[[:space:]])(Warning:|warning:|× Error:|error:)' "$log_file" >&3 2>/dev/null || true
+      rm -f "$log_file"
+      return 0
+    else
+      status=$?
+    fi
+    print_warning "Runtime startup details: $log_file"
+    bind_error="$(grep -m 1 -E "$bind_error_pattern" "$log_file" || true)"
+    if [[ "$bind_error" =~ $bind_error_pattern ]]; then
+      busy_port="${BASH_REMATCH[2]}"
+    fi
   fi
 
-  MN_RUNTIME_START_LOG="$log_file"
+  if [ -n "$busy_port" ]; then
+    print_error "Runtime startup failed. Docker could not publish TCP port $busy_port because it is already in use. Free the port or change its mapping, then retry mn-runtime start."
+  else
+    print_error "Runtime startup failed. Resolve the reported error, then retry mn-runtime start."
+  fi
   return "$status"
 }
 
@@ -1853,13 +1892,6 @@ function mn_reset_resolve_home_or_exit() {
   MN_RESET_HOME="$resolved_home"
 }
 
-function mn_reset_read_env_value() {
-  local file="$1"
-  local key="$2"
-  [ -f "$file" ] || return 0
-  awk -F= -v key="$key" '$1 == key {print substr($0, index($0, "=") + 1); exit}' "$file"
-}
-
 MN_RESET_CLEANUP_IMAGES=()
 
 function mn_reset_add_cleanup_image() {
@@ -1901,7 +1933,7 @@ function mn_reset_capture_cleanup_images() {
   # A prior reset may already have removed the containers while leaving
   # Docker-owned bind-mount files behind. Redis is part of the managed
   # runtime, and its locally cached image provides a small POSIX shell.
-  redis_image="$(mn_reset_read_env_value "$compose_env_file" "MN_REDIS_IMAGE")"
+  redis_image="$(mn_read_env_value "$compose_env_file" "MN_REDIS_IMAGE")"
   redis_image="${redis_image:-$MN_DEFAULT_REDIS_IMAGE}"
   if docker image inspect "$redis_image" >/dev/null 2>&1; then
     mn_reset_add_cleanup_image "$redis_image"
@@ -1973,7 +2005,7 @@ function mn_reset_docker_state_or_exit() {
     exit 1
   fi
 
-  project_name="$(mn_reset_read_env_value "$compose_env_file" "COMPOSE_PROJECT_NAME")"
+  project_name="$(mn_read_env_value "$compose_env_file" "COMPOSE_PROJECT_NAME")"
   project_name="${project_name:-mirror-neuron}"
   if ! [[ "$project_name" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]]; then
     mn_reset_error "Invalid Compose project name in ${compose_env_file}: ${project_name}"
@@ -3990,7 +4022,7 @@ EOF
 
   function write_runtime_compose_files() {
     local context_auth_token profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_agents_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image litellm_gateway_bind_host openshell_gateway_bind_host openshell_gateway_endpoint api_host
-    local grpc_auth_token grpc_admin_token
+    local grpc_auth_token grpc_admin_token runtime_port_settings
     grpc_auth_token="$(resolve_secret_file "${MN_GRPC_AUTH_TOKEN:-}" "${INSTALL_DIR}/grpc_auth.token" "MN_GRPC_AUTH_TOKEN")"
     grpc_admin_token="$(resolve_secret_file "${MN_GRPC_ADMIN_TOKEN:-}" "${INSTALL_DIR}/grpc_admin.token" "MN_GRPC_ADMIN_TOKEN")"
     context_auth_token="$(resolve_secret_file "${MN_CONTEXT_AUTH_TOKEN:-}" "${INSTALL_DIR}/context_auth.token" "MN_CONTEXT_AUTH_TOKEN")"
@@ -4042,6 +4074,7 @@ EOF
     if [ "$INSTALL_OPENSHELL" = "Y" ]; then
       write_openshell_compose_config
     fi
+    runtime_port_settings="$(mn_runtime_port_settings "$RUNTIME_COMPOSE_ENV")"
     cat >"$RUNTIME_COMPOSE_ENV" <<EOF
 COMPOSE_PROJECT_NAME=mirror-neuron
 COMPOSE_PROFILES=${profiles}
@@ -4103,8 +4136,7 @@ MN_WEB_UI_PACKAGE_VERSION=${MN_WEB_UI_PACKAGE_VERSION}
 MN_WEB_UI_API_HOST=${MN_WEB_UI_API_HOST:-host.docker.internal}
 MN_BLUEPRINT_WEB_UI_BIND_HOST=${MN_BLUEPRINT_WEB_UI_BIND_HOST:-0.0.0.0}
 MN_BLUEPRINT_WEB_UI_PUBLIC_HOST=${MN_BLUEPRINT_WEB_UI_PUBLIC_HOST:-localhost}
-MN_BLUEPRINT_WEB_UI_PORT_START=${MN_BLUEPRINT_WEB_UI_PORT_START:-61000}
-MN_BLUEPRINT_WEB_UI_PORT_END=${MN_BLUEPRINT_WEB_UI_PORT_END:-61049}
+${runtime_port_settings}
 MN_BLUEPRINT_WEB_UI_PORT_ALLOCATION_MODE=${MN_BLUEPRINT_WEB_UI_PORT_ALLOCATION_MODE:-prepublished}
 MN_ENV=${MN_ENV:-prod}
 MN_USE_LOCAL_SKILLS=${MN_USE_LOCAL_SKILLS}
@@ -4520,11 +4552,7 @@ EOF
   if [ "$START_NOW" = "Y" ]; then
     mn_print_stage "Starting MirrorNeuron services"
     mn_prepare_openshell_gateway_for_start
-    if ! mn_run_runtime_start_command "$BIN_DIR/mn-runtime" start; then
-      [ -n "$MN_RUNTIME_START_LOG" ] && print_warning "Runtime startup details: $MN_RUNTIME_START_LOG"
-      print_error "Runtime startup failed. Restore the original node identity/configuration, then retry mn-runtime start."
-      return 1
-    fi
+    mn_run_runtime_start_command "$BIN_DIR/mn-runtime" start || return 1
     if [ "$INSTALL_OPENSHELL" = "Y" ]; then
       wait_for_openshell_worker_service
     fi
@@ -5679,8 +5707,8 @@ EOF
   }
 
   function write_runtime_compose_files() {
-    local context_auth_token profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_agents_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image litellm_gateway_bind_host openshell_gateway_bind_host openshell_gateway_endpoint api_host blueprint_web_ui_port_start blueprint_web_ui_port_end
-    local grpc_auth_token grpc_admin_token
+    local context_auth_token profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_agents_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image litellm_gateway_bind_host openshell_gateway_bind_host openshell_gateway_endpoint api_host
+    local grpc_auth_token grpc_admin_token runtime_port_settings
     grpc_auth_token="$(resolve_secret_file "${MN_GRPC_AUTH_TOKEN:-}" "${INSTALL_DIR}/grpc_auth.token" "MN_GRPC_AUTH_TOKEN")"
     grpc_admin_token="$(resolve_secret_file "${MN_GRPC_ADMIN_TOKEN:-}" "${INSTALL_DIR}/grpc_admin.token" "MN_GRPC_ADMIN_TOKEN")"
     context_auth_token="$(resolve_secret_file "${MN_CONTEXT_AUTH_TOKEN:-}" "${INSTALL_DIR}/context_auth.token" "MN_CONTEXT_AUTH_TOKEN")"
@@ -5732,12 +5760,7 @@ EOF
     if [ "$INSTALL_OPENSHELL" = "Y" ]; then
       write_openshell_compose_config
     fi
-    # Preserve a locally selected Blueprint UI range on later local-source
-    # refreshes. Docker Desktop reserves every prepublished port in the range.
-    blueprint_web_ui_port_start="${MN_BLUEPRINT_WEB_UI_PORT_START:-$(read_env_value "$RUNTIME_COMPOSE_ENV" "MN_BLUEPRINT_WEB_UI_PORT_START")}"
-    blueprint_web_ui_port_end="${MN_BLUEPRINT_WEB_UI_PORT_END:-$(read_env_value "$RUNTIME_COMPOSE_ENV" "MN_BLUEPRINT_WEB_UI_PORT_END")}"
-    blueprint_web_ui_port_start="${blueprint_web_ui_port_start:-61000}"
-    blueprint_web_ui_port_end="${blueprint_web_ui_port_end:-61049}"
+    runtime_port_settings="$(mn_runtime_port_settings "$RUNTIME_COMPOSE_ENV")"
     cat >"$RUNTIME_COMPOSE_ENV" <<EOF
 COMPOSE_PROJECT_NAME=mirror-neuron
 COMPOSE_PROFILES=${profiles}
@@ -5799,8 +5822,7 @@ MN_WEB_UI_PACKAGE_VERSION=${MN_WEB_UI_PACKAGE_VERSION}
 MN_WEB_UI_API_HOST=${MN_WEB_UI_API_HOST:-host.docker.internal}
 MN_BLUEPRINT_WEB_UI_BIND_HOST=${MN_BLUEPRINT_WEB_UI_BIND_HOST:-0.0.0.0}
 MN_BLUEPRINT_WEB_UI_PUBLIC_HOST=${MN_BLUEPRINT_WEB_UI_PUBLIC_HOST:-localhost}
-MN_BLUEPRINT_WEB_UI_PORT_START=${blueprint_web_ui_port_start}
-MN_BLUEPRINT_WEB_UI_PORT_END=${blueprint_web_ui_port_end}
+${runtime_port_settings}
 MN_BLUEPRINT_WEB_UI_PORT_ALLOCATION_MODE=${MN_BLUEPRINT_WEB_UI_PORT_ALLOCATION_MODE:-prepublished}
 MN_ENV=${MN_ENV:-prod}
 MN_USE_LOCAL_SKILLS=${MN_USE_LOCAL_SKILLS}
@@ -6221,11 +6243,7 @@ EOF
     mn_print_stage "Starting MirrorNeuron services"
     "$VENV_DIR/bin/mn" runtime stop >/dev/null 2>&1 || true
     mn_prepare_openshell_gateway_for_start
-    if ! mn_run_runtime_start_command "$BIN_DIR/mn-runtime" start; then
-      [ -n "$MN_RUNTIME_START_LOG" ] && print_warning "Runtime startup details: $MN_RUNTIME_START_LOG"
-      print_error "Runtime startup failed. Restore the original node identity/configuration, then retry mn-runtime start."
-      return 1
-    fi
+    mn_run_runtime_start_command "$BIN_DIR/mn-runtime" start || return 1
     if [ "$INSTALL_OPENSHELL" = "Y" ]; then
       wait_for_openshell_worker_service
     fi
@@ -7674,7 +7692,7 @@ EOF
 
   function write_runtime_compose_files() {
     local context_auth_token profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_agents_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image litellm_gateway_bind_host openshell_gateway_bind_host openshell_gateway_endpoint api_host
-    local grpc_auth_token grpc_admin_token
+    local grpc_auth_token grpc_admin_token runtime_port_settings
     grpc_auth_token="$(resolve_secret_file "${MN_GRPC_AUTH_TOKEN:-}" "${INSTALL_DIR}/grpc_auth.token" "MN_GRPC_AUTH_TOKEN")"
     grpc_admin_token="$(resolve_secret_file "${MN_GRPC_ADMIN_TOKEN:-}" "${INSTALL_DIR}/grpc_admin.token" "MN_GRPC_ADMIN_TOKEN")"
     context_auth_token="$(resolve_secret_file "${MN_CONTEXT_AUTH_TOKEN:-}" "${INSTALL_DIR}/context_auth.token" "MN_CONTEXT_AUTH_TOKEN")"
@@ -7726,6 +7744,7 @@ EOF
     if [ "$INSTALL_OPENSHELL" = "Y" ]; then
       write_openshell_compose_config
     fi
+    runtime_port_settings="$(mn_runtime_port_settings "$RUNTIME_COMPOSE_ENV")"
     cat >"$RUNTIME_COMPOSE_ENV" <<EOF
 COMPOSE_PROJECT_NAME=mirror-neuron
 COMPOSE_PROFILES=${profiles}
@@ -7787,8 +7806,7 @@ MN_WEB_UI_PACKAGE_VERSION=${MN_WEB_UI_PACKAGE_VERSION}
 MN_WEB_UI_API_HOST=${MN_WEB_UI_API_HOST:-host.docker.internal}
 MN_BLUEPRINT_WEB_UI_BIND_HOST=${MN_BLUEPRINT_WEB_UI_BIND_HOST:-0.0.0.0}
 MN_BLUEPRINT_WEB_UI_PUBLIC_HOST=${MN_BLUEPRINT_WEB_UI_PUBLIC_HOST:-localhost}
-MN_BLUEPRINT_WEB_UI_PORT_START=${MN_BLUEPRINT_WEB_UI_PORT_START:-61000}
-MN_BLUEPRINT_WEB_UI_PORT_END=${MN_BLUEPRINT_WEB_UI_PORT_END:-61049}
+${runtime_port_settings}
 MN_BLUEPRINT_WEB_UI_PORT_ALLOCATION_MODE=${MN_BLUEPRINT_WEB_UI_PORT_ALLOCATION_MODE:-prepublished}
 MN_ENV=${MN_ENV:-prod}
 MN_USE_LOCAL_SKILLS=${MN_USE_LOCAL_SKILLS}
@@ -8111,11 +8129,7 @@ EOF
   if [ "$START_NOW" = "Y" ]; then
     mn_print_stage "Starting MirrorNeuron services"
     mn_prepare_openshell_gateway_for_start
-    if ! mn_run_runtime_start_command "$BIN_DIR/mn-runtime" start; then
-      [ -n "$MN_RUNTIME_START_LOG" ] && print_warning "Runtime startup details: $MN_RUNTIME_START_LOG"
-      print_error "Runtime startup failed. Restore the original node identity/configuration, then retry mn-runtime start."
-      return 1
-    fi
+    mn_run_runtime_start_command "$BIN_DIR/mn-runtime" start || return 1
     if [ "$INSTALL_OPENSHELL" = "Y" ]; then
       wait_for_openshell_worker_service
     fi

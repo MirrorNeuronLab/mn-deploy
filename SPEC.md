@@ -86,6 +86,12 @@ accessible Docker daemon before touching existing runtime data.
 All modes use the single `mn runtime start` contract. There is no worker-only
 runtime, and worker-only installer flags are rejected.
 
+All modes leave fresh Blueprint Web UI and automatic port ranges for the
+runtime to select. Reinstall preserves each saved range and its allocation
+policy. Explicit environment values override the saved range and pin it.
+The installer reports a Docker TCP port conflict and retains the startup log
+when a non-interactive startup fails.
+
 When OpenShell is selected, automatic startup creates its Compose service and
 network before resolving the final host gateway endpoint. The installer
 persists that endpoint before `mn runtime start` launches the native SDK

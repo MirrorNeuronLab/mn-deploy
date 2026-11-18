@@ -128,6 +128,18 @@ reset with no remaining options, empty Python component selections, and optional
 wheel-search arguments. The optional Ubuntu privilege prefix is also safe when
 running as root. All three install modes retain argument boundaries and defaults.
 
+## Runtime port selection (unreleased)
+
+The runtime selects the published ranges for Blueprint Web UIs and local
+automatic port allocation. It retries with an available range when Docker
+rejects an automatically selected port. The installer retains both ranges
+across reinstalls and reports the TCP port if a Docker bind conflict stops
+startup. Binary installs need the matching `mirrorneuron-runtime` release for
+automatic retry.
+
+Set `MN_BLUEPRINT_WEB_UI_PORT_START` and `MN_BLUEPRINT_WEB_UI_PORT_END`, or
+`MN_AUTO_PORT_START` and `MN_AUTO_PORT_END`, to pin either range.
+
 ## Reinstall and macOS paths (unreleased)
 
 Release this installer together with the CLI change that resolves sidecars from
@@ -424,10 +436,6 @@ see [Google's npm package contract](https://docs.cloud.google.com/artifact-regis
   authenticated peer gateway can route remote model requests through it.
   Restrict port `4000` to trusted LAN/VPN peers with the host firewall; agents
   still call their owner Core's LiteLLM gateway first.
-- If the default Blueprint Web UI range (`61000`–`61049`) conflicts with a
-  local service, set `MN_BLUEPRINT_WEB_UI_PORT_START` and
-  `MN_BLUEPRINT_WEB_UI_PORT_END` for one local install. The selected range is
-  retained by later local-source refreshes unless explicitly overridden.
 - The Syncthing sidecar is forced into LAN-only mode before every start,
   including when it reuses an existing configuration. Relay and global
   discovery connections, NAT/STUN traversal, usage reporting, automatic
