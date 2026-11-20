@@ -5,82 +5,82 @@
 name = "mn-python-sdk-common"
 path = "mn-python-sdk/packages/common"
 publish_group = "runtime"
-version = "1.4.16"
+version = "1.4.17"
 installer_groups = ["sdk"]
 binary_default = true
-source_hash = "v2:864c4f4408980d1ba44198456028c9c7d68b8a92bf958f29083129352e78f593"
+source_hash = "v2:b1087b7756d6b540d5dcae7d39c232ba5737e50510bd771d7a545eef984e7d08"
 
 [[packages]]
 name = "mn-python-sdk-web-ui"
 path = "mn-python-sdk/packages/web-ui"
 publish_group = "runtime"
-version = "1.4.16"
+version = "1.4.17"
 installer_groups = ["sdk"]
 binary_default = true
-source_hash = "v2:864c4f4408980d1ba44198456028c9c7d68b8a92bf958f29083129352e78f593"
+source_hash = "v2:b1087b7756d6b540d5dcae7d39c232ba5737e50510bd771d7a545eef984e7d08"
 
 [[packages]]
 name = "mn-python-sdk-models"
 path = "mn-python-sdk/packages/models"
 publish_group = "runtime"
-version = "1.4.16"
+version = "1.4.17"
 installer_groups = []
 binary_default = false
-source_hash = "v2:864c4f4408980d1ba44198456028c9c7d68b8a92bf958f29083129352e78f593"
+source_hash = "v2:b1087b7756d6b540d5dcae7d39c232ba5737e50510bd771d7a545eef984e7d08"
 
 [[packages]]
 name = "mn-python-sdk-mcp"
 path = "mn-python-sdk/packages/mcp"
 publish_group = "runtime"
-version = "1.4.16"
+version = "1.4.17"
 installer_groups = []
 binary_default = false
-source_hash = "v2:864c4f4408980d1ba44198456028c9c7d68b8a92bf958f29083129352e78f593"
+source_hash = "v2:b1087b7756d6b540d5dcae7d39c232ba5737e50510bd771d7a545eef984e7d08"
 
 [[packages]]
 name = "mn-python-sdk-collaboration"
 path = "mn-python-sdk/packages/collaboration"
 publish_group = "runtime"
-version = "1.4.16"
+version = "1.4.17"
 installer_groups = []
 binary_default = false
-source_hash = "v2:864c4f4408980d1ba44198456028c9c7d68b8a92bf958f29083129352e78f593"
+source_hash = "v2:b1087b7756d6b540d5dcae7d39c232ba5737e50510bd771d7a545eef984e7d08"
 
 [[packages]]
 name = "mn-python-sdk-rag"
 path = "mn-python-sdk/packages/rag"
 publish_group = "runtime"
-version = "1.4.16"
+version = "1.4.17"
 installer_groups = []
 binary_default = false
-source_hash = "v2:864c4f4408980d1ba44198456028c9c7d68b8a92bf958f29083129352e78f593"
+source_hash = "v2:b1087b7756d6b540d5dcae7d39c232ba5737e50510bd771d7a545eef984e7d08"
 
 [[packages]]
 name = "mn-python-sdk-job-response"
 path = "mn-python-sdk/packages/job-response"
 publish_group = "runtime"
-version = "1.4.16"
+version = "1.4.17"
 installer_groups = []
 binary_default = false
-source_hash = "v2:864c4f4408980d1ba44198456028c9c7d68b8a92bf958f29083129352e78f593"
+source_hash = "v2:b1087b7756d6b540d5dcae7d39c232ba5737e50510bd771d7a545eef984e7d08"
 
 [[packages]]
 name = "mirrorneuron-python-sdk"
 path = "mn-python-sdk"
 publish_group = "runtime"
-version = "1.4.16"
+version = "1.4.17"
 installer_groups = ["sdk"]
 binary_default = true
-source_hash = "v2:864c4f4408980d1ba44198456028c9c7d68b8a92bf958f29083129352e78f593"
+source_hash = "v2:b1087b7756d6b540d5dcae7d39c232ba5737e50510bd771d7a545eef984e7d08"
 
 [[packages]]
 name = "mirrorneuron-runtime"
 path = "mn-python-sdk/packages/runtime"
 publish_group = "runtime"
-version = "1.4.16"
+version = "1.4.17"
 installer_groups = ["runtime-node"]
 binary_default = true
-source_hash = "v2:864c4f4408980d1ba44198456028c9c7d68b8a92bf958f29083129352e78f593"
+source_hash = "v2:b1087b7756d6b540d5dcae7d39c232ba5737e50510bd771d7a545eef984e7d08"
 
 [[packages]]
 name = "mirrorneuron-cli"
@@ -267,10 +267,10 @@ source_hash = "v2:2fa4f9238274da4692953aff894bb01263b0fe689a24f294b4e27b561c6721
 name = "mirrorneuron-macos-logs-skill"
 path = "mn-skills/macos_logs_skill"
 publish_group = "skill"
-version = "1.3.67"
+version = "1.3.68"
 installer_groups = ["skill"]
 binary_default = false
-source_hash = "v2:e0d7e2db3b2ae062663281206348f21a058dfd1529bcd83383fd28e21a7f5744"
+source_hash = "v2:8db6943053e86c8bcdb074895889b4021bc612e392592c266a8e3951123e9e72"
 
 [[packages]]
 name = "mirrorneuron-market-research-skill"
@@ -548,10 +548,10 @@ source_hash = "v2:d7346b383c5aa33998a13e536b0ed3973e40aa118c31b824c9a0a23028c3b6
 name = "mn-blueprint-blocks"
 path = "mn-python-sdk/packages/blueprint-blocks"
 publish_group = "runtime"
-version = "1.4.16"
+version = "1.4.17"
 installer_groups = ["sdk"]
 binary_default = true
-source_hash = "v2:864c4f4408980d1ba44198456028c9c7d68b8a92bf958f29083129352e78f593"
+source_hash = "v2:b1087b7756d6b540d5dcae7d39c232ba5737e50510bd771d7a545eef984e7d08"
 
 [[packages]]
 name = "mirrorneuron-static-code-analysis-skill"
@@ -566,10 +566,10 @@ source_hash = "v2:bab2760f8b2c9d1e365a251ced06629d93b86ea572cd9ec693065ce0dfdc90
 name = "mirrorneuron-web-report-skill"
 path = "mn-skills/web_report_skill"
 publish_group = "skill"
-version = "1.3.65"
+version = "1.3.66"
 installer_groups = ["skill"]
 binary_default = false
-source_hash = "v2:18f8209d42f64d9a2915437ba1756c54912ba16b9b828956b53ba8c1842bf3ac"
+source_hash = "v2:c06d0fa159980627fa07adbd09463bffb0167f52e6829fe1439f28f2a3745729"
 
 [[packages]]
 name = "mirrorneuron-computer-use-skill"
