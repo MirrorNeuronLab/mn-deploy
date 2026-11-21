@@ -2,9 +2,12 @@ import importlib.util
 from pathlib import Path
 
 
+SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
+
+
 def test_cache_warmup_uses_sdk_catalog_recipe(monkeypatch, tmp_path, capsys):
     spec = importlib.util.spec_from_file_location(
-        "prism_dmr", Path(__file__).with_name("build-prism-dmr.py")
+        "prism_dmr", SCRIPTS / "build-prism-dmr.py"
     )
     wrapper = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(wrapper)

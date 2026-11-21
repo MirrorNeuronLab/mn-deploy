@@ -33,7 +33,7 @@ export PYTHONPATH="$WORKSPACE_ROOT/mn-python-sdk/packages/runtime/src:$WORKSPACE
   tests/integration/contracts/test_run_admission_contracts.py \
   tests/integration/contracts/test_federated_model_status_contract.py \
   tests/integration/contracts/test_blueprint_runtime_model_preflight_contract.py -q)
-(cd "$DEPLOY_DIR" && "$VALIDATION_PYTHON" -m pytest scripts/test_job_ui_proxy.py -q)
+(cd "$DEPLOY_DIR" && "$VALIDATION_PYTHON" -m pytest tests/test_job_ui_proxy.py -q)
 (cd "$WORKSPACE_ROOT/mn-python-sdk" && "$VALIDATION_PYTHON" -m pytest tests packages/runtime/tests_runtime -q)
 (cd "$WORKSPACE_ROOT/mn-cli" && "$VALIDATION_PYTHON" -m pytest -q)
 (cd "$WORKSPACE_ROOT/mn-api" && "$VALIDATION_PYTHON" -m pytest -q)

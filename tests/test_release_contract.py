@@ -13,10 +13,11 @@ import zipfile
 import pytest
 
 
+SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
+
+
 def module(filename):
-    spec = importlib.util.spec_from_file_location(
-        filename, Path(__file__).with_name(filename)
-    )
+    spec = importlib.util.spec_from_file_location(filename, SCRIPTS / filename)
     result = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(result)
     return result
@@ -29,7 +30,7 @@ stager = module("stage-python-release-sources.py")
 
 
 def test_release_preparation_reads_package_index_with_bash_32(tmp_path):
-    release = Path(__file__).with_name("release_all.sh")
+    release = SCRIPTS / "release_all.sh"
     source, separator, _ = release.read_text().partition('\nwhile [[ "$#" -gt 0 ]]')
     assert separator
     functions = tmp_path / "release-functions.sh"
@@ -143,7 +144,7 @@ def test_release_preview_uses_available_planning_python_without_writes(
     scripts = deploy / "scripts"
     scripts.mkdir(parents=True)
     for name in ("release_all.sh", "prepare-python-package-index.py"):
-        shutil.copy2(Path(__file__).with_name(name), scripts / name)
+        shutil.copy2(SCRIPTS / name, scripts / name)
     (scripts / "publish_computer_use_to_google_artifact_registry.py").write_text(
         "import sys\nassert len(sys.argv) == 1, 'preview must not apply changes'\n"
     )
@@ -211,7 +212,7 @@ def test_release_preview_uses_available_planning_python_without_writes(
 def test_release_preview_preserves_explicit_python_and_never_installs(
     tmp_path, failure
 ):
-    release = Path(__file__).with_name("release_all.sh")
+    release = SCRIPTS / "release_all.sh"
     source, _, _ = release.read_text().partition('\nwhile [[ "$#" -gt 0 ]]')
     functions = tmp_path / "release-functions.sh"
     functions.write_text(source)
@@ -240,10 +241,7 @@ def test_release_preview_preserves_explicit_python_and_never_installs(
 )
 def test_publishing_prepares_python_312_and_reuses_ready_environment(tmp_path, state):
     source, _, _ = (
-        Path(__file__)
-        .with_name("release_all.sh")
-        .read_text()
-        .partition('\nwhile [[ "$#" -gt 0 ]]')
+        (SCRIPTS / "release_all.sh").read_text().partition('\nwhile [[ "$#" -gt 0 ]]')
     )
     functions = tmp_path / "release-functions.sh"
     functions.write_text(source)
@@ -603,7 +601,7 @@ def test_incompatible_frozen_index_has_a_distinct_failure_status(tmp_path):
     result = subprocess.run(
         [
             sys.executable,
-            str(Path(__file__).with_name("prepare-python-package-index.py")),
+            str(SCRIPTS / "prepare-python-package-index.py"),
             str(index),
             str(tmp_path),
             "unused",
@@ -630,9 +628,7 @@ def test_publisher_rejects_frozen_conflict_before_builds_or_artifact_cleanup(tmp
     gcloud = tmp_path / "gcloud"
     gcloud.write_text("#!/bin/sh\nexit 99\n")
     gcloud.chmod(0o755)
-    publisher = Path(__file__).with_name(
-        "publish_python_packages_to_google_artifact_registry.sh"
-    )
+    publisher = SCRIPTS / "publish_python_packages_to_google_artifact_registry.sh"
     result = subprocess.run(
         [
             "bash",
@@ -659,7 +655,7 @@ def test_publisher_rejects_frozen_conflict_before_builds_or_artifact_cleanup(tmp
 
 
 def test_frozen_conflict_does_not_recommend_resuming_python(tmp_path):
-    release = Path(__file__).with_name("release_all.sh")
+    release = SCRIPTS / "release_all.sh"
     source, _, _ = release.read_text().partition('\nwhile [[ "$#" -gt 0 ]]')
     functions = tmp_path / "release-functions.sh"
     functions.write_text(source)

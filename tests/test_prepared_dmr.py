@@ -15,9 +15,12 @@ from mn_sdk.dmr_archive import extract_archive
 from mn_sdk.dmr_recipe import preparation_recipe, managed_runner_version
 
 
+SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
+
+
 def publisher():
     spec = importlib.util.spec_from_file_location(
-        "prepared_dmr", Path(__file__).with_name("publish-prepared-dmr.py")
+        "prepared_dmr", SCRIPTS / "publish-prepared-dmr.py"
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -275,7 +278,7 @@ def test_restore_wrapper_uses_selected_python_and_preserves_arguments(tmp_path):
         f"#!{sys.executable}\nimport json,os,sys\nfrom pathlib import Path\nPath({str(output)!r}).write_text(json.dumps([sys.argv[1:],os.environ['CLOUDSDK_PYTHON']]))\n"
     )
     python.chmod(0o755)
-    wrapper = Path(__file__).with_name("publish-dmr.sh")
+    wrapper = SCRIPTS / "publish-dmr.sh"
     env = {**os.environ, "MN_PUBLISH_PYTHON": str(python)}
     env.pop("CLOUDSDK_PYTHON", None)
     result = subprocess.run(

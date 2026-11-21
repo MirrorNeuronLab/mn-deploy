@@ -200,7 +200,7 @@ The SDK group selects `1.3.58`; other package versions remain independent.
 Offline verification:
 
 ```bash
-../mn-python-sdk/.venv/bin/python -m pytest scripts/test_release_contract.py -q
+../mn-python-sdk/.venv/bin/python -m pytest tests/test_release_contract.py -q
 ../mn-python-sdk/.venv/bin/python -m pytest ../mn-system-tests/tests/integration/installer -q
 ```
 

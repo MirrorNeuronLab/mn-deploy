@@ -23,6 +23,7 @@ installation or cleanup.
 - `save_install_support.sh`: creates versioned support snapshots.
 - `scripts/publish_*.sh`, `setup_google_artifact_registry.sh`: release publishing.
 - `scripts/`: validation, release packaging, and explicit state cleanup helpers.
+- `tests/`: offline regression tests for installers, release tools, and runtime containers.
 
 ## Installer Rules
 

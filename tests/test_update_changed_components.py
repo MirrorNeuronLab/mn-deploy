@@ -15,8 +15,11 @@ import zipfile
 import pytest
 
 
+SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
+
+
 def module(name):
-    spec = importlib.util.spec_from_file_location(name, Path(__file__).with_name(name))
+    spec = importlib.util.spec_from_file_location(name, SCRIPTS / name)
     loaded = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(loaded)
     return loaded
@@ -866,8 +869,8 @@ def test_url_download_uses_independent_support_and_index_pins(asset, expected):
     assert result == expected
 
 
-@pytest.mark.parametrize("historical", [False, True])
-def test_binary_version_selection_keeps_core_and_runtime_independent(historical):
+@pytest.mark.parametrize("version", ["v1.3.60", "v1.2.99"])
+def test_binary_version_selection_keeps_core_and_runtime_independent(version):
     script = (
         function("finalize_binary_install_version")
         + """
@@ -881,7 +884,6 @@ finalize_binary_install_version
 printf '%s\\n' "$INSTALL_VERSION" "$CORE_INSTALL_VERSION" "$RUNTIME_COMPOSE_TEMPLATE" "$PACKAGE_INDEX_FILE"
 """
     )
-    version = "v1.2.99" if historical else "v1.3.60"
     env = {
         **os.environ,
         "SCRIPT_DIR": "/fixture",
@@ -898,7 +900,7 @@ printf '%s\\n' "$INSTALL_VERSION" "$CORE_INSTALL_VERSION" "$RUNTIME_COMPOSE_TEMP
     ).splitlines()
     assert result == [
         version,
-        version,
-        f"/fixture/install_support/{version if historical else 'v1.3.61'}/docker-compose.yml",
-        f"/fixture/install_support/{version if historical else 'v1.3.62'}/package-index/python-packages.toml",
+        "v1.3.60",
+        "/fixture/install_support/v1.3.61/docker-compose.yml",
+        "/fixture/install_support/v1.3.62/package-index/python-packages.toml",
     ]

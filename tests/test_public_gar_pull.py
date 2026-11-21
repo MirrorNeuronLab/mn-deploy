@@ -57,7 +57,9 @@ elif args[:2] == ['image', 'inspect']:
         + ("mirror-neuron-core" if target == "core" else "membrane-context-engine")
         + ":v1.3.57"
     )
-    script = "\n".join(function("mn_pull_public_gar_image")) + "\n"
+    script = "exec 3>&2\n"
+    for name in ("mn_run_logged", "mn_pull_public_gar_image"):
+        script += "\n".join(function(name)) + "\n"
     if target == "core":
         script += "\n".join(function("install_core_from_gar")) + "\n"
         script += 'core_gar_image_for_tag() { printf "%s" "$TEST_IMAGE"; }\n'
@@ -82,6 +84,9 @@ runtime_compose() { echo "compose:$*"; }
         env={
             **os.environ,
             "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "MN_INSTALL_VERBOSE": "N",
+            "MN_INSTALL_ROLE": "full",
+            "MN_PYTHON_BIN": sys.executable,
             "DOCKER_CONFIG": str(config),
             "DOCKER_HOST": host,
             "DOCKER_CONTEXT": context,

@@ -747,7 +747,7 @@ Requires authenticated `gcloud` with Artifact Registry deletion permission and
 Python 3.10+. Run offline regression tests with:
 
 ```bash
-../mn-python-sdk/.venv/bin/python -m pytest scripts/test_clean_gar.py -q
+../mn-python-sdk/.venv/bin/python -m pytest tests/test_clean_gar.py -q
 ```
 
 ## Filesystem runtime memory (unreleased)
@@ -844,7 +844,7 @@ a Linux Docker image cannot accelerate inference through Apple Metal.
 
 The Web UI sidecar supports owner-scoped Job UI forwarding across connected
 computers, including live WebSockets. It requires the matching API relay and SDK
-execution-bound UI handles. `scripts/test_job_ui_proxy.py` exercises the actual
+execution-bound UI handles. `tests/test_job_ui_proxy.py` exercises the actual
 Compose JavaScript without Docker or a live runtime.
 
 ## Native computer-use app releases
@@ -875,6 +875,6 @@ Xcode or gcloud. Existing immutable install-support snapshots remain unchanged.
 The runtime separation release gate (`scripts/validate-runtime-split.sh`) requires
 Node for the shipped browser proxy and Elixir for execution credential binding.
 Its offline phase runs worker SDK supervision
-and endpoint-publication contracts plus `scripts/test_job_ui_proxy.py`. The
+and endpoint-publication contracts plus `tests/test_job_ui_proxy.py`. The
 `--two-runtimes` phase exercises the browser URL through the real HTTP surface
 and both native gateways, including assets, video streaming and WebSockets.
