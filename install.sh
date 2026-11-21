@@ -2351,6 +2351,8 @@ MN_RESET_DOCKER_OWNERS
 }
 
 function mn_reset_install_state() {
+  local host_remove_error
+
   mn_reset_resolve_home_or_exit
   mn_reset_confirm_or_exit
   if ! command -v docker >/dev/null 2>&1; then
@@ -2382,9 +2384,13 @@ function mn_reset_install_state() {
   printf '==> Recreating MirrorNeuron runtime data directory\n' >&3
   if [ -d "$MN_RESET_HOME" ]; then
     chmod -R u+rwX "$MN_RESET_HOME" 2>/dev/null || true
-    if ! rm -rf "$MN_RESET_HOME"; then
-      mn_reset_warning "Host removal failed; cleaning Docker-owned runtime files through Docker."
+    # Docker can remove entries the host user cannot delete from the bind mount.
+    if ! host_remove_error="$(rm -rf "$MN_RESET_HOME" 2>&1)"; then
+      print_detail "Removing the remaining runtime files through Docker."
       if ! mn_reset_remove_docker_owned_files; then
+        if [ -n "$host_remove_error" ]; then
+          printf '%s\n' "$host_remove_error" >&2
+        fi
         mn_reset_error "Could not remove MirrorNeuron runtime data: ${MN_RESET_HOME}"
         mn_reset_error "Docker could not clean the remaining runtime files. Verify Docker access, then repair ownership and rerun --reset."
         exit 1
