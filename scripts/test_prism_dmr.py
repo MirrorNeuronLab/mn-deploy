@@ -8,12 +8,12 @@ def test_cache_warmup_uses_sdk_catalog_recipe(monkeypatch, tmp_path, capsys):
     )
     wrapper = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(wrapper)
-    entry = {"id": "bonsai2:ptq1_0", "preparation": {"kind": "dmr_native"}}
+    entry = {"id": "inkling-2-mini:q4_k_m", "preparation": {"kind": "dmr_native"}}
     calls = []
     monkeypatch.setattr(
         wrapper,
         "resolve_model_entry",
-        lambda value: entry if value == "small" else None,
+        lambda value: entry if value == "inkling-2-mini" else None,
     )
     monkeypatch.setattr(
         wrapper,
@@ -26,4 +26,4 @@ def test_cache_warmup_uses_sdk_catalog_recipe(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr("sys.argv", ["build-prism-dmr.py", "--backend", "metal"])
     wrapper.main()
     assert calls == [(entry, {"accelerator": "metal"})]
-    assert "mn model add small --local" in capsys.readouterr().out
+    assert "mn model add inkling-2-mini --local" in capsys.readouterr().out

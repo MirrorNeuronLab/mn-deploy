@@ -796,16 +796,15 @@ complete document conversion, embedded PDF extraction and lazy OCR. Separate
 document-reading, PDF-extraction and OCR packages are removed from the current
 inventory. Install-support snapshots remain historical release records.
 
-## Prism-backed DMR for Bonsai2 (unreleased)
+## Native DMR for Inkling 2 Mini
 
 Model installation and first use execute the SDK-owned catalog `preparation`
 recipe automatically. It downloads/caches a prepared native DMR from public GAR
-with pinned archive checksums and Prism backend assets, starts an owned controller
+with pinned archive checksums and llama.cpp assets, starts an owned controller
 and wires per-model endpoints. Users need no Go, Git, compiler or Google Cloud
 credentials; the installed Python SDK handles preparation.
-`scripts/build-prism-dmr.py` is a thin SDK adapter for warming that backend cache
-without pulling weights; it starts the controller. See [catalog DMR preparation](../mn-docs/model-runtime.md#bonsai2-on-docker-model-runner)
-for verification and lifecycle details.
+`scripts/build-prism-dmr.py` warms Inkling's backend cache and starts its
+controller without pulling weights. See [catalog DMR preparation](../mn-docs/model-runtime.md#inkling-2-mini-on-docker-model-runner).
 
 Release builders use `scripts/publish-prepared-dmr.py --output <empty-directory>`
 to compile the pinned runner with the SDK's HTTP, native transport and Prism
@@ -816,9 +815,9 @@ Go and Git are release-build dependencies only.
 Restore these shared runner archives after GAR cleanup with:
 
 ```bash
-./scripts/publish-dmr.sh --model bonsai2:ptq1_0 --output /tmp/managed-dmr-release --apply
+./scripts/publish-dmr.sh --model inkling-2-mini --output /tmp/managed-dmr-release --apply
 # Reuse a saved release without rebuilding:
-./scripts/publish-dmr.sh --model bonsai2:ptq1_0 --from-directory /tmp/managed-dmr-release --apply
+./scripts/publish-dmr.sh --model inkling-2-mini --from-directory /tmp/managed-dmr-release --apply
 ```
 
 The command uses `.venv-gar-publish/bin/python` by default, then `python3.12`;

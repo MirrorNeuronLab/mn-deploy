@@ -301,8 +301,8 @@ def main():
     )
     parser.add_argument(
         "--model",
-        default="small",
-        help="SDK catalog model whose shared runner to publish (default: small).",
+        default="inkling-2-mini",
+        help="SDK catalog model whose shared runner to publish (default: %(default)s).",
     )
     parser.add_argument("--project", default="mirrorneuron-public-packages")
     parser.add_argument("--location", default="us-central1")

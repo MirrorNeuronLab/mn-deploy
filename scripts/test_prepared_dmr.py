@@ -26,7 +26,7 @@ def publisher():
 
 def test_publisher_builds_pinned_cross_platform_archives(monkeypatch, tmp_path):
     module = publisher()
-    recipe = preparation_recipe(resolve_model_entry("small"))
+    recipe = preparation_recipe(resolve_model_entry("inkling-2-mini"))
     commands, patches = [], []
     monkeypatch.setattr("mn_sdk.dmr_build.patch_managed_server", patches.append)
 
@@ -112,7 +112,7 @@ DESTINATION = {
 
 
 def saved_release(module, directory):
-    recipe = preparation_recipe(resolve_model_entry("small"))
+    recipe = preparation_recipe(resolve_model_entry("inkling-2-mini"))
     document = copy.deepcopy(recipe.document["runner"])
     directory.mkdir(parents=True, exist_ok=True)
     for platform, asset in document["assets"].items():
@@ -255,7 +255,7 @@ def test_cli_reuses_saved_archives_without_rebuilding(monkeypatch, tmp_path):
         [
             "publish-prepared-dmr.py",
             "--model",
-            "bonsai2:ptq1_0",
+            "inkling-2-mini:q4_k_m",
             "--from-directory",
             str(directory),
         ],
@@ -264,7 +264,7 @@ def test_cli_reuses_saved_archives_without_rebuilding(monkeypatch, tmp_path):
     assert not published
     monkeypatch.setattr(sys, "argv", [*sys.argv, "--apply"])
     module.main()
-    assert models == ["bonsai2:ptq1_0"] * 2
+    assert models == ["inkling-2-mini:q4_k_m"] * 2
     assert len(published) == 1
 
 

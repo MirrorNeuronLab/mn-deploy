@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare Bonsai2's catalog-declared DMR backend through the installed SDK.
+"""Prepare Inkling 2 Mini's native DMR backend through the installed SDK.
 
 Normal model installation and first use already run this preparation. This
 entrypoint is only for warming the backend cache without downloading weights.
@@ -19,13 +19,13 @@ def main():
     args = parser.parse_args()
     try:
         entry = prepare_dmr_model(
-            resolve_model_entry("small"), accelerator=args.backend
+            resolve_model_entry("inkling-2-mini"), accelerator=args.backend
         )
         state = managed_descriptor(entry, required=True)
     except (ValueError, RuntimeError, OSError) as exc:
         parser.exit(1, f"error: {exc}\n")
     print(f"Prepared catalog DMR backend: {state['root']}")
-    print("Next: mn model add small --local")
+    print("Next: mn model add inkling-2-mini --local")
 
 
 if __name__ == "__main__":

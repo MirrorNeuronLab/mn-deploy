@@ -444,8 +444,8 @@ The Python SDK owns native DMR customization through catalog `preparation`
 recipes. Normal model installation and first use prepare/reuse the pinned
 runner/backend bundle on the selected owner and automatically select its control
 and gateway endpoints. Backend setup is not duplicated in the installer.
-`scripts/build-prism-dmr.py` delegates to `prepare_dmr_model` for an optional
-backend-cache warmup; it starts the controller without downloading weights.
+`scripts/build-prism-dmr.py` delegates to `prepare_dmr_model` to warm Inkling's
+backend cache and start its controller without downloading weights.
 The installed SDK and catalog are the recipe source of truth.
 
 Normal preparation downloads checksum-pinned native runners from public GAR;
@@ -469,7 +469,7 @@ anonymous downloads before shipping its URLs and checksums in the SDK catalog.
 
 `scripts/publish-dmr.sh` restores this shared native runner release after GAR
 cleanup, using the existing builder with `--match-catalog`. `--model` selects the
-SDK catalog recipe; `small` currently selects Bonsai2. Select either `--output`
+SDK catalog recipe and defaults to `inkling-2-mini`. Select either `--output`
 for an empty build directory or `--from-directory` for saved archives and their
 manifest. The latter requires no Git or Go. Local validation checks recipe identity,
 the complete platform inventory, filenames, URLs, non-symlink archives and SHA-256.
