@@ -6,6 +6,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 WORKSPACE_ROOT="$(cd "${DEPLOY_DIR}/.." && pwd)"
 
+# shellcheck source=scripts/release/commands.sh
+source "$SCRIPT_DIR/release/commands.sh"
+# shellcheck source=scripts/release/registry.sh
+source "$SCRIPT_DIR/release/registry.sh"
+# shellcheck source=scripts/release/multiarch.sh
+source "$SCRIPT_DIR/release/multiarch.sh"
+
 PROJECT="${MN_GAR_PROJECT:-mirrorneuron-public-packages}"
 LOCATION="${MN_GAR_LOCATION:-us-central1}"
 CORE_DIR="${MN_CORE_DIR:-${WORKSPACE_ROOT}/MirrorNeuron}"
@@ -24,7 +31,6 @@ DOCKER_BIN="${MN_DOCKER_BIN:-docker}"
 APPLY="N"
 TAG_LATEST="Y"
 WORKTREE_DIR=""
-EMULATE_AMD64="N"
 
 usage() {
   cat <<'EOF'
@@ -65,36 +71,6 @@ Examples:
 EOF
 }
 
-log() {
-  printf '%s\n' "$*"
-}
-
-die() {
-  printf 'ERROR: %s\n' "$*" >&2
-  exit 1
-}
-
-quote_args() {
-  local arg
-  for arg in "$@"; do
-    printf ' %q' "$arg"
-  done
-  printf '\n'
-}
-
-run_or_echo() {
-  if [ "$APPLY" = "Y" ]; then
-    "$@"
-  else
-    printf 'DRY RUN:'
-    quote_args "$@"
-  fi
-}
-
-command_exists() {
-  command -v "$1" >/dev/null 2>&1
-}
-
 normalize_version_tag() {
   local value="$1"
   value="${value#refs/tags/}"
@@ -107,44 +83,6 @@ normalize_version_tag() {
 validate_version_tag() {
   [[ "$1" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta|rc)\.(0|[1-9][0-9]*))?$ ]] ||
     die "Version must be vMAJOR.MINOR.PATCH (optionally -alpha.N, -beta.N, or -rc.N), got '$1'."
-}
-
-validate_qemu_mode() {
-  case "$QEMU_MODE" in
-  auto | always | never) ;;
-  *) die "QEMU mode must be auto, always, or never; got '$QEMU_MODE'." ;;
-  esac
-}
-
-platform_requested() {
-  local platforms="${DOCKER_PLATFORMS//[[:space:]]/}"
-  case ",${platforms}," in
-  *,"$1",*) return 0 ;;
-  *) return 1 ;;
-  esac
-}
-
-configure_amd64_emulation() {
-  platform_requested linux/amd64 || return
-
-  case "$QEMU_MODE" in
-  always)
-    EMULATE_AMD64="Y"
-    ;;
-  auto)
-    case "$HOST_ARCH" in
-    arm64 | aarch64) EMULATE_AMD64="Y" ;;
-    esac
-    ;;
-  never)
-    return
-    ;;
-  esac
-
-  if [ "$EMULATE_AMD64" = "Y" ]; then
-    log "Configuring amd64 QEMU emulation for Core release build on ${HOST_ARCH}."
-    run_or_echo "$DOCKER_BIN" run --privileged --rm "$QEMU_IMAGE" --install amd64
-  fi
 }
 
 infer_version() {
@@ -175,47 +113,6 @@ check_gcloud_auth_for_apply() {
     die "gcloud cannot refresh an access token for ${active_account}. Run: gcloud auth login"
 }
 
-ensure_repository_public() {
-  if [ "$APPLY" != "Y" ]; then
-    run_or_echo "$GCLOUD_BIN" artifacts repositories describe "$DOCKER_REPOSITORY" \
-      --project="$PROJECT" \
-      --location="$LOCATION"
-    run_or_echo "$GCLOUD_BIN" artifacts repositories create "$DOCKER_REPOSITORY" \
-      --repository-format=docker \
-      --project="$PROJECT" \
-      --location="$LOCATION" \
-      --description="MirrorNeuron runtime Docker images"
-    run_or_echo "$GCLOUD_BIN" artifacts repositories add-iam-policy-binding "$DOCKER_REPOSITORY" \
-      --project="$PROJECT" \
-      --location="$LOCATION" \
-      --member=allUsers \
-      --role=roles/artifactregistry.reader \
-      --condition=None \
-      --quiet
-    return
-  fi
-
-  "$GCLOUD_BIN" services enable artifactregistry.googleapis.com --project="$PROJECT"
-  if "$GCLOUD_BIN" artifacts repositories describe "$DOCKER_REPOSITORY" \
-    --project="$PROJECT" \
-    --location="$LOCATION" >/dev/null 2>&1; then
-    log "GAR repository ${DOCKER_REPOSITORY} already exists in ${PROJECT}/${LOCATION}."
-  else
-    "$GCLOUD_BIN" artifacts repositories create "$DOCKER_REPOSITORY" \
-      --repository-format=docker \
-      --project="$PROJECT" \
-      --location="$LOCATION" \
-      --description="MirrorNeuron runtime Docker images"
-  fi
-  "$GCLOUD_BIN" artifacts repositories add-iam-policy-binding "$DOCKER_REPOSITORY" \
-    --project="$PROJECT" \
-    --location="$LOCATION" \
-    --member=allUsers \
-    --role=roles/artifactregistry.reader \
-    --condition=None \
-    --quiet
-}
-
 cleanup() {
   if [ -n "$WORKTREE_DIR" ]; then
     git -C "$CORE_DIR" worktree remove --force "$WORKTREE_DIR" >/dev/null 2>&1 || true
@@ -244,15 +141,13 @@ publish_docker_image() {
   image_repo="${LOCATION}-docker.pkg.dev/${PROJECT}/${DOCKER_REPOSITORY}/${DOCKER_IMAGE_NAME}"
   registry="${LOCATION}-docker.pkg.dev"
 
-  ensure_repository_public
+  ensure_repository_public "$DOCKER_REPOSITORY" docker "MirrorNeuron runtime Docker images"
   if [ "$APPLY" = "Y" ]; then
     "$GCLOUD_BIN" auth configure-docker "$registry" --quiet
     "$DOCKER_BIN" buildx version >/dev/null
   else
     run_or_echo "$GCLOUD_BIN" auth configure-docker "$registry" --quiet
   fi
-
-  configure_amd64_emulation
 
   build_cmd=(
     "$DOCKER_BIN" buildx build
@@ -267,7 +162,8 @@ publish_docker_image() {
     --tag "${image_repo}:${version_tag}"
     --tag "${image_repo}:${version_number}"
   )
-  if [ "$EMULATE_AMD64" = "Y" ]; then
+  if needs_amd64_emulation "$DOCKER_PLATFORMS" "$QEMU_MODE" "$HOST_ARCH"; then
+    configure_amd64_emulation "Core" "$HOST_ARCH" "$DOCKER_BIN" "$QEMU_IMAGE"
     # Erlang's dual-mapped JIT memory is not supported by QEMU user mode.
     # This build-only argument is consumed by the Dockerfile's Mix steps.
     build_cmd+=(--build-arg "ERL_AFLAGS=${QEMU_ERL_AFLAGS}")
@@ -372,7 +268,7 @@ CORE_DOCKERFILE="${CORE_DOCKERFILE:-${CORE_DIR}/Dockerfile}"
 
 VERSION_TAG="$(infer_version)"
 validate_version_tag "$VERSION_TAG"
-validate_qemu_mode
+validate_qemu_mode "$QEMU_MODE"
 trap cleanup EXIT
 prepare_tag_worktree "$VERSION_TAG"
 

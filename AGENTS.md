@@ -22,8 +22,12 @@ installation or cleanup.
 - `package-index/python-packages.toml`: published Python package inventory.
 - `save_install_support.sh`: creates versioned support snapshots.
 - `scripts/publish_*.sh`, `setup_google_artifact_registry.sh`: release publishing.
+- The Core, Membrane and Otterdesk publishers share command execution and
+  registry operations in `scripts/release/`. Core and Membrane also share
+  multi-architecture build support there.
 - `scripts/`: validation, release packaging, and explicit state cleanup helpers.
 - `tests/`: offline regression tests for installers, release tools, and runtime containers.
+- `tests/shell/` exercises install detection and workspace Git synchronization.
 
 ## Installer Rules
 

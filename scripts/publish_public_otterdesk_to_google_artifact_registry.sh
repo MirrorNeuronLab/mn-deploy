@@ -6,6 +6,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 WORKSPACE_ROOT="$(cd "${DEPLOY_DIR}/.." && pwd)"
 
+# shellcheck source=scripts/release/commands.sh
+source "$SCRIPT_DIR/release/commands.sh"
+# shellcheck source=scripts/release/registry.sh
+source "$SCRIPT_DIR/release/registry.sh"
+
 PROJECT="${MN_GAR_PROJECT:-mirrorneuron-public-packages}"
 LOCATION="${MN_GAR_LOCATION:-us-central1}"
 REPOSITORY="${MN_OTTERDESK_GAR_REPOSITORY:-otterdesk-desktop}"
@@ -66,32 +71,6 @@ Examples:
     --build \\
     --version v1.2.24
 EOF
-}
-
-log() {
-  printf '%s\n' "$*"
-}
-
-die() {
-  printf 'ERROR: %s\n' "$*" >&2
-  exit 1
-}
-
-quote_args() {
-  local arg
-  for arg in "$@"; do
-    printf ' %q' "$arg"
-  done
-  printf '\n'
-}
-
-run_or_echo() {
-  if [ "$APPLY" = "Y" ]; then
-    "$@"
-  else
-    printf 'DRY RUN:'
-    quote_args "$@"
-  fi
 }
 
 while [ "$#" -gt 0 ]; do
@@ -175,10 +154,6 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
-command_exists() {
-  command -v "$1" >/dev/null 2>&1
-}
-
 normalize_version_tag() {
   local value="$1"
   value="${value#refs/tags/}"
@@ -207,14 +182,6 @@ infer_version() {
   die "Release version is required. Pass --version v1.2.24 or set MN_OTTERDESK_VERSION."
 }
 
-sha256_file() {
-  if command_exists sha256sum; then
-    sha256sum "$@"
-  else
-    shasum -a 256 "$@"
-  fi
-}
-
 require_tools() {
   command_exists "$GCLOUD_BIN" || die "'$GCLOUD_BIN' was not found."
   command_exists find || die "'find' was not found."
@@ -223,71 +190,6 @@ require_tools() {
   if [ "$BUILD_ARTIFACTS" = "Y" ]; then
     command_exists "$NPM_BIN" || die "'$NPM_BIN' was not found."
   fi
-}
-
-check_gcloud_auth_for_apply() {
-  local active_account
-  active_account="$("$GCLOUD_BIN" auth list --filter=status:ACTIVE --format='value(account)' 2>/dev/null | head -n 1 || true)"
-  if [ -z "$active_account" ]; then
-    cat >&2 <<EOF
-No active gcloud account was found.
-Run:
-  gcloud auth login
-EOF
-    exit 1
-  fi
-  if ! "$GCLOUD_BIN" auth print-access-token >/dev/null 2>&1; then
-    cat >&2 <<EOF
-gcloud cannot refresh an access token for ${active_account}.
-Run:
-  gcloud auth login
-EOF
-    exit 1
-  fi
-}
-
-ensure_repository_public() {
-  if [ "$APPLY" != "Y" ]; then
-    run_or_echo "$GCLOUD_BIN" artifacts repositories describe "$REPOSITORY" \
-      --project="$PROJECT" \
-      --location="$LOCATION"
-    run_or_echo "$GCLOUD_BIN" artifacts repositories create "$REPOSITORY" \
-      --repository-format=generic \
-      --project="$PROJECT" \
-      --location="$LOCATION" \
-      --description="Otterdesk public desktop application packages"
-    run_or_echo "$GCLOUD_BIN" artifacts repositories add-iam-policy-binding "$REPOSITORY" \
-      --project="$PROJECT" \
-      --location="$LOCATION" \
-      --member=allUsers \
-      --role=roles/artifactregistry.reader \
-      --condition=None \
-      --quiet
-    return
-  fi
-
-  "$GCLOUD_BIN" services enable artifactregistry.googleapis.com --project="$PROJECT"
-
-  if "$GCLOUD_BIN" artifacts repositories describe "$REPOSITORY" \
-    --project="$PROJECT" \
-    --location="$LOCATION" >/dev/null 2>&1; then
-    log "GAR repository ${REPOSITORY} already exists in ${PROJECT}/${LOCATION}."
-  else
-    log "Creating generic GAR repository ${REPOSITORY} in ${PROJECT}/${LOCATION}."
-    "$GCLOUD_BIN" artifacts repositories create "$REPOSITORY" \
-      --repository-format=generic \
-      --project="$PROJECT" \
-      --location="$LOCATION" \
-      --description="Otterdesk public desktop application packages"
-  fi
-
-  "$GCLOUD_BIN" artifacts repositories add-iam-policy-binding "$REPOSITORY" \
-    --project="$PROJECT" \
-    --location="$LOCATION" \
-    --member=allUsers \
-    --role=roles/artifactregistry.reader \
-    --condition=None \
-    --quiet
 }
 
 build_artifacts() {
@@ -350,7 +252,7 @@ stage_artifacts() {
 }
 
 publish_artifacts() {
-  ensure_repository_public
+  ensure_repository_public "$REPOSITORY" generic "Otterdesk public desktop application packages"
 
   run_or_echo "$GCLOUD_BIN" artifacts generic upload \
     --project="$PROJECT" \
@@ -379,7 +281,7 @@ log "  dist dir: ${DIST_DIR}"
 log "  staging dir: ${STAGING_DIR}"
 
 if [ "$APPLY" = "Y" ]; then
-  check_gcloud_auth_for_apply
+  check_gcloud_auth
 else
   log "Dry run only. Re-run with --apply to publish."
 fi

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SOURCE_HELPER="$(cd "$SCRIPT_DIR/.." && pwd)/git_commit_push_all.sh"
+REPO_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/mn-deploy-git-sync.XXXXXX")"
 WORKSPACE="$TEST_ROOT/workspace"
 REMOTE="$TEST_ROOT/origin.git"
@@ -30,9 +30,9 @@ git -C "$SEED" push -u origin main >/dev/null
 git --git-dir="$REMOTE" symbolic-ref HEAD refs/heads/main
 
 mkdir -p "$WORKSPACE" "$HELPER_DIR"
-cp "$SOURCE_HELPER" "$HELPER_DIR/git_commit_push_all.sh"
+cp "$REPO_DIR/git_commit_push_all.sh" "$HELPER_DIR/git_commit_push_all.sh"
 mkdir -p "$HELPER_DIR/scripts"
-cp "$SCRIPT_DIR/format-prettier.py" "$HELPER_DIR/scripts/format-prettier.py"
+cp "$REPO_DIR/scripts/format-prettier.py" "$HELPER_DIR/scripts/format-prettier.py"
 git clone "$REMOTE" "$TARGET" >/dev/null
 git -C "$TARGET" config user.name "mn-deploy test"
 git -C "$TARGET" config user.email "mn-deploy-test@example.invalid"

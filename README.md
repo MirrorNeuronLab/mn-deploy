@@ -349,7 +349,7 @@ checkouts that will later receive the same commit.
 Run its isolated Git regression test with:
 
 ```bash
-./scripts/test-git-commit-push-all.sh
+./tests/shell/test-git-commit-push-all.sh
 ```
 
 ## Details

@@ -6,6 +6,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 WORKSPACE_ROOT="$(cd "${DEPLOY_DIR}/.." && pwd)"
 
+# shellcheck source=scripts/release/commands.sh
+source "$SCRIPT_DIR/release/commands.sh"
+# shellcheck source=scripts/release/registry.sh
+source "$SCRIPT_DIR/release/registry.sh"
+# shellcheck source=scripts/release/multiarch.sh
+source "$SCRIPT_DIR/release/multiarch.sh"
+
 PROJECT="${MN_GAR_PROJECT:-mirrorneuron-public-packages}"
 LOCATION="${MN_GAR_LOCATION:-us-central1}"
 MEMBRANE_DIR="${MN_MEMBRANE_DIR:-${WORKSPACE_ROOT}/Membrane}"
@@ -28,7 +35,6 @@ PUBLISH_BINARY="Y"
 PUBLISH_DOCKER="Y"
 TAG_LATEST="Y"
 PREPARED_BINARY_ARTIFACT_DIR=""
-EMULATE_AMD64="N"
 
 usage() {
   cat <<EOF
@@ -92,32 +98,6 @@ Examples:
     --version v1.2.24 \\
     --binary-artifacts-dir /tmp/membrane-release-assets
 EOF
-}
-
-log() {
-  printf '%s\n' "$*"
-}
-
-die() {
-  printf 'ERROR: %s\n' "$*" >&2
-  exit 1
-}
-
-quote_args() {
-  local arg
-  for arg in "$@"; do
-    printf ' %q' "$arg"
-  done
-  printf '\n'
-}
-
-run_or_echo() {
-  if [ "$APPLY" = "Y" ]; then
-    "$@"
-  else
-    printf 'DRY RUN:'
-    quote_args "$@"
-  fi
 }
 
 while [ "$#" -gt 0 ]; do
@@ -227,10 +207,6 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
-command_exists() {
-  command -v "$1" >/dev/null 2>&1
-}
-
 normalize_version_tag() {
   local value="$1"
   value="${value#refs/tags/}"
@@ -239,44 +215,6 @@ normalize_version_tag() {
   v*) printf '%s' "$value" ;;
   *) printf 'v%s' "$value" ;;
   esac
-}
-
-validate_qemu_mode() {
-  case "$QEMU_MODE" in
-  auto | always | never) ;;
-  *) die "QEMU mode must be auto, always, or never; got '$QEMU_MODE'." ;;
-  esac
-}
-
-platform_requested() {
-  local platforms="${DOCKER_PLATFORMS//[[:space:]]/}"
-  case ",${platforms}," in
-  *,"$1",*) return 0 ;;
-  *) return 1 ;;
-  esac
-}
-
-configure_amd64_emulation() {
-  platform_requested linux/amd64 || return
-
-  case "$QEMU_MODE" in
-  always)
-    EMULATE_AMD64="Y"
-    ;;
-  auto)
-    case "$HOST_ARCH" in
-    arm64 | aarch64) EMULATE_AMD64="Y" ;;
-    esac
-    ;;
-  never)
-    return
-    ;;
-  esac
-
-  if [ "$EMULATE_AMD64" = "Y" ]; then
-    log "Configuring amd64 QEMU emulation for Membrane release build on ${HOST_ARCH}."
-    run_or_echo "$DOCKER_BIN" run --privileged --rm "$QEMU_IMAGE" --install amd64
-  fi
 }
 
 infer_version() {
@@ -310,14 +248,6 @@ host_package_suffix() {
   esac
 }
 
-sha256_file() {
-  if command_exists sha256sum; then
-    sha256sum "$@"
-  else
-    shasum -a 256 "$@"
-  fi
-}
-
 require_common_tools() {
   command_exists "$GCLOUD_BIN" || die "'$GCLOUD_BIN' was not found."
   if [ "$PUBLISH_DOCKER" = "Y" ]; then
@@ -329,75 +259,6 @@ require_common_tools() {
     command_exists zip || die "'zip' was not found."
     command_exists sha256sum || command_exists shasum || die "'sha256sum' or 'shasum' is required."
   fi
-}
-
-check_gcloud_auth_for_apply() {
-  local active_account
-  active_account="$("$GCLOUD_BIN" auth list --filter=status:ACTIVE --format='value(account)' 2>/dev/null | head -n 1 || true)"
-  if [ -z "$active_account" ]; then
-    cat >&2 <<EOF
-No active gcloud account was found.
-Run:
-  gcloud auth login
-EOF
-    exit 1
-  fi
-  if ! "$GCLOUD_BIN" auth print-access-token >/dev/null 2>&1; then
-    cat >&2 <<EOF
-gcloud cannot refresh an access token for ${active_account}.
-Run:
-  gcloud auth login
-EOF
-    exit 1
-  fi
-}
-
-ensure_repository_public() {
-  local repository="$1"
-  local format="$2"
-  local description="$3"
-
-  if [ "$APPLY" != "Y" ]; then
-    run_or_echo "$GCLOUD_BIN" artifacts repositories describe "$repository" \
-      --project="$PROJECT" \
-      --location="$LOCATION"
-    run_or_echo "$GCLOUD_BIN" artifacts repositories create "$repository" \
-      --repository-format="$format" \
-      --project="$PROJECT" \
-      --location="$LOCATION" \
-      --description="$description"
-    run_or_echo "$GCLOUD_BIN" artifacts repositories add-iam-policy-binding "$repository" \
-      --project="$PROJECT" \
-      --location="$LOCATION" \
-      --member=allUsers \
-      --role=roles/artifactregistry.reader \
-      --condition=None \
-      --quiet
-    return
-  fi
-
-  "$GCLOUD_BIN" services enable artifactregistry.googleapis.com --project="$PROJECT"
-
-  if "$GCLOUD_BIN" artifacts repositories describe "$repository" \
-    --project="$PROJECT" \
-    --location="$LOCATION" >/dev/null 2>&1; then
-    log "GAR repository ${repository} already exists in ${PROJECT}/${LOCATION}."
-  else
-    log "Creating ${format} GAR repository ${repository} in ${PROJECT}/${LOCATION}."
-    "$GCLOUD_BIN" artifacts repositories create "$repository" \
-      --repository-format="$format" \
-      --project="$PROJECT" \
-      --location="$LOCATION" \
-      --description="$description"
-  fi
-
-  "$GCLOUD_BIN" artifacts repositories add-iam-policy-binding "$repository" \
-    --project="$PROJECT" \
-    --location="$LOCATION" \
-    --member=allUsers \
-    --role=roles/artifactregistry.reader \
-    --condition=None \
-    --quiet
 }
 
 prepare_binary_artifacts() {
@@ -491,7 +352,9 @@ publish_docker_image() {
     run_or_echo "$GCLOUD_BIN" auth configure-docker "$registry" --quiet
   fi
 
-  configure_amd64_emulation
+  if needs_amd64_emulation "$DOCKER_PLATFORMS" "$QEMU_MODE" "$HOST_ARCH"; then
+    configure_amd64_emulation "Membrane" "$HOST_ARCH" "$DOCKER_BIN" "$QEMU_IMAGE"
+  fi
 
   build_cmd=(
     "$DOCKER_BIN" buildx build
@@ -511,7 +374,7 @@ publish_docker_image() {
 
 VERSION_TAG="$(infer_version)"
 VERSION_NUMBER="${VERSION_TAG#v}"
-validate_qemu_mode
+validate_qemu_mode "$QEMU_MODE"
 
 if [ -z "$PROJECT" ]; then
   die "GAR project is required."
@@ -536,7 +399,7 @@ if [ "$PUBLISH_DOCKER" = "Y" ]; then
 fi
 
 if [ "$APPLY" = "Y" ]; then
-  check_gcloud_auth_for_apply
+  check_gcloud_auth
 else
   log "Dry run only. Re-run with --apply to publish."
 fi

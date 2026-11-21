@@ -130,6 +130,42 @@ def commit(repo):
     git(repo, "commit", "-qm", "fixture")
 
 
+@pytest.mark.parametrize("platform", ["linux/amd64", "linux/arm64"])
+def test_core_publisher_only_adds_qemu_build_flags_for_emulation(tmp_path, platform):
+    core = repository(tmp_path, "Core checkout")
+    (core / "Dockerfile").write_text("FROM scratch\n")
+    commit(core)
+    git(core, "tag", "v1.0.0")
+    plan = subprocess.check_output(
+        [
+            "bash",
+            str(SCRIPTS / "publish_public_core_to_google_artifact_registry.sh"),
+            "--core-dir",
+            str(core),
+            "--version",
+            "v1.0.0",
+            "--docker-platforms",
+            platform,
+            "--qemu",
+            "auto",
+            "--docker",
+            "false",
+            "--gcloud",
+            "false",
+        ],
+        cwd=tmp_path,
+        env={**os.environ, "MN_CORE_HOST_ARCH": "arm64"},
+        text=True,
+    )
+    build = plan.index("DRY RUN: false buildx build")
+    if platform == "linux/amd64":
+        assert plan.index("--install amd64") < build
+        assert "--build-arg ERL_AFLAGS=" in plan[build:]
+    else:
+        assert "--install amd64" not in plan
+        assert "ERL_AFLAGS=" not in plan
+
+
 @pytest.mark.parametrize(
     "selection", ["default-venv", "custom-venv", "explicit", "path"]
 )
