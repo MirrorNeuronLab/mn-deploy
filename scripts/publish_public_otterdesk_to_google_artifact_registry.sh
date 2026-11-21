@@ -6,9 +6,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 WORKSPACE_ROOT="$(cd "${DEPLOY_DIR}/.." && pwd)"
 
-# shellcheck source=scripts/release/commands.sh
+# shellcheck source=release/commands.sh
 source "$SCRIPT_DIR/release/commands.sh"
-# shellcheck source=scripts/release/registry.sh
+# shellcheck source=release/registry.sh
 source "$SCRIPT_DIR/release/registry.sh"
 
 PROJECT="${MN_GAR_PROJECT:-mirrorneuron-public-packages}"
