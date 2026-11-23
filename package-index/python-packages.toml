@@ -327,15 +327,6 @@ binary_default = false
 source_hash = "v2:64ddd039be3f141c57c9bc2bdee4347e7232d4a6ccebff60af2a3f95ff7bb373"
 
 [[packages]]
-name = "mirrorneuron-slack-communicate-skill"
-path = "mn-skills/slack_communicate_skill"
-publish_group = "skill"
-version = "1.3.56"
-installer_groups = ["skill"]
-binary_default = false
-source_hash = "v2:ae6d08c56be71477b610cdc4975cc174e149b35965a03c5e6adffe4153ea40ad"
-
-[[packages]]
 name = "mirrorneuron-spreadsheet-analysis-skill"
 path = "mn-skills/spreadsheet_analysis_skill"
 publish_group = "skill"
