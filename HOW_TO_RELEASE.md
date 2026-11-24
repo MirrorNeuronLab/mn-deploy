@@ -208,7 +208,7 @@ Source fingerprints require `v2:` hashes ordered by file path. Older hashes are
 unsupported; prepare a new release index when upgrading release tooling.
 Historical release tags and support snapshots remain immutable.
 
-## mn computer use
+## mirrorneuron-pc-use
 
 The aggregate release publishes the native app before its Python skill. For an
 independent app release from the checked source, use Python 3.12+ on macOS:

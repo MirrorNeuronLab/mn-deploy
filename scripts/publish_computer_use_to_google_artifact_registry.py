@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build, sign, notarize and publish mn computer use. Default is a read-only plan."""
+"""Build, sign, notarize and publish mirrorneuron-pc-use. Default is a read-only plan."""
 
 from __future__ import annotations
 
@@ -286,7 +286,7 @@ def main():
     from mn_computer_use_skill import distribution
 
     print(
-        f"==> mn computer use {distribution.release_version()} ({', '.join(args.architectures)})",
+        f"==> mirrorneuron-pc-use {distribution.release_version()} ({', '.join(args.architectures)})",
         flush=True,
     )
     if not args.apply:
@@ -331,7 +331,7 @@ if __name__ == "__main__":
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
         # Do not render subprocess arguments, Apple credentials or HTTP headers.
         print(
-            f"error: mn computer use release failed ({type(exc).__name__}): "
+            f"error: mirrorneuron-pc-use release failed ({type(exc).__name__}): "
             + (
                 str(exc)
                 if isinstance(exc, (ValueError, RuntimeError))

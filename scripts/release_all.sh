@@ -45,7 +45,7 @@ Create a complete multi-repository release:
   1. verify all release worktrees are clean and synchronized with main;
   2. update package versions and installer defaults, then snapshot support;
   3. create local annotated release tags, then build, publish, and verify all
-     notarized mn computer use, Python, Web UI, Core, and Membrane artifacts in Google Artifact Registry;
+     notarized mirrorneuron-pc-use, Python, Web UI, Core, and Membrane artifacts in Google Artifact Registry;
   4. push the prepared tags only after GAR verification succeeds, without
      consuming or waiting for GitHub release workflow artifacts;
   5. update named blueprint pins and record the completed release.
@@ -444,7 +444,7 @@ update_post_release_pins() {
 - GAR npm: mirrorneuron-web-ui@${VERSION} in ${NPM_REPOSITORY}.
 - GAR Python: all packages in package-index/python-packages.toml, including
   mirrorneuron-api, mirrorneuron-cli, and mirrorneuron-python-sdk.
-- GAR generic: signed, notarized mn computer use for macOS arm64 and x86_64;
+- GAR generic: signed, notarized mirrorneuron-pc-use for macOS arm64 and x86_64;
   immutable native-source versions in mirrorneuron-binaries/mn-computer-use.
 - GAR Docker: mirror-neuron-core and membrane-context-engine each published
   ${TAG}, ${VERSION}, and latest (pointing to this release at confirmation).

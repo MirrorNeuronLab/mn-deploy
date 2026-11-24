@@ -1155,7 +1155,7 @@ def update(args, workspace, cache):
     )
     if native_app:
         print(
-            "==> Native mn computer use: verify/publish notarized GAR artifacts before the skill wheel.",
+            "==> Native mirrorneuron-pc-use: verify/publish notarized GAR artifacts before the skill wheel.",
             flush=True,
         )
     for component in planned["components"]:
