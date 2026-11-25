@@ -4454,7 +4454,8 @@ EOF
       run_quiet "pip-upgrade" "$VENV_DIR/bin/pip" install --upgrade pip
       # The Git runtime depends on the worker SDK even when only a surface was
       # explicitly selected. Use the requested ref in each source repository.
-      local sdk_reference="git+https://github.com/MirrorNeuronLab/mn-python-sdk.git$(github_ref_suffix)"
+      local sdk_reference
+      sdk_reference="git+https://github.com/MirrorNeuronLab/mn-python-sdk.git$(github_ref_suffix)"
       local -a sdk_requirements=("mirrorneuron-python-sdk @ $sdk_reference") sdk_groups=(sdk)
       local package_name package_path package_extras component_rows
       if [ "$INSTALL_CLI" = "Y" ] || [ "$INSTALL_API" = "Y" ]; then
