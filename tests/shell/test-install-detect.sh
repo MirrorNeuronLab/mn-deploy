@@ -18,10 +18,10 @@ assert_output() {
 }
 
 mkdir -p "$TEST_ROOT/bin"
-cat >"$TEST_ROOT/bin/docker" <<'EOF'
+cat >"$TEST_ROOT/bin/podman" <<'EOF'
 #!/usr/bin/env bash
 case "$*" in
-    info) exit "${FAKE_DOCKER_INFO_STATUS:-0}" ;;
+    info) exit "${FAKE_PODMAN_INFO_STATUS:-0}" ;;
     "container inspect mirror-neuron-core") exit "${FAKE_CONTAINER_STATUS:-1}" ;;
     "container inspect --format {{.State.Running}} mirror-neuron-core")
         printf '%s\n' "${FAKE_CONTAINER_RUNNING:-false}"
@@ -35,9 +35,9 @@ case "$*" in
     *) exit 1 ;;
 esac
 EOF
-chmod +x "$TEST_ROOT/bin/docker"
+chmod +x "$TEST_ROOT/bin/podman"
 
-assert_output '{"installed":false,"install_role":"full","running":false,"runtime_ready":false,"status":"not_installed","version":null,"docker_installed":true,"docker_running":true}'
+assert_output '{"installed":false,"install_role":"full","running":false,"runtime_ready":false,"status":"not_installed","version":null,"podman_installed":true,"podman_running":true}'
 
 mkdir -p "$TEST_ROOT/home/bin"
 cat >"$TEST_ROOT/home/bin/mn-runtime" <<'EOF'
@@ -55,18 +55,18 @@ cat >"$TEST_ROOT/home/install_metadata.json" <<'EOF'
 }
 EOF
 FAKE_CONTAINER_STATUS=0 FAKE_CONTAINER_RUNNING=true \
-  assert_output '{"installed":true,"install_role":"full","running":true,"runtime_ready":true,"status":"running","version":"v1.3.54","docker_installed":true,"docker_running":true}'
+  assert_output '{"installed":true,"install_role":"full","running":true,"runtime_ready":true,"status":"running","version":"v1.3.54","podman_installed":true,"podman_running":true}'
 
 FAKE_CONTAINER_STATUS=1 FAKE_RUNTIME_STATUS=1 \
-  assert_output '{"installed":true,"install_role":"full","running":false,"runtime_ready":false,"status":"stopped","version":"v1.3.54","docker_installed":true,"docker_running":true}'
+  assert_output '{"installed":true,"install_role":"full","running":false,"runtime_ready":false,"status":"stopped","version":"v1.3.54","podman_installed":true,"podman_running":true}'
 
-FAKE_DOCKER_INFO_STATUS=1 FAKE_RUNTIME_STATUS=1 \
-  assert_output '{"installed":true,"install_role":"full","running":null,"runtime_ready":false,"status":"docker_not_running","version":"v1.3.54","docker_installed":true,"docker_running":false}'
+FAKE_PODMAN_INFO_STATUS=1 FAKE_RUNTIME_STATUS=1 \
+  assert_output '{"installed":true,"install_role":"full","running":null,"runtime_ready":false,"status":"podman_not_running","version":"v1.3.54","podman_installed":true,"podman_running":false}'
 
-mv "$TEST_ROOT/bin/docker" "$TEST_ROOT/bin/docker.disabled"
+mv "$TEST_ROOT/bin/podman" "$TEST_ROOT/bin/podman.disabled"
 FAKE_RUNTIME_STATUS=1 \
-  assert_output '{"installed":true,"install_role":"full","running":null,"runtime_ready":false,"status":"docker_not_running","version":"v1.3.54","docker_installed":false,"docker_running":false}'
-mv "$TEST_ROOT/bin/docker.disabled" "$TEST_ROOT/bin/docker"
+  assert_output '{"installed":true,"install_role":"full","running":null,"runtime_ready":false,"status":"podman_not_running","version":"v1.3.54","podman_installed":false,"podman_running":false}'
+mv "$TEST_ROOT/bin/podman.disabled" "$TEST_ROOT/bin/podman"
 
 cat >"$TEST_ROOT/home/install_metadata.json" <<'EOF'
 {
@@ -74,6 +74,6 @@ cat >"$TEST_ROOT/home/install_metadata.json" <<'EOF'
 }
 EOF
 FAKE_CONTAINER_STATUS=0 FAKE_CONTAINER_RUNNING=false FAKE_IMAGE_VERSION=v1.3.53 FAKE_RUNTIME_STATUS=1 \
-  assert_output '{"installed":true,"install_role":"full","running":false,"runtime_ready":false,"status":"stopped","version":"v1.3.53","docker_installed":true,"docker_running":true}'
+  assert_output '{"installed":true,"install_role":"full","running":false,"runtime_ready":false,"status":"stopped","version":"v1.3.53","podman_installed":true,"podman_running":true}'
 
 printf 'install detection tests passed\n'

@@ -10,12 +10,18 @@ import subprocess
 
 import pytest
 
-from mn_sdk import resolve_model_entry
 from mn_sdk.dmr_archive import extract_archive
 from mn_sdk.dmr_recipe import preparation_recipe, managed_runner_version
 
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
+
+
+def archived_recipe():
+    data = json.loads(
+        (Path(__file__).parent / "fixtures" / "inkling-dmr-release.json").read_text()
+    )
+    return preparation_recipe(data)
 
 
 def publisher():
@@ -29,7 +35,7 @@ def publisher():
 
 def test_publisher_builds_pinned_cross_platform_archives(monkeypatch, tmp_path):
     module = publisher()
-    recipe = preparation_recipe(resolve_model_entry("inkling-2-mini"))
+    recipe = archived_recipe()
     commands, patches = [], []
     monkeypatch.setattr("mn_sdk.dmr_build.patch_managed_server", patches.append)
 
@@ -95,6 +101,7 @@ def test_publisher_builds_pinned_cross_platform_archives(monkeypatch, tmp_path):
 def test_publisher_does_not_upload_without_apply(monkeypatch, tmp_path):
     module = publisher()
     recipe, directory, document = saved_release(module, tmp_path)
+    monkeypatch.setattr(module, "catalog_recipe", lambda _: recipe)
     monkeypatch.setattr(
         module, "build_archives", lambda *args, **kwargs: ("revision-policy2", document)
     )
@@ -115,7 +122,7 @@ DESTINATION = {
 
 
 def saved_release(module, directory):
-    recipe = preparation_recipe(resolve_model_entry("inkling-2-mini"))
+    recipe = archived_recipe()
     document = copy.deepcopy(recipe.document["runner"])
     directory.mkdir(parents=True, exist_ok=True)
     for platform, asset in document["assets"].items():

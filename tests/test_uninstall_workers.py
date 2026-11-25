@@ -25,7 +25,7 @@ def test_worker_cleanup(tmp_path, worker_project, scenario):
             }
         )
     )
-    docker = tmp_path / "docker"
+    docker = tmp_path / "podman"
     docker.write_text(
         f"#!{sys.executable}\n"
         + """import json, os, sys

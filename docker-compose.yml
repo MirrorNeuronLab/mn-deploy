@@ -2,7 +2,7 @@ name: mirror-neuron
 
 services:
   web-ui:
-    image: ${MN_WEB_UI_IMAGE:-node:22-alpine}
+    image: ${MN_WEB_UI_IMAGE:-docker.io/library/node:22-alpine}
     container_name: mirror-neuron-web-ui
     profiles:
       - web-ui
@@ -12,7 +12,7 @@ services:
       MN_WEB_UI_SOURCE_MODE: ${MN_WEB_UI_SOURCE_MODE:-package}
       MN_WEB_UI_PACKAGE_VERSION: ${MN_WEB_UI_PACKAGE_VERSION:-1.4.3}
       MN_WEB_UI_NPM_REGISTRY: ${MN_WEB_UI_NPM_REGISTRY:-https://us-central1-npm.pkg.dev/mirrorneuron-public-packages/mirrorneuron-npm/}
-      MN_WEB_UI_API_HOST: ${MN_WEB_UI_API_HOST:-host.docker.internal}
+      MN_WEB_UI_API_HOST: ${MN_WEB_UI_API_HOST:-host.containers.internal}
       MN_API_PORT: ${MN_API_PORT:-54001}
       MN_API_TOKEN: ${MN_API_TOKEN:-}
       MN_WEB_UI_PORT: ${MN_WEB_UI_PORT:-55173}
@@ -21,7 +21,7 @@ services:
     ports:
       - "${MN_WEB_UI_BIND_HOST:-127.0.0.1}:${MN_WEB_UI_PORT:-55173}:${MN_WEB_UI_PORT:-55173}"
     extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - "host.containers.internal:host-gateway"
     volumes:
       - ${MN_WEB_UI_SOURCE_MOUNT:-./web-ui-source}:/mnt/mn-web-ui-source:ro
       - web-ui-npm-cache:/root/.npm
@@ -64,7 +64,7 @@ services:
         import { extname, join, relative, resolve } from "node:path";
 
         const siteDir = resolve(process.env.MN_WEB_UI_SITE_DIR || "/work/site");
-        const apiHost = process.env.MN_WEB_UI_API_HOST || "host.docker.internal";
+        const apiHost = process.env.MN_WEB_UI_API_HOST || "host.containers.internal";
         const apiPort = Number(process.env.MN_API_PORT || "54001");
         const apiToken = process.env.MN_API_TOKEN || "";
         const port = Number(process.env.MN_WEB_UI_PORT || "55173");
@@ -441,7 +441,7 @@ services:
       - runtime
 
   redis:
-    image: ${MN_REDIS_IMAGE:-redis:8}
+    image: ${MN_REDIS_IMAGE:-docker.io/library/redis:8}
     container_name: mirror-neuron-redis
     restart: unless-stopped
     expose:
@@ -463,7 +463,7 @@ services:
           - ${MN_NODE_ALIAS:-mirror-neuron}-redis
 
   syncthing:
-    image: ${MN_SYNCTHING_IMAGE:-syncthing/syncthing:latest}
+    image: ${MN_SYNCTHING_IMAGE:-docker.io/syncthing/syncthing:latest}
     container_name: mirror-neuron-syncthing
     profiles:
       - syncthing
@@ -501,6 +501,8 @@ services:
 
         exec /bin/entrypoint.sh /bin/syncthing serve
     environment:
+      PUID: "${MN_SYNCTHING_UID:-1000}"
+      PGID: "${MN_SYNCTHING_GID:-1000}"
       STGUIADDRESS: 0.0.0.0:8384
       STGUIAPIKEY: ${MN_SYNCTHING_API_KEY:-}
       STHOMEDIR: /var/syncthing/config
@@ -517,6 +519,8 @@ services:
       - runtime
 
   openshell:
+    security_opt:
+      - label=disable
     image: ${OPENSHELL_GATEWAY_IMAGE:-ghcr.io/nvidia/openshell/gateway:0.0.47}
     container_name: openshell-cluster-openshell
     command:
@@ -547,7 +551,7 @@ services:
       OPENSHELL_SERVER_PORT: ${OPENSHELL_GATEWAY_PORT:-58080}
     volumes:
       - ${MN_HOST_OPENSHELL_STATE_DIR:-./openshell-state}:${MN_HOST_OPENSHELL_STATE_DIR:-./openshell-state}
-      - ${DOCKER_HOST_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
+      - ${PODMAN_HOST_SOCKET:?Podman API socket is required}:/var/run/docker.sock
     networks:
       - runtime
 
@@ -595,7 +599,7 @@ services:
 
         listen_host = os.getenv("MN_NATIVE_SDK_GRPC_PROXY_LISTEN_HOST", "0.0.0.0")
         listen_port = int(os.getenv("MN_NATIVE_SDK_GRPC_PROXY_PORT", "55052"))
-        target_host = os.getenv("MN_NATIVE_SDK_GRPC_PROXY_TARGET_HOST", "host.docker.internal")
+        target_host = os.getenv("MN_NATIVE_SDK_GRPC_PROXY_TARGET_HOST", "host.containers.internal")
         target_port = int(os.getenv("MN_NATIVE_SDK_GRPC_PROXY_TARGET_PORT", "55052"))
 
         def relay(src, dst):
@@ -645,10 +649,10 @@ services:
     environment:
       MN_NATIVE_SDK_GRPC_PROXY_LISTEN_HOST: 0.0.0.0
       MN_NATIVE_SDK_GRPC_PROXY_PORT: ${MN_NATIVE_SDK_GRPC_PROXY_PORT:-55052}
-      MN_NATIVE_SDK_GRPC_PROXY_TARGET_HOST: ${MN_NATIVE_SDK_GRPC_PROXY_TARGET_HOST:-host.docker.internal}
+      MN_NATIVE_SDK_GRPC_PROXY_TARGET_HOST: ${MN_NATIVE_SDK_GRPC_PROXY_TARGET_HOST:-host.containers.internal}
       MN_NATIVE_SDK_GRPC_PROXY_TARGET_PORT: ${MN_NATIVE_SDK_GRPC_PROXY_TARGET_PORT:-${MN_NATIVE_SDK_GRPC_PORT:-55052}}
     extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - "host.containers.internal:host-gateway"
     networks:
       - runtime
 
@@ -668,6 +672,8 @@ services:
       - "${MN_LITELLM_GATEWAY_BIND_HOST:-127.0.0.1}:${MN_LITELLM_GATEWAY_PORT:-4000}:4000"
     env_file:
       - path: ${MN_LITELLM_GATEWAY_ENV_FILE:-./docker-compose.env}
+        required: false
+      - path: ${MN_HOST_HOME_DIR:-${MN_HOST_MN_DIR:-./mn}}/models/litellm-gateway/managed-dmr.env
         required: false
     depends_on:
       membrane-context-engine:
@@ -697,14 +703,14 @@ services:
     volumes:
       - ${MN_HOST_HOME_DIR:-${MN_HOST_MN_DIR:-./mn}}:/root/.mn
       - ${MN_HOST_HOME_DIR:-${MN_HOST_MN_DIR:-./mn}}:/opt/mirror_neuron/.mn
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     networks:
       runtime:
         aliases:
           - mn-litellm-proxy
 
   mirror-neuron-core:
+    security_opt:
+      - label=disable
     image: mirror-neuron-core:latest
     container_name: mirror-neuron-core
     restart: unless-stopped
@@ -819,8 +825,8 @@ services:
       MN_NODE_MODELS: ${MN_NODE_MODELS:-}
       MN_NODE_RUNTIME_MODELS: ${MN_NODE_RUNTIME_MODELS:-}
       MN_DOCKER_WORKER_ENABLED: ${MN_DOCKER_WORKER_ENABLED:-1}
-      DOCKER_BUILDKIT: ${DOCKER_BUILDKIT:-1}
-      BUILDKIT_PROGRESS: ${BUILDKIT_PROGRESS:-plain}
+      CONTAINER_HOST: unix:///run/podman/podman.sock
+      MN_HOST_HOME_DIR: ${MN_HOST_HOME_DIR:-${MN_HOST_MN_DIR:-}}
       MN_ENV: ${MN_ENV:-dev}
       MN_PIP_INDEX_URL: ${MN_PIP_INDEX_URL:-https://us-central1-python.pkg.dev/mirrorneuron-public-packages/agent-skills/simple/}
       MN_PIP_EXTRA_INDEX_URL: ${MN_PIP_EXTRA_INDEX_URL:-https://pypi.org/simple}
@@ -873,7 +879,7 @@ services:
       redis:
         condition: service_started
     extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - "host.containers.internal:host-gateway"
     volumes:
       - ${MN_HOST_STATE_DIR:-./state}:/root/.mirror_neuron
       - ${MN_HOST_STATE_DIR:-./state}:/opt/mirror_neuron/.mirror_neuron
@@ -888,7 +894,7 @@ services:
       - ${MN_HOST_OPENSHELL_CONFIG_DIR:-./openshell-config}:/root/.config/openshell:ro
       - ${MN_HOST_OPENSHELL_CONFIG_DIR:-./openshell-config}:/opt/mirror_neuron/.config/openshell:ro
       - ${MN_WORKSPACE_ROOT:-${MN_BLUEPRINT_LOCAL:-.}}:${MN_WORKSPACE_ROOT:-${MN_BLUEPRINT_LOCAL:-/workspace}}:ro
-      - ${DOCKER_HOST_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
+      - ${PODMAN_HOST_SOCKET:?Podman API socket is required}:/run/podman/podman.sock
     networks:
       runtime:
         aliases:

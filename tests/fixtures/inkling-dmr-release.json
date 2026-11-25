@@ -1,0 +1,135 @@
+{
+  "id": "inkling-2-mini:q4_k_m",
+  "source": "dmr",
+  "backend": "llama.cpp",
+  "preparation": {
+    "kind": "dmr_native",
+    "version": 1,
+    "runner": {
+      "assets": {
+        "darwin-arm64": {
+          "name": "managed-dmr-darwin-arm64.tar.gz",
+          "sha256": "10ec21136c63b4f4f8e7cbe1c7795a058d2f8773483256eabbd337b7703d6c34",
+          "url": "https://artifactregistry.googleapis.com/download/v1/projects/mirrorneuron-public-packages/locations/us-central1/repositories/mirrorneuron-binaries/files/managed-dmr%3Aab88713fadab-policy2%3Amanaged-dmr-darwin-arm64.tar.gz:download?alt=media"
+        },
+        "linux-arm64": {
+          "name": "managed-dmr-linux-arm64.tar.gz",
+          "sha256": "42a1db08ab45b6fdcc168dade7a112cab3bbe4c2ce986ee06fb36871f40bb5c7",
+          "url": "https://artifactregistry.googleapis.com/download/v1/projects/mirrorneuron-public-packages/locations/us-central1/repositories/mirrorneuron-binaries/files/managed-dmr%3Aab88713fadab-policy2%3Amanaged-dmr-linux-arm64.tar.gz:download?alt=media"
+        },
+        "linux-x64": {
+          "name": "managed-dmr-linux-x64.tar.gz",
+          "sha256": "291b70807ed144c06b830c85ebdb141158124bccf1ffa8fb07a79c80bac4d575",
+          "url": "https://artifactregistry.googleapis.com/download/v1/projects/mirrorneuron-public-packages/locations/us-central1/repositories/mirrorneuron-binaries/files/managed-dmr%3Aab88713fadab-policy2%3Amanaged-dmr-linux-x64.tar.gz:download?alt=media"
+        },
+        "windows-x64": {
+          "name": "managed-dmr-windows-x64.zip",
+          "sha256": "0fa2af718b00ca00f9e15c9a575a97ce9443bfe80dccd51d429fd8d7121d2e5b",
+          "url": "https://artifactregistry.googleapis.com/download/v1/projects/mirrorneuron-public-packages/locations/us-central1/repositories/mirrorneuron-binaries/files/managed-dmr%3Aab88713fadab-policy2%3Amanaged-dmr-windows-x64.zip:download?alt=media"
+        }
+      },
+      "policy": 2,
+      "repository": "https://github.com/docker/model-runner",
+      "revision": "ab88713fadabe6a6da5d7c7fe8ce3407ecf2d4da"
+    },
+    "backend": {
+      "repository": "https://github.com/ggml-org/llama.cpp",
+      "release": "b12600",
+      "commit": "29b52d3",
+      "assets": {
+        "darwin-arm64-metal": [
+          {
+            "name": "llama-b12600-bin-macos-arm64.tar.gz",
+            "sha256": "9ced6f8cbce915968a865ded7718c2c4d14a69876bf9abf544533aec9b76e975"
+          }
+        ],
+        "linux-x64-cpu": [
+          {
+            "name": "llama-b12600-bin-ubuntu-x64.tar.gz",
+            "sha256": "da524c71f9dd09913df29264bb7229b99a2de82d8a26e6902e6921d413560d6d"
+          }
+        ],
+        "linux-arm64-cpu": [
+          {
+            "name": "llama-b12600-bin-ubuntu-arm64.tar.gz",
+            "sha256": "5e94888b3ca53f203bb894076f019baad60d0f6426c20fa13e6e3d5b7d769ebe"
+          }
+        ],
+        "linux-x64-cuda": [
+          {
+            "name": "llama-b12600-bin-ubuntu-cuda-12.8-x64.tar.gz",
+            "sha256": "6b2bbca74c951e03e2cb45771410ac58590b6677257ae78e2c8a896bb0a3e1b2"
+          },
+          {
+            "name": "cudart-llama-b12600-bin-ubuntu-cuda-12.8-x64.tar.gz",
+            "sha256": "971775211e47dad69f8143eab527893abaacdd69b91005ff3621c72692cfe199"
+          }
+        ],
+        "linux-arm64-cuda": [
+          {
+            "name": "llama-b12600-bin-ubuntu-cuda-13.5-arm64.tar.gz",
+            "sha256": "8435712a783efb71ddb0c1d92b13cf8ef32ff8df1b58ec62f6a1d2a63873cc38"
+          },
+          {
+            "name": "cudart-llama-b12600-bin-ubuntu-cuda-13.5-arm64.tar.gz",
+            "sha256": "6e8f4241a2ed3a89a4736e3eaa4e9590b565eebb5fb2d6176cbf8b96bf7cf904"
+          }
+        ],
+        "linux-x64-vulkan": [
+          {
+            "name": "llama-b12600-bin-ubuntu-vulkan-x64.tar.gz",
+            "sha256": "33270a5d2034d268d07a970635639b22ad4411db945c092a3c472ab90513b2db"
+          }
+        ],
+        "linux-arm64-vulkan": [
+          {
+            "name": "llama-b12600-bin-ubuntu-vulkan-arm64.tar.gz",
+            "sha256": "f5c457719413297b3911d70179739b692be755a743b4a39a505bcf110534a8d0"
+          }
+        ],
+        "linux-x64-hip": [
+          {
+            "name": "llama-b12600-bin-ubuntu-rocm-10.0-x64.tar.gz",
+            "sha256": "13d7df272d2a355837d3e1320548aced7486fc09f0072b57b9dcbc8b599ef9d8"
+          }
+        ],
+        "windows-x64-cpu": [
+          {
+            "name": "llama-b12600-bin-win-cpu-x64.zip",
+            "sha256": "a31a14f1630408422228d02ff2a3fc41c06a6b3b3849d8d2782c37f0f6e30951"
+          }
+        ],
+        "windows-x64-cuda": [
+          {
+            "name": "llama-b12600-bin-win-cuda-12.4-x64.zip",
+            "sha256": "6a8e0d292d387195087b3810f3675cf612fb86542378adccbafec808dd3511a7"
+          },
+          {
+            "name": "cudart-llama-bin-win-cuda-12.4-x64.zip",
+            "sha256": "8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6"
+          }
+        ],
+        "windows-x64-vulkan": [
+          {
+            "name": "llama-b12600-bin-win-vulkan-x64.zip",
+            "sha256": "cca8bf28bf4193d0b7d674e8498bec8c8b82fb8fbd09a97759b79f542d984906"
+          }
+        ],
+        "windows-x64-hip": [
+          {
+            "name": "llama-b12600-bin-win-rocm-10.0-x64.zip",
+            "sha256": "ef9676f4fc2951ea2eb60a7090e7031674a8023de65be448ec2525a3f9eeae0d"
+          }
+        ]
+      },
+      "args": [
+        "-ngl",
+        "999",
+        "--jinja",
+        "--parallel",
+        "1",
+        "--metrics"
+      ]
+    }
+  }
+}

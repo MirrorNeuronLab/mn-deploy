@@ -35,7 +35,7 @@ def physical_interface_addresses():
         if raw_line and not raw_line[0].isspace() and ":" in raw_line:
             interface, details = raw_line.split(":", 1)
             is_virtual = interface.startswith(
-                ("docker", "br-", "veth", "virbr", "tailscale", "utun", "ipsec", "tun", "tap", "wg")
+                ("podman", "br-", "veth", "virbr", "tailscale", "utun", "ipsec", "tun", "tap", "wg")
             )
             is_usable_interface = (
                 "LOOPBACK" not in details
@@ -144,4 +144,4 @@ MN_NETWORK_ADVERTISE_HOST="$advertise_host" \
   ERL_EPMD_ADDRESS="${ERL_EPMD_ADDRESS:-0.0.0.0}" \
   mn runtime start
 
-docker port mirror-neuron-core 50051
+podman port mirror-neuron-core 50051

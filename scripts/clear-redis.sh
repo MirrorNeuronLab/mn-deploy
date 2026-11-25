@@ -101,8 +101,8 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-if ! command -v docker >/dev/null 2>&1; then
-  ui_error "docker is required."
+if ! command -v podman >/dev/null 2>&1; then
+  ui_error "podman is required."
   exit 1
 fi
 
@@ -148,22 +148,22 @@ redis-cli $auth_args MEMORY PURGE >/dev/null 2>&1 || true
 redis-cli $auth_args BGREWRITEAOF >/dev/null 2>&1 || true
 '
 
-if [ -f "$COMPOSE_FILE" ]; then
+if [ -f "$COMPOSE_FILE" ] && [ -x "$MN_HOME_DIR/venv/bin/python" ]; then
   compose_args=(-f "$COMPOSE_FILE")
   if [ -f "$COMPOSE_ENV_FILE" ]; then
     compose_args=(--env-file "$COMPOSE_ENV_FILE" "${compose_args[@]}")
   fi
-  docker compose "${compose_args[@]}" exec -T \
+  "$MN_HOME_DIR/venv/bin/python" -m mn_sdk.containers.podman_compose "${compose_args[@]}" exec -T \
     -e "MN_CLEAR_REDIS_DB=${DATABASE}" \
     -e "MN_CLEAR_REDIS_COMMAND=${redis_command}" \
     redis sh -c "$run_redis_cli_script"
 else
-  if ! docker ps --format '{{.Names}}' | grep -Fxq "$CONTAINER_NAME"; then
+  if ! podman ps --format '{{.Names}}' | grep -Fxq "$CONTAINER_NAME"; then
     ui_error "Redis container not found: ${CONTAINER_NAME}"
     printf 'Hint: set MN_HOME, pass --mn-home, or pass --container.\n' >&2
     exit 1
   fi
-  docker exec -i \
+  podman exec -i \
     -e "MN_CLEAR_REDIS_DB=${DATABASE}" \
     -e "MN_CLEAR_REDIS_COMMAND=${redis_command}" \
     "$CONTAINER_NAME" sh -c "$run_redis_cli_script"

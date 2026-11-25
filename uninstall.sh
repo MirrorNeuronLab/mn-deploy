@@ -181,35 +181,11 @@ case "$(printf '%s' "$DOCKER_NETWORK_EXTERNAL_VALUE" | tr '[:upper:]' '[:lower:]
 esac
 
 function runtime_compose_down() {
-  if docker compose version >/dev/null 2>&1; then
-    if [ -f "$RUNTIME_COMPOSE_ENV" ]; then
-      docker compose --env-file "$RUNTIME_COMPOSE_ENV" \
-        --project-name "$COMPOSE_PROJECT_NAME" \
-        -f "$RUNTIME_COMPOSE_FILE" \
-        down --remove-orphans --volumes --rmi local
-    else
-      docker compose \
-        --project-name "$COMPOSE_PROJECT_NAME" \
-        -f "$RUNTIME_COMPOSE_FILE" \
-        down --remove-orphans --volumes --rmi local
-    fi
-  elif command -v docker-compose >/dev/null 2>&1; then
-    if [ -f "$RUNTIME_COMPOSE_ENV" ]; then
-      docker-compose \
-        --env-file "$RUNTIME_COMPOSE_ENV" \
-        --project-name "$COMPOSE_PROJECT_NAME" \
-        -f "$RUNTIME_COMPOSE_FILE" \
-        down --remove-orphans --volumes --rmi local
-    else
-      docker-compose \
-        --project-name "$COMPOSE_PROJECT_NAME" \
-        -f "$RUNTIME_COMPOSE_FILE" \
-        down --remove-orphans --volumes --rmi local
-    fi
-  else
-    print_warning "Docker Compose is not available; using project-label cleanup."
-    return 1
+  local -a args=(--project-name "$COMPOSE_PROJECT_NAME" -f "$RUNTIME_COMPOSE_FILE")
+  if [ -f "$RUNTIME_COMPOSE_ENV" ]; then
+    args+=(--env-file "$RUNTIME_COMPOSE_ENV")
   fi
+  "$VENV_DIR/bin/python" -m mn_sdk.containers.podman_compose "${args[@]}" down --remove-orphans --volumes --rmi local
 }
 
 function remove_compose_project_resources() {
@@ -228,13 +204,13 @@ function remove_compose_project_resources() {
   # Workers use a separate SDK Compose project and attach to the runtime
   # network. Remove every project's containers before shared dependencies.
   for project_name in "${projects[@]}"; do
-    if ! resources=$(docker ps -aq --filter "label=com.docker.compose.project=${project_name}" 2>/dev/null); then
+    if ! resources=$(podman ps -aq --filter "label=com.docker.compose.project=${project_name}" 2>/dev/null); then
       print_error "Could not list containers for Compose project $project_name."
       return 1
     fi
     while IFS= read -r resource_id; do
       [ -n "$resource_id" ] || continue
-      if ! docker rm -f "$resource_id" >/dev/null 2>&1; then
+      if ! podman rm -f "$resource_id" >/dev/null 2>&1; then
         print_error "Could not remove container $resource_id (project $project_name)."
         cleanup_failed="Y"
       fi
@@ -243,19 +219,19 @@ function remove_compose_project_resources() {
   [ "$cleanup_failed" = "N" ] || return 1
 
   for project_name in "${projects[@]}"; do
-    if ! resources=$(docker volume ls -q --filter "label=com.docker.compose.project=${project_name}" 2>/dev/null); then
+    if ! resources=$(podman volume ls -q --filter "label=com.docker.compose.project=${project_name}" 2>/dev/null); then
       print_error "Could not list volumes for Compose project $project_name."
       return 1
     fi
     while IFS= read -r resource_id; do
       [ -n "$resource_id" ] || continue
-      if ! docker volume rm -f "$resource_id" >/dev/null 2>&1; then
+      if ! podman volume rm -f "$resource_id" >/dev/null 2>&1; then
         print_error "Could not remove volume $resource_id (project $project_name)."
         cleanup_failed="Y"
       fi
     done <<<"$resources"
 
-    if ! resources=$(docker network ls \
+    if ! resources=$(podman network ls \
       --filter "label=com.docker.compose.project=${project_name}" \
       --format '{{.ID}} {{.Name}}' 2>/dev/null); then
       print_error "Could not list networks for Compose project $project_name."
@@ -267,7 +243,7 @@ function remove_compose_project_resources() {
         [ "$resource_name" = "$DOCKER_NETWORK_NAME" ]; then
         continue
       fi
-      if ! docker network rm "$resource_id" >/dev/null 2>&1; then
+      if ! podman network rm "$resource_id" >/dev/null 2>&1; then
         print_error "Could not remove network $resource_name ($resource_id); check its attached containers."
         cleanup_failed="Y"
       fi
@@ -275,11 +251,11 @@ function remove_compose_project_resources() {
   done
 
   if [ "$DOCKER_NETWORK_EXTERNAL" != "Y" ] &&
-    docker network inspect "$DOCKER_NETWORK_NAME" >/dev/null 2>&1; then
-    network_project="$(docker network inspect -f '{{ index .Labels "com.docker.compose.project" }}' "$DOCKER_NETWORK_NAME" 2>/dev/null || true)"
+    podman network inspect "$DOCKER_NETWORK_NAME" >/dev/null 2>&1; then
+    network_project="$(podman network inspect -f '{{ index .Labels "com.docker.compose.project" }}' "$DOCKER_NETWORK_NAME" 2>/dev/null || true)"
     if [ "$network_project" = "$COMPOSE_PROJECT_NAME" ] ||
       [ "$DOCKER_NETWORK_EXTERNAL_KNOWN" = "Y" ]; then
-      if ! docker network rm "$DOCKER_NETWORK_NAME" >/dev/null 2>&1; then
+      if ! podman network rm "$DOCKER_NETWORK_NAME" >/dev/null 2>&1; then
         print_error "Could not remove network $DOCKER_NETWORK_NAME; check its attached containers."
         cleanup_failed="Y"
       fi
@@ -292,16 +268,27 @@ function remove_compose_project_resources() {
 function remove_docker_runtime_project() {
   local cleanup_failed="N"
 
-  if ! docker info >/dev/null 2>&1; then
-    print_error "Docker is installed but the daemon is not available."
-    printf 'Next: start Docker, then rerun ./uninstall.sh --yes\n' >&3
+  if ! podman info >/dev/null 2>&1; then
+    print_error "Podman is installed but the daemon is not available."
+    printf 'Next: start Podman, then rerun ./uninstall.sh --yes\n' >&3
     return 1
   fi
 
-  print_step "Removing complete Docker Compose project"
+  # Model servers share the runtime network, but have independent lifecycles.
+  local model_filter="label=io.mirrorneuron.model.home=$INSTALL_DIR" model_resources resource
+  model_resources="$(podman ps -aq --filter "$model_filter")" || return 1
+  while IFS= read -r resource; do
+    [ -z "$resource" ] || podman rm -f "$resource" || return 1
+  done <<<"$model_resources"
+  model_resources="$(podman volume ls -q --filter "$model_filter")" || return 1
+  while IFS= read -r resource; do
+    [ -z "$resource" ] || podman volume rm "$resource" || return 1
+  done <<<"$model_resources"
+
+  print_step "Removing complete Compose project"
   if [ -f "$RUNTIME_COMPOSE_FILE" ]; then
     if ! runtime_compose_down >/dev/null 2>&1; then
-      print_warning "Docker Compose teardown was incomplete; cleaning resources by project label."
+      print_warning "Compose teardown was incomplete; cleaning resources by project label."
     fi
   else
     print_warning "Installed Compose file not found; cleaning resources by project label."
@@ -311,20 +298,28 @@ function remove_docker_runtime_project() {
     cleanup_failed="Y"
   fi
   if [ "$cleanup_failed" = "Y" ]; then
-    print_error "Some MirrorNeuron Docker resources could not be removed."
-    printf 'Next: resolve active Docker attachments, then rerun ./uninstall.sh --yes\n' >&3
+    print_error "Some MirrorNeuron Podman resources could not be removed."
+    printf 'Next: resolve active Podman attachments, then rerun ./uninstall.sh --yes\n' >&3
     return 1
   fi
 
   print_success "Removed Compose containers, orphan services, named volumes, and owned networks."
 }
 
-if command -v docker >/dev/null 2>&1; then
+if command -v podman >/dev/null 2>&1; then
   if ! remove_docker_runtime_project; then
     exit 1
   fi
 else
-  print_warning "Docker not installed, skipping container, volume, and network cleanup."
+  print_warning "Podman not installed, skipping container, volume, and network cleanup."
+fi
+
+if compgen -G "$INSTALL_DIR/models/llama.cpp/*/server.json" >/dev/null; then
+  print_step "Stopping native llama.cpp model servers"
+  if ! MN_HOME="$INSTALL_DIR" "$VENV_DIR/bin/python" -m mn_sdk.models.native_llama stop-all; then
+    print_error "Could not verify or stop the native model servers in $INSTALL_DIR."
+    exit 1
+  fi
 fi
 
 print_step "Removing Symlinks"
@@ -353,10 +348,10 @@ if [ -d "$UI_DIR" ] || [ -L "$UI_DIR" ]; then
 else
   print_success "Web UI installation not found, skipping."
 fi
-print_step "Removing Docker Images and OpenShell Artifacts"
-if command -v docker &>/dev/null; then
-  if docker image inspect mirror-neuron-core:latest >/dev/null 2>&1; then
-    docker rmi mirror-neuron-core:latest >/dev/null 2>&1 || true
+print_step "Removing Podman Images and OpenShell Artifacts"
+if command -v podman &>/dev/null; then
+  if podman image inspect mirror-neuron-core:latest >/dev/null 2>&1; then
+    podman rmi mirror-neuron-core:latest >/dev/null 2>&1 || true
     print_success "Removed Core image."
   else
     print_success "Core image not found, skipping."
@@ -366,8 +361,8 @@ if command -v docker &>/dev/null; then
     openshell gateway destroy --name openshell >/dev/null 2>&1 || true
   fi
 
-  if docker ps -a --format '{{.Names}}' | grep -q '^openshell-cluster-openshell$'; then
-    docker rm -f openshell-cluster-openshell >/dev/null 2>&1 || true
+  if podman ps -a --format '{{.Names}}' | grep -q '^openshell-cluster-openshell$'; then
+    podman rm -f openshell-cluster-openshell >/dev/null 2>&1 || true
     print_success "Removed OpenShell gateway container."
   else
     print_success "OpenShell gateway container not found, skipping."
@@ -379,16 +374,16 @@ if command -v docker &>/dev/null; then
     "ghcr.io/nvidia/openshell/gateway:0.0.47" \
     "ghcr.io/nvidia/openshell/cluster:0.0.16" \
     "ghcr.io/nvidia/openshell/cluster:latest"; do
-    if docker image inspect "$image" >/dev/null 2>&1; then
-      docker rmi "$image" >/dev/null 2>&1 || true
+    if podman image inspect "$image" >/dev/null 2>&1; then
+      podman rmi "$image" >/dev/null 2>&1 || true
       removed_image="Y"
     fi
   done
 
   if [ "$removed_image" = "Y" ]; then
-    print_success "Removed OpenShell Docker image(s)."
+    print_success "Removed OpenShell Podman image(s)."
   else
-    print_success "OpenShell Docker images not found, skipping."
+    print_success "OpenShell Podman images not found, skipping."
   fi
 
   OPENSHELL_CONTAINER_CONFIG_DIR="${OPENSHELL_CONTAINER_CONFIG_DIR:-$HOME/.config/openshell-mirror-neuron}"
@@ -399,7 +394,7 @@ if command -v docker &>/dev/null; then
     print_success "MirrorNeuron OpenShell container config not found, skipping."
   fi
 else
-  print_warning "Docker not installed, skipping image cleanup."
+  print_warning "Podman not installed, skipping image cleanup."
 fi
 
 echo "" >&3

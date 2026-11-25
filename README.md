@@ -62,10 +62,10 @@ Current installation uses explicit component pins and current release-index fing
 Backward compatibility and automatic migration of obsolete state are unsupported.
 
 OpenShell startup resolves the Compose network gateway before launching the
-host-native SDK helper. The installer uses `docker compose create openshell`
-to create the service without starting it, records the resolved bind address
-and endpoint, then starts the runtime. Linux native preparation uses the Docker
-bridge address (for example `172.19.0.1:58080`); Docker Desktop retains loopback and
+host-native SDK helper. The installer uses the containerized Compose provider to create OpenShell
+without starting it, records the resolved bind address
+and endpoint, then starts the runtime. Linux native preparation uses the Podman
+bridge address (for example `172.19.0.1:58080`); Podman machines use loopback and
 explicit gateway overrides remain authoritative. All three install modes use
 this ordering. `create` does not support the `--no-deps` option. Historical
 support snapshots remain unchanged.
@@ -176,51 +176,24 @@ warning. For an already-open terminal, run the printed one-time reload command:
 OpenShell runs through the managed containers in every install mode; the
 installer does not run the upstream host package installer.
 
-When Model Runner is required but disabled, the installer enables it with
-`docker desktop enable model-runner`. Docker Desktop may request the platform
-permission needed to update that setting.
+## Podman runtime
 
-## Automatic Docker setup (unreleased)
+Runtime installation uses the Podman CLI. On Linux the installer starts the
+native API socket for the invoking user. On macOS it uses a Podman machine for workloads. The Compose provider runs in a
+pinned container. Client-only installation requires Python tooling.
 
-Runtime installs wait for Docker before preparing MirrorNeuron, including with
-`--no-start`. The installer starts an existing Docker daemon when needed. On
-a fresh setup it downloads Docker Desktop for Apple silicon or Intel on macOS,
-or installs native Docker Engine and its Compose plugin on Linux distributions
-supported by Docker's installer. Client-only installs require only Python
-tooling.
-
-On macOS, the installer uses Docker's `--accept-license` flag with authorized
-sudo. When sudo needs authentication and the current user can write to
-Applications, the installer copies Docker Desktop there. Complete any
-first-launch prompts in Docker Desktop.
-[Docker Desktop installation](https://docs.docker.com/desktop/setup/install/mac-install/)
-
-Linux Engine installation requires root or sudo. Run `sudo -v` in the same
-terminal before a default install, or use `--interactive` to allow sudo to
-prompt. A fresh installation adds the invoking account to the `docker` group
-if needed and continues with that group active. Start a new login session to
-use the group from your shell.
-Members of the `docker` group have root-level access.
-[Docker Engine installation](https://docs.docker.com/engine/install/)
-[Docker group permissions](https://docs.docker.com/engine/install/linux-postinstall/)
-
-## Quick Start
-
-Start an existing Docker installation without installing MirrorNeuron or Docker
-(unreleased):
+Start an existing engine or machine with:
 
 ```bash
-./install.sh --start-docker
+./install.sh --start-podman
 ```
 
-This launches Docker Desktop on macOS, starts the selected Docker Engine,
-rootless Docker, or Docker Desktop service on Linux, and waits for `docker info`
-to succeed. Windows Bash environments use `docker desktop start`. Linux system
-services use non-interactive sudo when needed; if permission is unavailable,
-the command prints the manual startup command. Remote endpoints must be started
-on their host. Installation/reset options cannot be combined with this flag.
-The readiness wait defaults to 60 attempts spaced two seconds apart; override
-with `MN_DOCKER_START_ATTEMPTS`.
+Use `podman info` to check the selected container engine. GGUF models run
+directly on the host with native llama.cpp. macOS uses Metal, and Linux uses
+CUDA or Vulkan. Podman keeps its own workload container and volume storage.
+Provision existing job data on Podman when moving a node from Docker.
+
+## Quick Start
 
 Inspect installer options:
 
@@ -455,13 +428,13 @@ see [Google's npm package contract](https://docs.cloud.google.com/artifact-regis
   memory only starts that prepared image; it never builds Membrane source.
 - OpenShell sandbox JWT keys are bootstrapped by the pinned gateway container;
   installing OpenSSL on the host is not required. Keys are generated in the
-  container filesystem and copied out, so reset-time Docker Desktop host-mount
+  container filesystem and copied out, so reset-time Podman host-mount
   caching cannot break bootstrap. The temporary container is removed on success
   and failure, and the signing key is installed with mode 0600.
 - The OpenShell host endpoint follows its published Compose bind address:
-  Docker Desktop uses loopback, while native Linux uses the runtime bridge
+  Podman machines use loopback, while native Linux uses the runtime bridge
   gateway so both the host CLI and sandbox containers can reach the service.
-- The Web UI is a Docker Compose service published on port `55173` by default;
+- The Web UI is a Compose service published on port `55173` by default;
   installing it does not require npm on the host. Binary installs fetch the
   selected `mirrorneuron-web-ui` package from the public GAR npm repository
   inside the service, while local installs mount and build the `mn-web-ui`
@@ -709,7 +682,7 @@ image from the sibling `Membrane` checkout instead. Set `MN_MEMBRANE_DIR` to use
 specific local checkout. Binary and GitHub install modes ignore this flag and
 continue using GAR images. The flag selects `mirror-neuron-memory-engine:local`,
 records source mode, and builds the Dockerfile `runtime` target once per installer
-invocation using the normal Docker cache. Subsequent runtime/blueprint startup
+invocation using the Podman build cache. Subsequent runtime/blueprint startup
 does not build images. Missing source and `--build-membrane --no-context-engine`
 fail before installation; a failed build stops installation. No image is published.
 
@@ -798,51 +771,14 @@ complete document conversion, embedded PDF extraction and lazy OCR. Separate
 document-reading, PDF-extraction and OCR packages are removed from the current
 inventory. Install-support snapshots remain historical release records.
 
-## Native DMR for Inkling 2 Mini
+## Local model serving
 
-Model installation and first use execute the SDK-owned catalog `preparation`
-recipe automatically. It downloads/caches a prepared native DMR from public GAR
-with pinned archive checksums and llama.cpp assets, starts an owned controller
-and wires per-model endpoints. Users need no Go, Git, compiler or Google Cloud
-credentials; the installed Python SDK handles preparation.
-`scripts/build-prism-dmr.py` warms Inkling's backend cache and starts its
-controller without pulling weights. See [catalog DMR preparation](../mn-docs/model-runtime.md#inkling-2-mini-on-docker-model-runner).
-
-Release builders use `scripts/publish-prepared-dmr.py --output <empty-directory>`
-to compile the pinned runner with the SDK's HTTP, native transport and Prism
-version-parser patches. Add `--apply` to publish the immutable native archives
-to public GAR. The output's `runner-assets.json` supplies catalog URLs and hashes.
-Go and Git are release-build dependencies only.
-
-Restore these shared runner archives after GAR cleanup with:
-
-```bash
-./scripts/publish-dmr.sh --model inkling-2-mini --output /tmp/managed-dmr-release --apply
-# Reuse a saved release without rebuilding:
-./scripts/publish-dmr.sh --model inkling-2-mini --from-directory /tmp/managed-dmr-release --apply
-```
-
-The command uses `.venv-gar-publish/bin/python` by default, then `python3.12`;
-set `MN_PUBLISH_PYTHON` to another Python 3.12+ environment with the matching
-MirrorNeuron SDK installed. It also supplies that interpreter to `gcloud` unless
-`CLOUDSDK_PYTHON` is already set. Building needs Git and Go; publishing needs
-authenticated `gcloud` with upload permission. Saved archives need no build tools.
-Omit `--apply` to build/validate only; `--from-directory` then performs only local
-validation. The restore entrypoint requires the SDK catalog's exact URLs and
-checksums before upload. Different build tools may produce different archives;
-retain the original release directory for exact restoration. Upload skips existing
-files, publishes only the validated archives and their manifest, and verifies
-every complete public download anonymously. A conflicting existing file fails
-verification and is never overwritten. Co-workers share these native runner
-archives through their catalog recipe. For a new runner release, the original
-Python builder still produces a new `runner-assets.json` for catalog review.
-
-The Spark ARM64 CUDA backend is published separately as
-`prism-llama-backend:prism-b10743-adfffbe-cuda13-sm121-arm64-v1` in the same generic
-repository. It targets Ubuntu 24.04, GB10/SM 12.1 and driver 580+, and includes
-CUDA 13 runtime libraries, upstream/NVIDIA licenses and build provenance.
-The SDK catalog selects its public URL and SHA-256. macOS selects native Metal;
-a Linux Docker image cannot accelerate inference through Apple Metal.
+All six catalog models run with native llama.cpp on their selected Linux or
+macOS owner. Run `mn model add nano` to prepare Bolt and `mn model probe nano`
+to exercise its LiteLLM route. The first start downloads the GGUF weights
+into the model's host cache. Later starts reuse that cache. The SDK can
+provision a verified native binary or use `MN_LLAMA_SERVER`.
+[SDK model guide](../mn-python-sdk/docs/docker-models.md)
 
 The Web UI sidecar supports owner-scoped Job UI forwarding across connected
 computers, including live WebSockets. It requires the matching API relay and SDK

@@ -21,7 +21,7 @@ set -euo pipefail
 print_detail() { :; }
 print_step() { :; }
 print_error() { printf '%s\n' "$1" >&2; }
-docker() {
+podman() {
     case "$1" in
         ps) printf '%s\n' "$INVENTORY" ;;
         inspect)

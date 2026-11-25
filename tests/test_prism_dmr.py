@@ -11,22 +11,22 @@ def test_cache_warmup_uses_sdk_catalog_recipe(monkeypatch, tmp_path, capsys):
     )
     wrapper = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(wrapper)
-    entry = {"id": "inkling-2-mini:q4_k_m", "preparation": {"kind": "dmr_native"}}
+    from types import SimpleNamespace
+
+    entry = {"id": "inkling-2-mini:q4_k_m", "source": "llama_cpp"}
     calls = []
+    monkeypatch.setattr(wrapper, "resolve_model_entry", lambda name: entry)
     monkeypatch.setattr(
         wrapper,
-        "resolve_model_entry",
-        lambda value: entry if value == "inkling-2-mini" else None,
+        "prepare",
+        lambda value: calls.append(value) or {"binary": "/native/llama-server"},
     )
     monkeypatch.setattr(
-        wrapper,
-        "prepare_dmr_model",
-        lambda value, **kwargs: calls.append((value, kwargs)) or value,
-    )
-    monkeypatch.setattr(
-        wrapper, "managed_descriptor", lambda *args, **kwargs: {"root": tmp_path}
+        wrapper, "settings", lambda _value: SimpleNamespace(accelerator="metal")
     )
     monkeypatch.setattr("sys.argv", ["build-prism-dmr.py", "--backend", "metal"])
     wrapper.main()
-    assert calls == [(entry, {"accelerator": "metal"})]
-    assert "mn model add inkling-2-mini --local" in capsys.readouterr().out
+    assert calls == [entry]
+    assert (
+        "Prepared native llama-server /native/llama-server" in capsys.readouterr().out
+    )

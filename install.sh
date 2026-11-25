@@ -3,7 +3,7 @@
 set -euo pipefail
 
 # Keep a streamed Linux installer available if it has to restart in the
-# Docker group after provisioning the engine. The stream itself is one-shot.
+# Podman group after provisioning the engine. The stream itself is one-shot.
 if [ -z "${BASH_SOURCE[0]:-}" ] && [ -z "${BASH_EXECUTION_STRING:-}" ] && [ "$(uname -s)" = "Linux" ]; then
   mn_streamed_installer="$(mktemp "${TMPDIR:-/tmp}/mn-install.XXXXXX")"
   trap 'rm -f "$mn_streamed_installer"' EXIT
@@ -28,7 +28,7 @@ exec 3>&1
 # here.
 
 # MirrorNeuron releases by installation source.
-# Core is a GAR Docker image.
+# Core is a GAR Podman image.
 MN_DEFAULT_CORE_VERSION="${MN_DEFAULT_CORE_VERSION:-v1.4.1}"
 # SDK, CLI, and API are pip packages.
 MN_DEFAULT_PYTHON_SDK_VERSION="${MN_DEFAULT_PYTHON_SDK_VERSION:-v1.4.23}"
@@ -38,7 +38,7 @@ MN_DEFAULT_API_VERSION="${MN_DEFAULT_API_VERSION:-v1.4.15}"
 MN_DEFAULT_WEB_UI_VERSION="${MN_DEFAULT_WEB_UI_VERSION:-v1.4.3}"
 # Additional pip packages are selected from the versioned package index.
 MN_DEFAULT_AGENT_PACKAGE_INDEX_VERSION="${MN_DEFAULT_AGENT_PACKAGE_INDEX_VERSION:-v1.4.31}"
-# Membrane v2 context engine is a GAR Docker image.
+# Membrane v2 context engine is a GAR Podman image.
 MN_DEFAULT_MEMBRANE_CONTEXT_ENGINE_VERSION="${MN_DEFAULT_MEMBRANE_CONTEXT_ENGINE_VERSION:-v1.4.0}"
 
 # Google Artifact Registry coordinates.
@@ -53,12 +53,12 @@ MN_DEFAULT_PYTHON_GAR_REPOSITORY="${MN_DEFAULT_PYTHON_GAR_REPOSITORY:-agent-skil
 MN_DEFAULT_WEB_UI_GAR_NPM_REPOSITORY="${MN_DEFAULT_WEB_UI_GAR_NPM_REPOSITORY:-mirrorneuron-npm}"
 MN_DEFAULT_WEB_UI_NPM_REGISTRY="${MN_DEFAULT_WEB_UI_NPM_REGISTRY:-https://us-central1-npm.pkg.dev/mirrorneuron-public-packages/mirrorneuron-npm/}"
 
-# Docker images started directly by the installer or generated Compose config.
-MN_DEFAULT_REDIS_IMAGE="${MN_DEFAULT_REDIS_IMAGE:-redis:8}"
-MN_DEFAULT_WEB_UI_IMAGE="${MN_DEFAULT_WEB_UI_IMAGE:-node:22-alpine}"
+# Podman images started directly by the installer or generated Compose config.
+MN_DEFAULT_REDIS_IMAGE="${MN_DEFAULT_REDIS_IMAGE:-docker.io/library/redis:8}"
+MN_DEFAULT_WEB_UI_IMAGE="${MN_DEFAULT_WEB_UI_IMAGE:-docker.io/library/node:22-alpine}"
 # These upstream images intentionally retain their existing mutable `latest`
 # policy. Replace `latest` with a release tag or digest here to pin them.
-MN_DEFAULT_SYNCTHING_IMAGE="${MN_DEFAULT_SYNCTHING_IMAGE:-syncthing/syncthing:latest}"
+MN_DEFAULT_SYNCTHING_IMAGE="${MN_DEFAULT_SYNCTHING_IMAGE:-docker.io/syncthing/syncthing:latest}"
 MN_DEFAULT_OPENSHELL_SANDBOX_IMAGE="${MN_DEFAULT_OPENSHELL_SANDBOX_IMAGE:-ghcr.io/nvidia/openshell/sandbox:latest}"
 # Keep the OpenShell gateway and supervisor on matching releases so the
 # gateway can extract /openshell-sandbox at startup.
@@ -67,16 +67,6 @@ MN_DEFAULT_OPENSHELL_GATEWAY_IMAGE="${MN_DEFAULT_OPENSHELL_GATEWAY_IMAGE:-ghcr.i
 MN_DEFAULT_OPENSHELL_SUPERVISOR_IMAGE="${MN_DEFAULT_OPENSHELL_SUPERVISOR_IMAGE:-ghcr.io/nvidia/openshell/supervisor:0.0.47}"
 # The WAC release and the platform digests in mn_install_wac are one pin.
 MN_WAC_VERSION="v0.12.0"
-
-# Docker Model Runner's NVIDIA source build.
-MN_DEFAULT_DOCKER_MODEL_PLUGIN_PACKAGE="${MN_DEFAULT_DOCKER_MODEL_PLUGIN_PACKAGE:-docker-model-plugin}"
-# Empty preserves the OS package repository’s selected version. Set an exact
-# package version here when the Ubuntu Docker repository is pinned.
-MN_DEFAULT_DOCKER_MODEL_PLUGIN_VERSION="${MN_DEFAULT_DOCKER_MODEL_PLUGIN_VERSION:-}"
-MN_DEFAULT_NVIDIA_LLAMA_CPP_BUILD="${MN_DEFAULT_NVIDIA_LLAMA_CPP_BUILD:-b10524}"
-MN_DEFAULT_NVIDIA_LLAMA_CPP_IMAGE="${MN_DEFAULT_NVIDIA_LLAMA_CPP_IMAGE:-ghcr.io/ggml-org/llama.cpp:server-cuda13-b10524}"
-MN_DEFAULT_NVIDIA_MODEL_RUNNER_IMAGE="${MN_DEFAULT_NVIDIA_MODEL_RUNNER_IMAGE:-docker/model-runner:local-cuda-b10524}"
-MN_DEFAULT_NVIDIA_MODEL_RUNNER_BUILD_VERSION="${MN_DEFAULT_NVIDIA_MODEL_RUNNER_BUILD_VERSION:-v1.2.6-local-b10524}"
 
 # Python toolchain. Leave MN_DEFAULT_UV_VERSION empty to preserve the upstream
 # installer’s current-release behavior; set it to a uv release to pin it.
@@ -94,7 +84,7 @@ MN_INSTALL_HELP_ALL="N"
 MN_INSTALL_VERBOSE="${MN_INSTALL_VERBOSE:-N}"
 MN_INSTALL_RESET="N"
 MN_INSTALL_DETECT_ONLY="N"
-MN_INSTALL_START_DOCKER="N"
+MN_INSTALL_START_PODMAN="N"
 MN_NO_RUNTIME="N"
 MN_RUNTIME_ONLY="N"
 MN_INSTALL_ROLE="full"
@@ -255,7 +245,7 @@ MirrorNeuron installer
 
 Usage: ./$MN_INSTALL_SCRIPT_NAME [--mode github|local|binary] [options]
 
-Install a local runtime with Docker setup, or a client for a remote node.
+Install a local runtime with Podman setup, or a client for a remote node.
 Runs without prompts by default. Use --interactive to choose components.
 
 Common options:
@@ -269,7 +259,7 @@ Common options:
   --no-web-ui        Skip the Web UI.
   --version TAG      Select a release (binary or GitHub mode).
   --reset            Permanently clear existing data; always requires typing YES.
-  --start-docker     Start an existing Docker installation and exit.
+  --start-podman     Start an existing Podman installation and exit.
   --detect-only      Print installation status as JSON without making changes.
   -v, --verbose      Show component details and diagnostics.
   -h, --help         Show this help; add --mode MODE for mode-specific options.
@@ -293,7 +283,7 @@ Common controls (available before mode-specific setup):
   --no-runtime         Client mode: install CLI/API for remote execution only.
   --runtime-only       Runtime mode: execution services without CLI/API or Web UI.
                        Default home: ~/.mn-client. Ignored in source modes.
-  --start-docker       Start existing Docker only; install nothing.
+  --start-podman       Start existing Podman only; install nothing.
   --detect-only        Print installation status as JSON; make no changes.
   --reset              Permanently clear existing data; always requires typing YES.
   --help-all           Show this reference for the selected mode; make no changes.
@@ -305,311 +295,135 @@ EOF
 }
 
 # =============================================================================
-# DOCKER INSTALLATION AND STARTUP
+# PODMAN INSTALLATION AND STARTUP
 # =============================================================================
 
-function mn_start_docker() {
-  local host_os endpoint context attempts
-  local startup_mode="${1:-only}" desktop_app="${2:-Docker}"
-  attempts="${MN_DOCKER_START_ATTEMPTS:-60}"
-  if ! [[ "$attempts" =~ ^[1-9][0-9]*$ ]]; then
-    printf 'error: MN_DOCKER_START_ATTEMPTS must be a positive integer.\n' >&3
-    return 1
-  fi
-  if ! command -v docker >/dev/null 2>&1; then
-    printf 'error: Docker CLI is not installed or is not on PATH.\nNext: install Docker for your OS and rerun install.sh --start-docker.\n' >&3
-    return 1
-  fi
-  if docker info >/dev/null 2>&1; then
-    if [ "$startup_mode" = only ]; then
-      print_success "Docker is already running."
-    fi
-    return 0
-  fi
-
-  context="$(docker context show 2>/dev/null || true)"
-  if [ -n "${DOCKER_CONTEXT:-}" ]; then
-    endpoint="$(docker context inspect --format '{{.Endpoints.docker.Host}}' 2>/dev/null || true)"
-  else
-    endpoint="${DOCKER_HOST:-$(docker context inspect --format '{{.Endpoints.docker.Host}}' 2>/dev/null || true)}"
-  fi
-  case "$endpoint" in
-  ssh://* | tcp://* | http://* | https://*)
-    printf 'error: The selected Docker endpoint is remote or uses TCP.\nNext: start that daemon on its host or select a local Docker context, then retry.\n' >&3
-    return 1
-    ;;
-  esac
-
-  host_os="$(uname -s)"
-  printf '==> Starting Docker\n' >&3
-  case "$host_os" in
-  Darwin)
-    if ! open -a "$desktop_app"; then
-      printf 'error: Could not launch Docker Desktop.\nNext: open the installed Docker Desktop application, then retry.\n' >&3
-      return 1
-    fi
-    ;;
-  Linux)
-    case "$context:$endpoint" in
-    desktop-linux:* | *:*/.docker/desktop/docker.sock)
-      mn_start_docker_service user docker-desktop || return 1
-      ;;
-    rootless:* | *:*/run/user/*/docker.sock)
-      mn_start_docker_service user docker || return 1
-      ;;
-    *) mn_start_docker_service system docker "$startup_mode" || return 1 ;;
-    esac
-    ;;
-  MINGW* | MSYS* | CYGWIN*)
-    if ! docker desktop start; then
-      printf 'error: Could not start Docker Desktop.\nNext: open Docker Desktop manually, then retry.\n' >&3
-      return 1
-    fi
-    ;;
-  *)
-    printf 'error: Automatic Docker startup is unsupported on this OS.\nNext: start Docker manually, then retry.\n' >&3
-    return 1
-    ;;
-  esac
-
-  printf '==> Waiting for Docker to become ready\n' >&3
-  while [ "$attempts" -gt 0 ]; do
-    if docker info >/dev/null 2>&1; then
-      printf '✓ Docker is running.\n' >&3
-      return 0
-    fi
-    attempts=$((attempts - 1))
-    [ "$attempts" -eq 0 ] || sleep 2
-  done
-  print_error "Docker did not become accessible before the startup timeout."
-  if [ "$startup_mode" = install ] && [ "$host_os" = Darwin ]; then
-    printf 'Next: complete any Docker Desktop first-launch prompts and verify docker info, then retry.\n' >&3
-  else
-    printf 'Next: check Docker startup, socket permissions, and the selected context with docker info, then retry.\n' >&3
-  fi
-  return 1
-}
-
-function mn_start_docker_service() {
-  local scope="$1" service_name="$2" startup_mode="${3:-only}"
-  local -a command_args=() privilege=()
-  if [ "$scope" = user ]; then
-    command_args=(systemctl --user start "$service_name")
-  elif command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
-    command_args=(systemctl start "$service_name")
-  elif command -v service >/dev/null 2>&1; then
-    command_args=(service "$service_name" start)
-  else
-    printf 'error: No supported Docker service manager is available.\nNext: start Docker using your OS service manager, then retry.\n' >&3
-    return 1
-  fi
-  if [ "$scope" = system ] && [ "$(id -u)" -ne 0 ]; then
-    if ! command -v sudo >/dev/null 2>&1; then
-      printf 'error: Starting the Docker system service requires sudo.\nNext: ask an administrator to start the Docker service, then retry.\n' >&3
-      return 1
-    fi
-    privilege=(sudo -n)
-    if [ "$startup_mode" = install ] && [ "${NON_INTERACTIVE:-Y}" = "N" ]; then
-      privilege=(sudo)
-    fi
-  fi
-  if ! ${privilege[@]+"${privilege[@]}"} "${command_args[@]}" </dev/null; then
-    printf 'error: Could not start the Docker service.\nNext: run the following command with the required permissions, then retry:\n  ' >&3
-    [ "$scope" != system ] || printf 'sudo ' >&3
-    printf '%s ' "${command_args[@]}" >&3
-    printf '\n' >&3
-    return 1
-  fi
-}
-
-function mn_docker_admin() {
+function mn_podman_admin() {
   if [ "$(id -u)" -eq 0 ]; then
     "$@"
-  elif [ "${NON_INTERACTIVE:-Y}" = "N" ]; then
+  elif [ "${NON_INTERACTIVE:-Y}" = N ]; then
     sudo "$@"
   else
     sudo -n "$@"
   fi
 }
 
-function mn_require_docker_admin() {
-  if [ "$(id -u)" -eq 0 ]; then return 0; fi
-  if command -v sudo >/dev/null 2>&1; then
-    if [ "${NON_INTERACTIVE:-Y}" = "N" ] && sudo -v; then return 0; fi
-    if sudo -n -v 2>/dev/null; then return 0; fi
-  fi
-  print_error "Installing Docker requires administrator access."
-  printf 'Next: authorize sudo in this terminal with sudo -v, then rerun the installer.\n' >&3
-  return 1
-}
-
-function mn_find_docker_desktop() {
-  local app
-  for app in /Applications/Docker.app "$HOME/Applications/Docker.app"; do
-    if [ -x "$app/Contents/Resources/bin/docker" ]; then
-      printf '%s\n' "$app"
-      return 0
+function mn_install_podman_cli() {
+  print_step "Installing the Podman CLI"
+  case "$(uname -s)" in
+  Darwin)
+    if command -v brew >/dev/null 2>&1; then
+      brew install podman
+      return
     fi
-  done
-  return 1
-}
-
-function mn_install_docker_desktop() (
-  local architecture work_dir mount_dir app stage_dir="" mounted="N" use_admin="Y"
-  case "$(uname -m)" in
-  arm64) architecture=arm64 ;;
-  x86_64)
-    architecture=amd64
-    if [ "$(sysctl -n hw.optional.arm64 2>/dev/null || true)" = 1 ]; then
-      architecture=arm64
-    fi
+    (
+      local pkg_dir package
+      pkg_dir="$(mktemp -d)" || exit 1
+      trap 'rm -rf "$pkg_dir"' EXIT
+      package="$pkg_dir/podman.pkg"
+      curl -fsSL --retry 3 https://github.com/containers/podman/releases/download/v5.6.2/podman-installer-macos-universal.pkg -o "$package" || exit 1
+      printf '%s  %s\n' 0640ac3ac9351f76360ada0bf8bce905c13f68f1d212fb593a686e133064b7ce "$package" | shasum -a 256 -c - || exit 1
+      mn_podman_admin /usr/sbin/installer -pkg "$package" -target /
+    ) || return 1
+    export PATH="/opt/podman/bin:$PATH"
+    return 0
     ;;
-  *)
-    print_error "Automatic Docker Desktop installation requires an Apple silicon or Intel Mac."
-    return 1
+  Linux)
+    if command -v apt-get >/dev/null 2>&1; then
+      mn_podman_admin apt-get update && mn_podman_admin apt-get install -y --no-install-recommends podman
+      return
+    elif command -v dnf >/dev/null 2>&1; then
+      mn_podman_admin dnf install -y --setopt=install_weak_deps=False podman
+      return
+    elif command -v pacman >/dev/null 2>&1; then
+      mn_podman_admin pacman -S --needed --noconfirm podman
+      return
+    fi
     ;;
   esac
-
-  if [ -w /Applications ] && [ "$(id -u)" -ne 0 ] && ! sudo -n -v 2>/dev/null; then
-    use_admin="N"
-  else
-    mn_require_docker_admin || return 1
-  fi
-  work_dir="$(mktemp -d "${TMPDIR:-/tmp}/mn-docker-desktop.XXXXXX")" || return 1
-  mount_dir="$work_dir/mount"
-  trap '
-    if [ -n "$stage_dir" ]; then rm -rf "$stage_dir"; fi
-    if [ "$mounted" = "Y" ] && ! hdiutil detach "$mount_dir" >/dev/null 2>&1 &&
-      ! hdiutil detach "$mount_dir" -force >/dev/null; then
-      print_warning "Could not detach the Docker disk image at $mount_dir."
-    else
-      rm -rf "$work_dir"
-    fi
-  ' EXIT
-  trap 'exit 130' INT
-  trap 'exit 143' TERM
-
-  printf '==> Installing Docker Desktop\n' >&3
-  curl -fsSL --retry 3 --connect-timeout 15 \
-    "https://desktop.docker.com/mac/main/$architecture/Docker.dmg" -o "$work_dir/Docker.dmg" || return 1
-  mkdir "$mount_dir" || return 1
-  hdiutil attach "$work_dir/Docker.dmg" -readonly -nobrowse -mountpoint "$mount_dir" >/dev/null || return 1
-  mounted="Y"
-  app="$mount_dir/Docker.app"
-  if [ "$use_admin" = "Y" ]; then
-    print_step "Running the Docker Desktop installer with --accept-license"
-    mn_run_logged "Docker Desktop installation" mn_docker_admin \
-      "$app/Contents/MacOS/install" --accept-license --user="${SUDO_USER:-$(id -un)}" </dev/null
-  else
-    # Copy the bundle as in the drag-to-Applications installer. Docker Desktop
-    # presents its agreement on first launch when the account has yet to accept.
-    stage_dir="$(mktemp -d /Applications/.mn-docker.XXXXXX)" || return 1
-    ditto "$app" "$stage_dir/Docker.app" || return 1
-    mv "$stage_dir/Docker.app" /Applications/
-  fi
-)
-
-function mn_install_docker_engine() (
-  local work_dir
-  mn_require_docker_admin || return 1
-  work_dir="$(mktemp -d "${TMPDIR:-/tmp}/mn-docker-engine.XXXXXX")" || return 1
-  trap 'rm -rf "$work_dir"' EXIT
-  trap 'exit 130' INT
-  trap 'exit 143' TERM
-
-  printf '==> Installing Docker Engine\n' >&3
-  curl -fsSL --retry 3 --connect-timeout 15 https://get.docker.com -o "$work_dir/install.sh" || return 1
-  mn_run_logged "Docker Engine installation" mn_docker_admin sh "$work_dir/install.sh" </dev/null
-)
-
-function mn_enter_docker_group() {
-  local user command_line arg
-  if [ "$(id -u)" -eq 0 ]; then return 0; fi
-  case " $(id -nG) " in *" docker "*) return 0 ;; esac
-  user="$(id -un)"
-  case " $(id -nG "$user") " in *" docker "*) ;; *) return 0 ;; esac
-
-  if ! command -v sg >/dev/null 2>&1; then
-    print_error "The current login session has not picked up the Docker group."
-    printf 'Next: log out and back in, then rerun the installer.\n' >&3
-    return 1
-  fi
-  command_line="exec $(mn_shell_quote "$BASH") -euo pipefail $(mn_shell_quote "${BASH_SOURCE[0]}")"
-  for arg in ${MN_INSTALL_ORIGINAL_ARGS[@]+"${MN_INSTALL_ORIGINAL_ARGS[@]}"}; do
-    command_line="$command_line $(mn_shell_quote "$arg")"
-  done
-  printf '==> Continuing in the Docker group. Start a new login session to use Docker from your shell.\n' >&3
-  # The new process acquires its own lifecycle lock before touching MN_HOME.
-  mn_reset_release_lock
-  exec sg docker -c "$command_line"
+  print_error "Install the Podman CLI for this platform and rerun the installer."
+  return 1
 }
 
-function mn_prepare_runtime_docker() {
-  local host_os desktop_app="" installed_engine="N" user
+# Bind mounts are resolved by the engine. On a Mac this is the socket inside
+# the Podman machine, even though the client connects via a forwarded socket.
+function mn_resolve_podman_socket() {
+  if [ -n "${PODMAN_HOST_SOCKET:-}" ]; then
+    printf '%s\n' "$PODMAN_HOST_SOCKET"
+  else
+    podman info --format '{{.Host.RemoteSocket.Path}}'
+  fi
+}
+
+function mn_start_podman() {
+  local mode="${1:-only}" host_os socket_path
+  if ! command -v podman >/dev/null 2>&1; then
+    print_error "Podman CLI is missing. Install Podman or run the runtime installer."
+    return 1
+  fi
   host_os="$(uname -s)"
-  if [ "$host_os" = Darwin ] && ! command -v docker >/dev/null 2>&1; then
-    desktop_app="$(mn_find_docker_desktop || true)"
-    if [ -n "$desktop_app" ]; then
-      export PATH="$PATH:$desktop_app/Contents/Resources/bin"
-    fi
-  fi
-
-  if ! command -v docker >/dev/null 2>&1; then
-    if ! command -v curl >/dev/null 2>&1; then
-      print_error "curl is required to download Docker."
-      printf 'Next: install curl and rerun the installer.\n' >&3
-      return 1
-    fi
-    case "$host_os" in
-    Darwin)
-      if ! mn_install_docker_desktop; then
-        print_error "Docker Desktop installation failed."
-        printf 'Next: resolve the error above, then retry. See https://docs.docker.com/desktop/setup/install/mac-install/\n' >&3
+  case "$host_os" in
+  Darwin | MINGW* | MSYS* | CYGWIN*)
+    if ! podman info >/dev/null 2>&1; then
+      if [ -n "${CONTAINER_HOST:-}${CONTAINER_CONNECTION:-}" ]; then
+        print_error "The selected Podman connection is unreachable. Check it with podman info."
         return 1
       fi
-      desktop_app="$(mn_find_docker_desktop)" || {
-        print_error "Docker Desktop was not found after installation. Check /Applications/Docker.app and retry."
-        return 1
-      }
-      export PATH="$PATH:$HOME/.docker/bin:$desktop_app/Contents/Resources/bin"
-      ;;
-    Linux)
-      if ! mn_install_docker_engine; then
-        print_error "Docker Engine installation failed."
-        printf 'Next: resolve the error above, then retry. See https://docs.docker.com/engine/install/\n' >&3
-        return 1
+      if ! podman machine inspect >/dev/null 2>&1; then
+        if [ "$mode" != install ]; then
+          print_error "No Podman machine is configured. Run podman machine init first."
+          return 1
+        fi
+        podman machine init || return 1
       fi
-      installed_engine="Y"
-      ;;
-    *)
-      print_error "Automatic Docker installation is supported on macOS and Linux."
-      printf 'Next: install Docker for your OS and rerun the installer.\n' >&3
-      return 1
-      ;;
-    esac
-    hash -r
-  fi
-
-  if [ "$host_os" = Linux ] && ! docker info >/dev/null 2>&1; then
-    if [ "$installed_engine" = "Y" ] && [ "$(id -u)" -ne 0 ]; then
-      user="$(id -un)"
-      if ! mn_docker_admin usermod -aG docker "$user"; then
-        print_error "Could not add the current user to the Docker group."
-        printf 'Next: configure Docker socket access for your account, then rerun the installer.\n' >&3
-        return 1
+      podman machine start || return 1
+    fi
+    ;;
+  Linux)
+    podman info >/dev/null || return 1
+    socket_path="$(mn_resolve_podman_socket)" || return 1
+    if [ -z "${CONTAINER_HOST:-}${CONTAINER_CONNECTION:-}" ] && [ ! -S "$socket_path" ]; then
+      if [ "$(id -u)" -eq 0 ]; then
+        systemctl start podman.socket || return 1
+      else
+        systemctl --user start podman.socket || return 1
       fi
     fi
-    mn_enter_docker_group || return 1
-  fi
-  mn_start_docker install "${desktop_app:-Docker}" || return 1
+    ;;
+  *) print_error "Unsupported Podman host OS: $host_os"; return 1 ;;
+  esac
+  podman info >/dev/null || return 1
+  [ "$mode" != only ] || print_success "Podman is ready."
+}
 
-  DOCKER_HOST_SOCKET="${DOCKER_HOST_SOCKET:-$(mn_resolve_docker_host_socket)}"
-  if [ -z "${OPENSHELL_GATEWAY_DOCKER_GROUP:-}" ] && [ "$host_os" = "Darwin" ]; then
-    OPENSHELL_GATEWAY_DOCKER_GROUP="0"
-  elif [ -z "${OPENSHELL_GATEWAY_DOCKER_GROUP:-}" ] && [ -S "$DOCKER_HOST_SOCKET" ]; then
-    OPENSHELL_GATEWAY_DOCKER_GROUP="$(stat -c '%g' "$DOCKER_HOST_SOCKET" 2>/dev/null || stat -f '%g' "$DOCKER_HOST_SOCKET" 2>/dev/null || true)"
+function mn_prepare_runtime_podman() {
+  if ! command -v podman >/dev/null 2>&1; then
+    mn_install_podman_cli || return 1
   fi
+  mn_start_podman install || return 1
+  PODMAN_HOST_SOCKET="$(mn_resolve_podman_socket)" || return 1
+  case "$PODMAN_HOST_SOCKET" in
+    /*) ;;
+    *) print_error "Podman did not report an absolute API socket path."; return 1 ;;
+  esac
+  export PODMAN_HOST_SOCKET
+  local rootless container_uid container_gid
+  rootless="$(podman info --format '{{.Host.Security.Rootless}}')" || return 1
+  if [ "$rootless" = true ]; then
+    # UID/GID 0 inside the default rootless namespace map to the invoking user.
+    container_uid=0
+    container_gid=0
+  else
+    container_uid="$(id -u)"
+    container_gid="$(id -g)"
+    if [ -z "${OPENSHELL_GATEWAY_DOCKER_GROUP:-}" ] && [ -S "$PODMAN_HOST_SOCKET" ]; then
+      OPENSHELL_GATEWAY_DOCKER_GROUP="$(stat -c '%g' "$PODMAN_HOST_SOCKET" 2>/dev/null || stat -f '%g' "$PODMAN_HOST_SOCKET" 2>/dev/null || true)"
+    fi
+  fi
+  OPENSHELL_GATEWAY_USER="${OPENSHELL_GATEWAY_USER:-$container_uid:$container_gid}"
   OPENSHELL_GATEWAY_DOCKER_GROUP="${OPENSHELL_GATEWAY_DOCKER_GROUP:-0}"
+  MN_SYNCTHING_UID="${MN_SYNCTHING_UID:-$container_uid}"
+  MN_SYNCTHING_GID="${MN_SYNCTHING_GID:-$container_gid}"
 }
 
 # =============================================================================
@@ -633,16 +447,16 @@ function mn_detect_version_from_metadata() {
   printf '%s' "$version"
 }
 
-function mn_detect_version_from_docker() {
+function mn_detect_version_from_podman() {
   local image=""
   local version=""
 
-  image="$(docker container inspect --format '{{.Config.Image}}' mirror-neuron-core 2>/dev/null || true)"
+  image="$(podman container inspect --format '{{.Config.Image}}' mirror-neuron-core 2>/dev/null || true)"
   if [ -n "$image" ]; then
-    version="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' "$image" 2>/dev/null || true)"
+    version="$(podman image inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' "$image" 2>/dev/null || true)"
   fi
   if [ -z "$version" ]; then
-    version="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' mirror-neuron-core:latest 2>/dev/null || true)"
+    version="$(podman image inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' mirror-neuron-core:latest 2>/dev/null || true)"
   fi
   mn_detect_version_is_valid "$version" || return 1
   printf '%s' "$version"
@@ -691,7 +505,7 @@ function mn_detect_runtime() {
       client_version="$(sed -n 's/.*"cli_version": "\([v0-9.a-z-]*\)".*/"\1"/p' "$metadata_file" | head -n 1)"
       client_version="${client_version:-null}"
     fi
-    printf '{"installed":%s,"install_role":"client","running":false,"runtime_ready":false,"status":"client","version":%s,"docker_installed":null,"docker_running":null}\n' "$client_installed" "$client_version"
+    printf '{"installed":%s,"install_role":"client","running":false,"runtime_ready":false,"status":"client","version":%s,"podman_installed":null,"podman_running":null}\n' "$client_installed" "$client_version"
     return
   fi
   local installed="false"
@@ -699,19 +513,19 @@ function mn_detect_runtime() {
   local runtime_ready="false"
   local status="not_installed"
   local version=""
-  local docker_installed="false"
-  local docker_running="false"
+  local podman_installed="false"
+  local podman_running="false"
   local docker_ready="N"
   local core_container_exists="N"
   local cli=""
   local MN_DETECT_IDENTITY_INVALID="N"
 
-  if command -v docker >/dev/null 2>&1; then
-    docker_installed="true"
-    if docker info >/dev/null 2>&1; then
-      docker_running="true"
+  if command -v podman >/dev/null 2>&1; then
+    podman_installed="true"
+    if podman info >/dev/null 2>&1; then
+      podman_running="true"
       docker_ready="Y"
-      if docker container inspect mirror-neuron-core >/dev/null 2>&1; then
+      if podman container inspect mirror-neuron-core >/dev/null 2>&1; then
         core_container_exists="Y"
       fi
     fi
@@ -736,8 +550,8 @@ function mn_detect_runtime() {
   if [ "$installed" = "true" ]; then
     if [ "$docker_ready" != "Y" ]; then
       running="null"
-      status="docker_not_running"
-    elif [ "$(docker container inspect --format '{{.State.Running}}' mirror-neuron-core 2>/dev/null || true)" = "true" ]; then
+      status="podman_not_running"
+    elif [ "$(podman container inspect --format '{{.State.Running}}' mirror-neuron-core 2>/dev/null || true)" = "true" ]; then
       running="true"
       status="running"
     else
@@ -750,18 +564,18 @@ function mn_detect_runtime() {
   fi
   version="$(mn_detect_version_from_metadata "$metadata_file" || true)"
   if [ -z "$version" ] && [ "$docker_ready" = "Y" ]; then
-    version="$(mn_detect_version_from_docker || true)"
+    version="$(mn_detect_version_from_podman || true)"
   fi
   if [ -z "$version" ]; then
     [ -z "$cli" ] || version="$(mn_detect_version_from_cli "$cli" || true)"
   fi
 
   if [ -n "$version" ]; then
-    printf '{"installed":%s,"install_role":"%s","running":%s,"runtime_ready":%s,"status":"%s","version":"%s","docker_installed":%s,"docker_running":%s}\n' \
-      "$installed" "$detected_role" "$running" "$runtime_ready" "$status" "$version" "$docker_installed" "$docker_running"
+    printf '{"installed":%s,"install_role":"%s","running":%s,"runtime_ready":%s,"status":"%s","version":"%s","podman_installed":%s,"podman_running":%s}\n' \
+      "$installed" "$detected_role" "$running" "$runtime_ready" "$status" "$version" "$podman_installed" "$podman_running"
   else
-    printf '{"installed":%s,"install_role":"%s","running":%s,"runtime_ready":%s,"status":"%s","version":null,"docker_installed":%s,"docker_running":%s}\n' \
-      "$installed" "$detected_role" "$running" "$runtime_ready" "$status" "$docker_installed" "$docker_running"
+    printf '{"installed":%s,"install_role":"%s","running":%s,"runtime_ready":%s,"status":"%s","version":null,"podman_installed":%s,"podman_running":%s}\n' \
+      "$installed" "$detected_role" "$running" "$runtime_ready" "$status" "$podman_installed" "$podman_running"
   fi
 }
 
@@ -817,319 +631,33 @@ function mn_install_support_asset_path() {
   fi
 }
 
-function mn_is_linux_nvidia_host() {
-  [ "$(uname -s)" = "Linux" ] || return 1
-  command -v nvidia-smi >/dev/null 2>&1 || return 1
-
-  local gpu_list
-  gpu_list="$(nvidia-smi -L 2>/dev/null || true)"
-  [ -n "$gpu_list" ]
-}
-
-function mn_is_ubuntu_linux_host() {
-  [ "$(uname -s)" = "Linux" ] || return 1
-  [ -r /etc/os-release ] || return 1
-
-  local distro_id distro_like
-  distro_id="$(
-    # The file exists only on the target Linux host.
-    # shellcheck disable=SC1091
-    . /etc/os-release
-    printf '%s' "${ID:-}"
-  )"
-  distro_like="$(
-    # The file exists only on the target Linux host.
-    # shellcheck disable=SC1091
-    . /etc/os-release
-    printf '%s' "${ID_LIKE:-}"
-  )"
-  case " ${distro_id} ${distro_like} " in
-  *" ubuntu "*) return 0 ;;
-  *) return 1 ;;
-  esac
-}
-
-function mn_is_docker_desktop_host() {
-  local host_os docker_os
-  host_os="$(uname -s)"
-  case "$host_os" in
-  Darwin | MINGW* | MSYS* | CYGWIN*) return 0 ;;
-  esac
-
-  docker_os="$(docker info --format '{{.OperatingSystem}}' 2>/dev/null | tr '[:upper:]' '[:lower:]' || true)"
-  case "$docker_os" in
-  *"docker desktop"* | *"windows"*) return 0 ;;
-  *) return 1 ;;
-  esac
-}
-
-function mn_print_docker_model_runner_install_hint() {
-  if mn_is_docker_desktop_host; then
-    printf 'Next: docker desktop enable model-runner\n' >&3
-  elif mn_is_ubuntu_linux_host; then
-    printf 'Next: run these commands, then rerun install.sh:\n' >&3
-    printf '  sudo apt-get update\n' >&3
-    printf '  sudo apt-get install docker-model-plugin -y\n' >&3
-  else
-    printf "Next: install the Docker Model Runner plugin for this platform, then run 'docker model start-runner'.\n" >&3
-  fi
-}
-
-function mn_install_ubuntu_docker_model_plugin() {
-  local package_name package_version
-  local -a privilege=()
-
-  package_name="${MN_DOCKER_MODEL_PLUGIN_PACKAGE:-$MN_DEFAULT_DOCKER_MODEL_PLUGIN_PACKAGE}"
-  package_version="${MN_DOCKER_MODEL_PLUGIN_VERSION:-$MN_DEFAULT_DOCKER_MODEL_PLUGIN_VERSION}"
-  if [ -n "$package_version" ]; then
-    package_name="${package_name}=${package_version}"
-  fi
-
-  if ! command -v apt-get >/dev/null 2>&1; then
-    print_error "'apt-get' is required to install docker-model-plugin on Ubuntu."
-    mn_print_docker_model_runner_install_hint
-    exit 1
-  fi
-
-  if [ "$(id -u)" -ne 0 ]; then
-    if ! command -v sudo >/dev/null 2>&1; then
-      print_error "'sudo' is required to install docker-model-plugin on Ubuntu."
-      mn_print_docker_model_runner_install_hint
-      exit 1
-    fi
-    if [ "${NON_INTERACTIVE:-Y}" = "Y" ]; then
-      if ! sudo -n true >/dev/null 2>&1; then
-        print_error "Installing docker-model-plugin requires sudo access."
-        mn_print_docker_model_runner_install_hint
-        exit 1
-      fi
-      privilege=(sudo -n)
-    else
-      privilege=(sudo)
-    fi
-  fi
-
-  print_step "Installing Docker Model Runner plugin for Ubuntu"
-  if ! ${privilege[@]+"${privilege[@]}"} apt-get update; then
-    print_error "Could not refresh Ubuntu package metadata."
-    mn_print_docker_model_runner_install_hint
-    exit 1
-  fi
-  if ! ${privilege[@]+"${privilege[@]}"} apt-get install "$package_name" -y; then
-    print_error "Could not install docker-model-plugin."
-    mn_print_docker_model_runner_install_hint
-    exit 1
-  fi
-}
-
-function mn_prepare_docker_model_runner_cli() {
-  if mn_is_docker_desktop_host; then
-    if docker model status >/dev/null 2>&1; then
-      return 0
-    fi
-    print_step "Enabling Docker Model Runner in Docker Desktop"
-    if ! docker desktop enable model-runner >/dev/null 2>&1; then
-      print_warning "Docker Desktop did not enable Model Runner automatically."
-    fi
-    return 0
-  fi
-
-  if mn_is_ubuntu_linux_host && ! docker model --help >/dev/null 2>&1; then
-    mn_install_ubuntu_docker_model_plugin
-  fi
-}
-
-function mn_docker_model_runner_endpoint_ready() {
-  command -v curl >/dev/null 2>&1 || return 1
-  curl --fail --silent --show-error --max-time 5 \
-    "http://127.0.0.1:12434/engines/v1/models" >/dev/null 2>&1 ||
-    curl --fail --silent --show-error --max-time 5 \
-      "http://127.0.0.1:12434/v1/models" >/dev/null 2>&1
-}
-
-function mn_wait_for_docker_model_runner() {
-  local attempts="${MN_DOCKER_MODEL_RUNNER_START_ATTEMPTS:-30}"
-  while [ "$attempts" -gt 0 ]; do
-    if mn_docker_model_runner_endpoint_ready; then
-      return 0
-    fi
-    sleep 1
-    attempts=$((attempts - 1))
-  done
-  return 1
-}
-
-function mn_nvidia_llamacpp_runner_image() {
-  printf '%s' "${MN_DOCKER_MODEL_RUNNER_NVIDIA_IMAGE:-$MN_DEFAULT_NVIDIA_MODEL_RUNNER_IMAGE}"
-}
-
-function mn_nvidia_llamacpp_runner_is_current() {
-  local image
-  image="$(docker container inspect -f '{{.Config.Image}}' docker-model-runner 2>/dev/null || true)"
-  [ "$image" = "$(mn_nvidia_llamacpp_runner_image)" ]
-}
-
-function mn_ensure_nvidia_llamacpp_runner() {
-  local runner_image build_dir llama_server_image llama_server_build runner_build_version
-  runner_image="$(mn_nvidia_llamacpp_runner_image)"
-  llama_server_image="${MN_NVIDIA_LLAMA_CPP_IMAGE:-$MN_DEFAULT_NVIDIA_LLAMA_CPP_IMAGE}"
-  llama_server_build="${MN_NVIDIA_LLAMA_CPP_BUILD:-$MN_DEFAULT_NVIDIA_LLAMA_CPP_BUILD}"
-  runner_build_version="${MN_NVIDIA_MODEL_RUNNER_BUILD_VERSION:-$MN_DEFAULT_NVIDIA_MODEL_RUNNER_BUILD_VERSION}"
-
-  if mn_nvidia_llamacpp_runner_is_current; then
-    if mn_docker_model_runner_endpoint_ready; then
-      return 0
-    fi
-    print_step "Starting the NVIDIA llama.cpp Docker Model Runner"
-    docker start docker-model-runner >/dev/null 2>&1 || true
-    if mn_wait_for_docker_model_runner; then
-      return 0
-    fi
-    print_warning "The installed NVIDIA llama.cpp Docker Model Runner did not start; rebuilding it."
-  fi
-
-  if ! command -v git >/dev/null 2>&1; then
-    print_error "git is required to build the NVIDIA llama.cpp Docker Model Runner."
-    exit 1
-  fi
-
-  build_dir="$(mktemp -d "${TMPDIR:-/tmp}/mn-dmr-llamacpp.XXXXXX")"
-  print_step "Updating Docker Model Runner to llama.cpp ${llama_server_build} for NVIDIA"
-  if ! mn_run_logged "Docker Model Runner source download" git clone --depth 1 https://github.com/docker/model-runner.git "$build_dir"; then
-    rm -rf "$build_dir"
-    print_error "Could not fetch the Docker Model Runner source needed for the NVIDIA llama.cpp update."
-    exit 1
-  fi
-  if ! mn_run_logged "CUDA image download" docker pull "$llama_server_image"; then
-    rm -rf "$build_dir"
-    print_error "Could not pull llama.cpp CUDA build ${llama_server_build}."
-    exit 1
-  fi
-  if ! (
-    cd "$build_dir"
-    mn_run_docker_build --target final-llamacpp \
-      --build-arg VERSION="$runner_build_version" \
-      --build-arg LLAMA_SERVER_VERSION="$llama_server_build" \
-      --build-arg LLAMA_SERVER_VARIANT=cuda \
-      --build-arg LLAMA_UPSTREAM_IMAGE="$llama_server_image" \
-      -t "$runner_image" .
-  ); then
-    rm -rf "$build_dir"
-    print_error "Could not build the NVIDIA llama.cpp Docker Model Runner."
-    exit 1
-  fi
-  rm -rf "$build_dir"
-
-  # This replaces only the controller container; its named model volume is
-  # retained, so existing model artifacts survive the runtime upgrade.
-  docker rm -f docker-model-runner >/dev/null 2>&1 || true
-  if ! docker run -d \
-    --name docker-model-runner \
-    --restart unless-stopped \
-    --runtime nvidia \
-    --gpus all \
-    --device /dev/dri:/dev/dri \
-    --network bridge \
-    -p 127.0.0.1:12434:12434 \
-    -p 172.17.0.1:12434:12434 \
-    -v docker-model-runner-models:/models:z \
-    -e MODEL_RUNNER_PORT=12434 \
-    -e MODEL_RUNNER_ENVIRONMENT=moby \
-    -e MODEL_RUNNER_SOCK=/var/run/model-runner/model-runner.sock \
-    -e LLAMA_SERVER_PATH=/app \
-    -e LD_LIBRARY_PATH=/app \
-    -e HOME=/home/modelrunner \
-    -e MODELS_PATH=/models \
-    -e NVIDIA_VISIBLE_DEVICES=all \
-    -e NVIDIA_DRIVER_CAPABILITIES=compute,utility \
-    --label com.docker.desktop.service=model-runner \
-    --label com.docker.model-runner.role=controller \
-    "$runner_image" >/dev/null; then
-    print_error "Could not start the NVIDIA llama.cpp Docker Model Runner."
-    exit 1
-  fi
-  if ! mn_wait_for_docker_model_runner; then
-    print_error "The NVIDIA llama.cpp Docker Model Runner did not become ready."
-    exit 1
-  fi
-  print_step "Docker Model Runner is using llama.cpp CUDA build ${llama_server_build}."
-}
-
-function mn_resolve_docker_host_socket() {
-  local context_host=""
-
-  case "${DOCKER_HOST:-}" in
-  unix://*)
-    printf '%s\n' "${DOCKER_HOST#unix://}"
-    return 0
-    ;;
-  esac
-
-  if command -v docker >/dev/null 2>&1; then
-    context_host="$(docker context inspect --format '{{.Endpoints.docker.Host}}' 2>/dev/null | head -n 1 || true)"
-    case "$context_host" in
-    unix://*)
-      printf '%s\n' "${context_host#unix://}"
-      return 0
-      ;;
-    esac
-  fi
-
-  if [ "$(uname -s)" = "Darwin" ]; then
-    printf '%s/.docker/run/docker.sock\n' "$HOME"
-  else
-    printf '/var/run/docker.sock\n'
-  fi
-}
-
-# Public GAR pulls must not invoke the caller's credential helpers. Resolve
-# the daemon before isolating Docker's config so Docker Desktop keeps its socket.
 function mn_pull_public_gar_image() (
-  local image="$1"
-  local docker_config docker_host
-
+  local image="$1" auth_dir
   case "$image" in
-  us-central1-docker.pkg.dev/mirrorneuron-public-packages/*) ;;
-  *)
-    mn_run_logged "Docker image download" docker pull "$image"
-    return $?
+  us-central1-docker.pkg.dev/mirrorneuron-public-packages/*)
+    auth_dir="$(mktemp -d)" || return 1
+    trap 'rm -rf "$auth_dir"' EXIT
+    printf '{"auths":{}}\n' >"$auth_dir/auth.json"
+    mn_run_logged "Podman image download" podman pull --authfile "$auth_dir/auth.json" "$image"
     ;;
+  *) mn_run_logged "Podman image download" podman pull "$image" ;;
   esac
-
-  if [ -n "${DOCKER_CONTEXT:-}" ]; then
-    docker_host="$(docker context inspect --format '{{.Endpoints.docker.Host}}')" || return 1
-  else
-    docker_host="${DOCKER_HOST:-$(docker context inspect --format '{{.Endpoints.docker.Host}}' 2>/dev/null | head -n 1 || true)}"
-  fi
-  docker_host="${docker_host:-unix://${DOCKER_HOST_SOCKET:-$(mn_resolve_docker_host_socket)}}"
-  docker_config="$(mktemp -d "${TMPDIR:-/tmp}/mn-public-gar-docker-config.XXXXXX")" || return 1
-  trap 'rm -rf "$docker_config"' EXIT
-  unset DOCKER_CONTEXT DOCKER_AUTH_CONFIG
-  DOCKER_CONFIG="$docker_config" DOCKER_HOST="$docker_host" mn_run_logged "Docker image download" docker pull "$image"
 )
 
-function mn_report_docker_daemon_failure() {
-  if docker info >/dev/null 2>&1; then
-    return 0
-  fi
-
-  print_error "Docker stopped responding during installation."
-  if [ "$(uname -s)" = "Darwin" ]; then
-    print_error "Restart Docker Desktop and rerun install.sh; the installer is safe to retry."
-    print_error "If Docker reports a containerd/bbolt assertion, collect diagnostics before resetting Docker data."
-  else
-    print_error "Restart the Docker daemon and rerun install.sh; the installer is safe to retry."
+function mn_report_podman_failure() {
+  if ! podman info >/dev/null 2>&1; then
+    print_error "Podman stopped responding. Verify podman info and retry the installer."
   fi
 }
 
-function mn_run_docker_build() {
+function mn_run_podman_build() {
   local status
-  if mn_run_logged "Docker image build" docker build "$@"; then
+  if mn_run_logged "Podman image build" podman build "$@"; then
     return 0
   else
     status=$?
   fi
-  mn_report_docker_daemon_failure
+  mn_report_podman_failure
   return "$status"
 }
 
@@ -1450,6 +978,10 @@ function mn_print_install_complete() {
   fi
 }
 
+function runtime_compose() {
+  "$VENV_DIR/bin/python" -m mn_sdk.containers.podman_compose --env-file "$RUNTIME_COMPOSE_ENV" -f "$RUNTIME_COMPOSE_FILE" "$@"
+}
+
 function mn_run_runtime_compose() {
   local log_dir="${TMPDIR:-/tmp}/mirror_neuron_install"
   local log_file="${log_dir}/docker-compose.$$.log"
@@ -1468,7 +1000,7 @@ function mn_run_runtime_compose() {
     status=$?
   fi
 
-  print_error "Docker Compose failed. Details: $log_file"
+  print_error "Compose failed. Details: $log_file"
   printf '  Re-run with --verbose to show Compose output directly.\n' >&3
   return "$status"
 }
@@ -1539,7 +1071,7 @@ function mn_run_runtime_start_command() {
   fi
 
   if [ -n "$busy_port" ]; then
-    print_error "Runtime startup failed. Docker could not publish TCP port $busy_port because it is already in use. Free the port or change its mapping, then retry mn-runtime start."
+    print_error "Runtime startup failed. Podman could not publish TCP port $busy_port because it is already in use. Free the port or change its mapping, then retry mn-runtime start."
   else
     print_error "Runtime startup failed. Resolve the reported error, then retry mn-runtime start."
   fi
@@ -1672,8 +1204,8 @@ while [ "$#" -gt 0 ]; do
   --detect-only)
     MN_INSTALL_DETECT_ONLY="Y"
     ;;
-  --start-docker)
-    MN_INSTALL_START_DOCKER="Y"
+  --start-podman | --start-docker)
+    MN_INSTALL_START_PODMAN="Y"
     ;;
   --no-runtime)
     MN_NO_RUNTIME="Y"
@@ -1708,18 +1240,18 @@ elif [ "$MN_RUNTIME_ONLY" = "Y" ]; then
 fi
 export MN_INSTALL_ROLE
 
-if [ "$MN_INSTALL_START_DOCKER" = "Y" ]; then
+if [ "$MN_INSTALL_START_PODMAN" = "Y" ]; then
   if [ "$MN_INSTALL_MODE_EXPLICIT" = "Y" ] || [ -n "$MN_INSTALL_VERSION" ] ||
     [ "$MN_INSTALL_DETECT_ONLY" = "Y" ] || [ "$MN_INSTALL_RESET" = "Y" ] ||
     [ "$MN_BUILD_MEMBRANE" = "Y" ] || [ "$MN_NO_RUNTIME" = "Y" ] || [ "$MN_RUNTIME_ONLY" = "Y" ] || [ "${#MN_INSTALL_ARGS[@]}" -ne 0 ]; then
-    printf 'error: --start-docker cannot be combined with detection or installation options.\n' >&3
+    printf 'error: --start-podman cannot be combined with detection or installation options.\n' >&3
     exit 1
   fi
   if [ "$MN_INSTALL_HELP_REQUESTED" = "Y" ]; then
     print_unified_usage
     exit 0
   fi
-  mn_start_docker
+  mn_start_podman
   exit 0
 fi
 
@@ -1867,10 +1399,10 @@ function mn_prepare_membrane_image() {
     return
   fi
   [ "$MN_MEMBRANE_BUILD_PREPARED" != "Y" ] || return 0
-  # Recheck before Docker is invoked; no fallback to an older image on failure.
+  # Recheck before Podman is invoked; no fallback to an older image on failure.
   mn_validate_membrane_build || return 1
-  print_step "Building Membrane Docker image from local source"
-  if ! mn_run_logged "Membrane image build" docker build --target runtime \
+  print_step "Building Membrane Podman image from local source"
+  if ! mn_run_logged "Membrane image build" podman build --target runtime \
     --file "$MN_BUILD_MEMBRANE_DIR/Dockerfile" \
     --tag "$(mn_selected_membrane_image '')" "$MN_BUILD_MEMBRANE_DIR"; then
     print_error "Membrane image build failed. The GAR image was not used as a fallback."
@@ -1983,22 +1515,22 @@ function mn_reset_capture_cleanup_images() {
     mirror-neuron-context-engine-model \
     mirror-neuron-context-engine \
     mirror-neuron-native-sdk-grpc; do
-    image="$(docker container inspect --format '{{.Config.Image}}' "$container_name" 2>/dev/null || true)"
+    image="$(podman container inspect --format '{{.Config.Image}}' "$container_name" 2>/dev/null || true)"
     mn_reset_add_cleanup_image "$image"
   done
 
   while IFS= read -r resource_id; do
     [ -n "$resource_id" ] || continue
-    image="$(docker container inspect --format '{{.Config.Image}}' "$resource_id" 2>/dev/null || true)"
+    image="$(podman container inspect --format '{{.Config.Image}}' "$resource_id" 2>/dev/null || true)"
     mn_reset_add_cleanup_image "$image"
-  done < <(docker ps -aq --filter "label=com.docker.compose.project=${project_name}" 2>/dev/null || true)
+  done < <(podman ps -aq --filter "label=com.docker.compose.project=${project_name}" 2>/dev/null || true)
 
   # A prior reset may already have removed the containers while leaving
   # Docker-owned bind-mount files behind. Redis is part of the managed
   # runtime, and its locally cached image provides a small POSIX shell.
   redis_image="$(mn_read_env_value "$compose_env_file" "MN_REDIS_IMAGE")"
   redis_image="${redis_image:-$MN_DEFAULT_REDIS_IMAGE}"
-  if docker image inspect "$redis_image" >/dev/null 2>&1; then
+  if podman image inspect "$redis_image" >/dev/null 2>&1; then
     mn_reset_add_cleanup_image "$redis_image"
   fi
 }
@@ -2012,7 +1544,7 @@ function mn_reset_remove_docker_owned_files() {
   # parent or HOME, and use an image already available on the host.
   for cleanup_image in "${MN_RESET_CLEANUP_IMAGES[@]:-}"; do
     [ -n "$cleanup_image" ] || continue
-    if docker run --rm --user 0:0 \
+    if podman run --rm --user 0:0 \
       --volume "$MN_RESET_HOME:/mnt/mn-reset:rw" \
       --entrypoint /bin/sh \
       "$cleanup_image" -ec "$cleanup_command" >/dev/null 2>&1; then
@@ -2029,7 +1561,7 @@ function mn_reset_confirm_or_exit() {
   if [ -n "${VENV_DIR:-}" ]; then
     mn_reset_warning "The MirrorNeuron Python virtual environment at ${VENV_DIR} will also be removed."
   fi
-  mn_reset_warning "MirrorNeuron Docker containers and volumes will be removed, including all Redis data."
+  mn_reset_warning "MirrorNeuron Podman containers and volumes will be removed, including all Redis data."
   mn_reset_warning "This cannot be undone, and --yes does not bypass this confirmation."
   printf 'Type YES to reset MirrorNeuron and continue with a fresh install: ' >&3
 
@@ -2058,13 +1590,13 @@ function mn_reset_docker_state_or_exit() {
   local redis_cli_script
   local -a compose_args=()
 
-  if ! command -v docker >/dev/null 2>&1; then
-    mn_reset_error "docker is required to clear Redis and MirrorNeuron runtime volumes."
+  if ! command -v podman >/dev/null 2>&1; then
+    mn_reset_error "podman is required to clear Redis and MirrorNeuron runtime volumes."
     exit 1
   fi
-  if ! docker info >/dev/null 2>&1; then
-    mn_reset_error "Docker is not running; reset stopped before deleting ${MN_RESET_HOME}."
-    printf 'Next: start Docker, then rerun install.sh --reset.\n' >&3
+  if ! podman info >/dev/null 2>&1; then
+    mn_reset_error "Podman is not running; reset stopped before deleting ${MN_RESET_HOME}."
+    printf 'Next: start Podman, then rerun install.sh --reset.\n' >&3
     exit 1
   fi
 
@@ -2087,40 +1619,33 @@ else
   redis-cli FLUSHALL
   redis-cli MEMORY PURGE >/dev/null 2>&1 || true
 fi'
-  if docker ps --format '{{.Names}}' 2>/dev/null | grep -Fxq "$redis_container"; then
-    if docker exec -i "$redis_container" sh -c "$redis_cli_script" >/dev/null 2>&1; then
+  if podman ps --format '{{.Names}}' 2>/dev/null | grep -Fxq "$redis_container"; then
+    if podman exec -i "$redis_container" sh -c "$redis_cli_script" >/dev/null 2>&1; then
       printf '✓ Cleared all Redis databases.\n' >&3
     else
-      mn_reset_warning "Redis FLUSHALL failed; removing its persistent Docker volume instead."
+      mn_reset_warning "Redis FLUSHALL failed; removing its persistent Podman volume instead."
     fi
   fi
 
   if [ -f "$compose_file" ]; then
-    if docker compose version >/dev/null 2>&1; then
-      compose_args=(--project-name "$project_name" -f "$compose_file")
+    local python="$MN_RESET_HOME/venv/bin/python"
+    if [ -x "$python" ]; then
       if [ -f "$compose_env_file" ]; then
-        compose_args=(--env-file "$compose_env_file" "${compose_args[@]}")
+        compose_args+=(--env-file "$compose_env_file")
       fi
-      if ! docker compose "${compose_args[@]}" down --remove-orphans --volumes >/dev/null 2>&1; then
-        mn_reset_warning "Docker Compose teardown was incomplete; cleaning owned resources by project label."
-      fi
-    elif command -v docker-compose >/dev/null 2>&1; then
-      compose_args=(--project-name "$project_name" -f "$compose_file")
-      if [ -f "$compose_env_file" ]; then
-        compose_args=(--env-file "$compose_env_file" "${compose_args[@]}")
-      fi
-      if ! docker-compose "${compose_args[@]}" down --remove-orphans --volumes >/dev/null 2>&1; then
-        mn_reset_warning "Docker Compose teardown was incomplete; cleaning owned resources by project label."
+      compose_args+=(-p "$project_name" -f "$compose_file")
+      if ! "$python" -m mn_sdk.containers.podman_compose "${compose_args[@]}" down --remove-orphans --volumes >/dev/null 2>&1; then
+        mn_reset_warning "Compose teardown was incomplete; cleaning owned resources by project label."
       fi
     fi
   fi
 
   while IFS= read -r resource_id; do
     [ -n "$resource_id" ] || continue
-    if ! docker rm -f "$resource_id" >/dev/null 2>&1; then
+    if ! podman rm -f "$resource_id" >/dev/null 2>&1; then
       cleanup_failed="Y"
     fi
-  done < <(docker ps -aq --filter "label=com.docker.compose.project=${project_name}" 2>/dev/null || true)
+  done < <(podman ps -aq --filter "label=com.docker.compose.project=${project_name}" 2>/dev/null || true)
 
   for container_name in \
     mirror-neuron-core \
@@ -2132,8 +1657,8 @@ fi'
     mirror-neuron-native-sdk-grpc \
     mn-litellm-proxy \
     openshell-cluster-openshell; do
-    if docker container inspect "$container_name" >/dev/null 2>&1; then
-      if ! docker rm -f "$container_name" >/dev/null 2>&1; then
+    if podman container inspect "$container_name" >/dev/null 2>&1; then
+      if ! podman rm -f "$container_name" >/dev/null 2>&1; then
         cleanup_failed="Y"
       fi
     fi
@@ -2141,24 +1666,24 @@ fi'
 
   while IFS= read -r resource_id; do
     [ -n "$resource_id" ] || continue
-    if ! docker volume rm -f "$resource_id" >/dev/null 2>&1; then
+    if ! podman volume rm -f "$resource_id" >/dev/null 2>&1; then
       cleanup_failed="Y"
     fi
-  done < <(docker volume ls -q --filter "label=com.docker.compose.project=${project_name}" 2>/dev/null || true)
+  done < <(podman volume ls -q --filter "label=com.docker.compose.project=${project_name}" 2>/dev/null || true)
 
   redis_volume="${project_name}_redis-data"
-  if docker volume inspect "$redis_volume" >/dev/null 2>&1; then
-    if ! docker volume rm -f "$redis_volume" >/dev/null 2>&1; then
+  if podman volume inspect "$redis_volume" >/dev/null 2>&1; then
+    if ! podman volume rm -f "$redis_volume" >/dev/null 2>&1; then
       cleanup_failed="Y"
     fi
   fi
 
   if [ "$cleanup_failed" = "Y" ]; then
-    mn_reset_error "Could not remove all MirrorNeuron Docker containers or volumes."
+    mn_reset_error "Could not remove all MirrorNeuron Podman containers or volumes."
     mn_reset_error "Reset stopped before deleting ${MN_RESET_HOME}."
     exit 1
   fi
-  printf '✓ Removed MirrorNeuron Docker runtime and persistent Redis data.\n' >&3
+  printf '✓ Removed MirrorNeuron Podman runtime and persistent Redis data.\n' >&3
 }
 
 function mn_reset_release_lock() {
@@ -2229,10 +1754,10 @@ from pathlib import Path
 import subprocess
 import sys
 
-result = subprocess.run(["docker", "container", "inspect", "--format", "{{json .Mounts}}", "mirror-neuron-core"],
+result = subprocess.run(["podman", "container", "inspect", "--format", "{{json .Mounts}}", "mirror-neuron-core"],
                         capture_output=True, text=True, timeout=10)
 if result.returncode:
-    existing = subprocess.run(["docker", "ps", "-aq", "--filter", "name=^mirror-neuron-core$"],
+    existing = subprocess.run(["podman", "ps", "-aq", "--filter", "name=^mirror-neuron-core$"],
                               check=True, capture_output=True, text=True, timeout=10)
     if existing.stdout.strip():
         raise SystemExit("Could not verify the existing Core container; reset stopped.")
@@ -2371,7 +1896,7 @@ import sys
 home = Path(sys.argv[1]).resolve()
 
 def docker(*args):
-    return subprocess.run(["docker", *args], check=True, capture_output=True, text=True, timeout=60).stdout.strip()
+    return subprocess.run(["podman", *args], check=True, capture_output=True, text=True, timeout=60).stdout.strip()
 
 # Worker Compose uses a separate project. Bind mounts establish installation
 # ownership even when its ledger was lost; a shared project label alone cannot.
@@ -2387,19 +1912,26 @@ for container in docker("ps", "-aq", "--filter", f"label=com.docker.compose.proj
            str(mount.get("Source", "")).startswith(str(home) + "/") for mount in mounts):
         docker("rm", "-f", container)
 
-# Docker-backed models own labeled cache volumes outside MN_HOME. Only remove
+# Clean also interrupted pulls that had not yet published a registry record.
+home_filter = f"label=io.mirrorneuron.model.home={home}"
+for container in docker("ps", "-aq", "--filter", home_filter).splitlines():
+    docker("rm", "-f", container)
+for volume in docker("volume", "ls", "-q", "--filter", home_filter).splitlines():
+    docker("volume", "rm", volume)
+
+# Podman models own labeled cache volumes outside MN_HOME. Only remove
 # the exact model identities recorded by this installation, never shared images.
 registry = home / "models/registry.json"
 if registry.exists():
     models = json.loads(registry.read_text()).get("models", {})
     for model_id, model in models.items():
-        if not isinstance(model, dict) or model.get("kind") != "docker":
+        if not isinstance(model, dict) or model.get("kind") not in {"docker", "dmr", "llama_cpp"}:
             continue
         digest = hashlib.sha256(model_id.encode()).hexdigest()[:20]
         container = f"mn-model-{digest}"
         volume = container + "-cache"
         for kind, name in (("container", container), ("volume", volume)):
-            found = subprocess.run(["docker", kind, "inspect", "--format", "{{json .Config.Labels}}" if kind == "container" else "{{json .Labels}}", name],
+            found = subprocess.run(["podman", kind, "inspect", "--format", "{{json .Config.Labels}}" if kind == "container" else "{{json .Labels}}", name],
                                    capture_output=True, text=True, timeout=10)
             if found.returncode:
                 continue
@@ -2408,7 +1940,7 @@ if registry.exists():
                 raise SystemExit("Model resource ownership could not be verified; reset stopped.")
             docker("rm", "-f", name) if kind == "container" else docker("volume", "rm", name)
 MN_RESET_DOCKER_OWNERS
-    mn_reset_error "Additional runtime Docker resources could not be cleared; data was preserved."
+    mn_reset_error "Additional runtime Podman resources could not be cleared; data was preserved."
     exit 1
   fi
 }
@@ -2418,19 +1950,22 @@ function mn_reset_install_state() {
 
   mn_reset_resolve_home_or_exit
   mn_reset_confirm_or_exit
-  if ! command -v docker >/dev/null 2>&1; then
-    mn_reset_error "docker is required to clear Redis and MirrorNeuron runtime volumes."
+  if ! command -v podman >/dev/null 2>&1; then
+    mn_reset_error "podman is required to clear Redis and MirrorNeuron runtime volumes."
     exit 1
   fi
-  if ! docker info >/dev/null 2>&1; then
-    mn_reset_error "Docker is not running; reset stopped before host cleanup."
+  if ! podman info >/dev/null 2>&1; then
+    mn_reset_error "Podman is not running; reset stopped before host cleanup."
     exit 1
   fi
   mn_reset_acquire_lock
   mn_reset_verify_container_home_or_exit
+  if compgen -G "$MN_RESET_HOME/models/llama.cpp/*/server.json" >/dev/null && [ -x "$MN_RESET_HOME/venv/bin/python" ]; then
+    MN_HOME="$MN_RESET_HOME" "$MN_RESET_HOME/venv/bin/python" -m mn_sdk.models.native_llama stop-all || exit 1
+  fi
   mn_reset_host_processes_or_exit
-  mn_reset_docker_state_or_exit
   mn_reset_additional_docker_state_or_exit
+  mn_reset_docker_state_or_exit
   # An inherited environment from a previous sourced installation must not
   # restore its credentials, identity, endpoints, or old storage roots.
   unset MN_NODE_NAME MN_CLUSTER_NODES MN_GRPC_AUTH_TOKEN MN_GRPC_ADMIN_TOKEN
@@ -2447,19 +1982,19 @@ function mn_reset_install_state() {
   printf '==> Recreating MirrorNeuron runtime data directory\n' >&3
   if [ -d "$MN_RESET_HOME" ]; then
     chmod -R u+rwX "$MN_RESET_HOME" 2>/dev/null || true
-    # Docker can remove entries the host user cannot delete from the bind mount.
+    # Podman can remove entries the host user cannot delete from the bind mount.
     if ! host_remove_error="$(rm -rf "$MN_RESET_HOME" 2>&1)"; then
-      print_detail "Removing the remaining runtime files through Docker."
+      print_detail "Removing the remaining runtime files through Podman."
       if ! mn_reset_remove_docker_owned_files; then
         if [ -n "$host_remove_error" ]; then
           printf '%s\n' "$host_remove_error" >&2
         fi
         mn_reset_error "Could not remove MirrorNeuron runtime data: ${MN_RESET_HOME}"
-        mn_reset_error "Docker could not clean the remaining runtime files. Verify Docker access, then repair ownership and rerun --reset."
+        mn_reset_error "Podman could not clean the remaining runtime files. Verify Podman access, then repair ownership and rerun --reset."
         exit 1
       fi
       if ! rm -rf "$MN_RESET_HOME"; then
-        mn_reset_error "Could not remove MirrorNeuron runtime data after Docker cleanup: ${MN_RESET_HOME}"
+        mn_reset_error "Could not remove MirrorNeuron runtime data after Podman cleanup: ${MN_RESET_HOME}"
         exit 1
       fi
     fi
@@ -2527,9 +2062,9 @@ function mn_ensure_runtime_compose_template_file() {
 
   support_asset_path="$(mn_install_support_asset_path "docker-compose.yml")"
   RUNTIME_COMPOSE_TEMPLATE="${TMPDIR:-/tmp}/mirror_neuron_install/docker-compose.yml"
-  mn_download_public_repo_asset "$support_asset_path" "$RUNTIME_COMPOSE_TEMPLATE" "MirrorNeuron runtime Docker Compose template"
+  mn_download_public_repo_asset "$support_asset_path" "$RUNTIME_COMPOSE_TEMPLATE" "MirrorNeuron runtime Compose template"
   if ! mn_runtime_compose_template_is_valid "$RUNTIME_COMPOSE_TEMPLATE"; then
-    print_error "Downloaded MirrorNeuron runtime Docker Compose template is invalid: $RUNTIME_COMPOSE_TEMPLATE"
+    print_error "Downloaded MirrorNeuron runtime Compose template is invalid: $RUNTIME_COMPOSE_TEMPLATE"
     exit 1
   fi
 }
@@ -2564,19 +2099,19 @@ function mn_stop_runtime_containers_for_reinstall() {
   local container_ids container_id kind resource_kind
   local runtime_ids=()
 
-  if ! command -v docker >/dev/null 2>&1; then
+  if ! command -v podman >/dev/null 2>&1; then
     return 0
   fi
 
-  container_ids="$(docker ps -aq --filter "label=com.docker.compose.project=mirror-neuron" 2>/dev/null || true)"
+  container_ids="$(podman ps -aq --filter "label=com.docker.compose.project=mirror-neuron" 2>/dev/null || true)"
   if [ -z "$container_ids" ]; then
     return 0
   fi
 
   while IFS= read -r container_id; do
     [ -n "$container_id" ] || continue
-    kind="$(docker inspect -f '{{ index .Config.Labels "mirror-neuron.kind" }}' "$container_id" 2>/dev/null || true)"
-    resource_kind="$(docker inspect -f '{{ index .Config.Labels "mirror-neuron.resource-kind" }}' "$container_id" 2>/dev/null || true)"
+    kind="$(podman inspect -f '{{ index .Config.Labels "mirror-neuron.kind" }}' "$container_id" 2>/dev/null || true)"
+    resource_kind="$(podman inspect -f '{{ index .Config.Labels "mirror-neuron.resource-kind" }}' "$container_id" 2>/dev/null || true)"
     if [ "$kind" = "docker_worker" ] || [ "$resource_kind" = "docker-worker" ]; then
       print_detail "Preserving job-owned DockerWorker container ${container_id} during reinstall."
       continue
@@ -2589,9 +2124,9 @@ function mn_stop_runtime_containers_for_reinstall() {
   fi
 
   print_step "Stopping existing MirrorNeuron runtime"
-  if ! docker rm -f "${runtime_ids[@]}" >/dev/null 2>&1; then
+  if ! podman rm -f "${runtime_ids[@]}" >/dev/null 2>&1; then
     print_error "Could not stop existing MirrorNeuron runtime containers."
-    print_error "Stop them with: docker rm -f ${runtime_ids[*]}"
+    print_error "Stop them with: podman rm -f ${runtime_ids[*]}"
     exit 1
   fi
 }
@@ -2630,9 +2165,9 @@ function mn_remove_path_or_exit() {
   fi
 
   print_error "Could not remove ${description}: ${path}"
-  print_error "The path may still be mounted by Docker or owned by another user."
+  print_error "The path may still be mounted by Podman or owned by another user."
   print_error "Stop MirrorNeuron containers, repair ownership, and rerun the installer:"
-  print_error "  docker rm -f \$(docker ps -aq --filter label=com.docker.compose.project=mirror-neuron)"
+  print_error "  podman rm -f \$(podman ps -aq --filter label=com.docker.compose.project=mirror-neuron)"
   print_error "  sudo chown -R $(id -u):$(id -g) \"${path}\""
   exit 1
 }
@@ -2703,7 +2238,7 @@ PYCODE
 }
 
 # Shared by all install modes. Generate inside the container, then copy out:
-# Docker Desktop may still hold an obsolete host mount after MN_HOME is reset.
+# Podman machine may still hold an obsolete host mount after MN_HOME is reset.
 function generate_openshell_jwt_keys() (
   set -euo pipefail
   local jwt_dir="$1"
@@ -2714,7 +2249,7 @@ function generate_openshell_jwt_keys() (
   # shellcheck disable=SC2329
   cleanup_openshell_jwt_bootstrap() {
     if [ -n "$container_id" ]; then
-      docker rm -f "$container_id" >/dev/null 2>&1 || true
+      podman rm -f "$container_id" >/dev/null 2>&1 || true
     fi
     if [ -n "$bootstrap_dir" ]; then
       rm -rf "$bootstrap_dir"
@@ -2725,7 +2260,7 @@ function generate_openshell_jwt_keys() (
   trap 'exit 143' TERM
 
   bootstrap_dir="$(mktemp -d "${jwt_dir}/.jwt-bootstrap.XXXXXX")"
-  if ! container_id="$(docker create \
+  if ! container_id="$(podman create \
     --user "$OPENSHELL_GATEWAY_USER" \
     --env HOME=/tmp/openshell-bootstrap \
     "$gateway_image" generate-certs \
@@ -2734,11 +2269,11 @@ function generate_openshell_jwt_keys() (
     print_error "Failed to create OpenShell certificate bootstrap container with ${gateway_image}."
     return 1
   fi
-  if ! docker start --attach "$container_id" >/dev/null; then
+  if ! podman start --attach "$container_id" >/dev/null; then
     print_error "Failed to generate OpenShell sandbox JWT keys with ${gateway_image}."
     return 1
   fi
-  mn_run_logged "OpenShell JWT key copy" docker cp "${container_id}:/tmp/openshell-bootstrap/output/jwt/." "$bootstrap_dir" || return 1
+  mn_run_logged "OpenShell JWT key copy" podman cp "${container_id}:/tmp/openshell-bootstrap/output/jwt/." "$bootstrap_dir" || return 1
   for name in signing.pem public.pem kid; do
     if [ ! -s "${bootstrap_dir}/${name}" ]; then
       print_error "OpenShell certificate bootstrap did not create jwt/${name}."
@@ -3261,7 +2796,6 @@ EOF
   MN_BLUEPRINT_PYTHON_ENVS_DIR="${MN_BLUEPRINT_PYTHON_ENVS_DIR:-}"
   MN_HOST_OPENSHELL_CONFIG_DIR="${OPENSHELL_CONTAINER_CONFIG_DIR:-${INSTALL_DIR}/.config/openshell-mirror-neuron}"
   MN_HOST_OPENSHELL_STATE_DIR="${MN_HOST_OPENSHELL_STATE_DIR:-${INSTALL_DIR}/openshell-state}"
-  OPENSHELL_GATEWAY_USER="${OPENSHELL_GATEWAY_USER:-$(id -u):$(id -g)}"
   MN_DYNAMIC_REDIS_PORT_START="${MN_DYNAMIC_REDIS_PORT_START:-56379}"
   MN_DYNAMIC_REDIS_PORT_END="${MN_DYNAMIC_REDIS_PORT_END:-56478}"
 
@@ -3295,7 +2829,7 @@ Options:
   -v, --verbose                 Show installation details and command paths.
   --no-reinstall                Keep an existing install instead of overwriting it.
   --web-ui / --no-web-ui        Enable or skip GitHub Web UI install/build.
-  --redis / --no-redis          Enable or skip Redis Docker setup.
+  --redis / --no-redis          Enable or skip Redis Podman setup.
   --context-engine / --no-context-engine
                                 Enable or skip Membrane context engine setup.
   --build-membrane              Local mode: build Membrane source instead of pulling GAR.
@@ -3477,7 +3011,7 @@ EOF
 
   finalize_github_install_version
 
-  mn_prepare_runtime_docker || exit 1
+  mn_prepare_runtime_podman || exit 1
   mn_prepare_installer_paths
   print_header
 
@@ -3649,7 +3183,7 @@ EOF
 
   function setup_context_engine() {
     remove_stale_runtime_containers_for_services context-engine-model membrane-context-engine
-    ensure_docker_model_runner
+
     mn_prepare_membrane_image
     runtime_compose up -d --no-build membrane-context-engine >/dev/null
   }
@@ -3716,6 +3250,7 @@ version = 1
 [openshell.gateway]
 bind_address = "0.0.0.0:${OPENSHELL_GATEWAY_PORT:-58080}"
 log_level = "info"
+# OpenShell uses its Docker-compatible driver against the mounted Podman API.
 compute_drivers = ["docker"]
 sandbox_namespace = "mirror-neuron"
 default_image = "${OPENSHELL_SANDBOX_IMAGE:-$MN_DEFAULT_OPENSHELL_SANDBOX_IMAGE}"
@@ -3897,7 +3432,7 @@ EOF
 
   function redis_container_owns_port() {
     local port="$1"
-    docker port mirror-neuron-redis 6379/tcp 2>/dev/null | awk -F: -v port="$port" '$NF == port {found=1} END {exit found ? 0 : 1}'
+    podman port mirror-neuron-redis 6379/tcp 2>/dev/null | awk -F: -v port="$port" '$NF == port {found=1} END {exit found ? 0 : 1}'
   }
 
   function redis_port_available() {
@@ -3963,7 +3498,7 @@ EOF
       return 0
     fi
 
-    if ! labels="$(docker network inspect -f '{{ index .Labels "com.docker.compose.project" }}|{{ index .Labels "com.docker.compose.network" }}' "$network_name" 2>/dev/null)"; then
+    if ! labels="$(podman network inspect -f '{{ index .Labels "com.docker.compose.project" }}|{{ index .Labels "com.docker.compose.network" }}' "$network_name" 2>/dev/null)"; then
       printf 'false\n'
       return 0
     fi
@@ -3973,27 +3508,26 @@ EOF
     if [ "$compose_project" = "mirror-neuron" ] && [ "$compose_network" = "runtime" ]; then
       printf 'false\n'
     else
-      print_warning "Docker network ${network_name} already exists outside this Compose project; reusing it as an external network."
+      print_warning "Podman network ${network_name} already exists outside this Compose project; reusing it as an external network."
       printf 'true\n'
     fi
   }
 
   function resolve_openshell_gateway_bind_host() {
     local network_name="$1"
-    local docker_os gateway
+    local gateway
 
     if [ -n "${OPENSHELL_GATEWAY_BIND_HOST:-}" ]; then
       printf '%s\n' "$OPENSHELL_GATEWAY_BIND_HOST"
       return 0
     fi
 
-    docker_os="$(docker info --format '{{.OperatingSystem}}' 2>/dev/null | tr '[:upper:]' '[:lower:]' || true)"
-    if [ "$(uname -s)" = "Darwin" ] || [[ "$docker_os" == *"docker desktop"* ]]; then
+    if [ "$(uname -s)" != Linux ]; then
       printf '127.0.0.1\n'
       return 0
     fi
 
-    gateway="$(docker network inspect -f '{{ (index .IPAM.Config 0).Gateway }}' "$network_name" 2>/dev/null || true)"
+    gateway="$(podman network inspect -f '{{ (index .Subnets 0).Gateway }}' "$network_name" 2>/dev/null || true)"
     printf '%s\n' "${gateway:-127.0.0.1}"
   }
 
@@ -4042,7 +3576,7 @@ EOF
     local readiness_announced="N"
 
     while [ "$attempt" -le "$max_attempts" ]; do
-      if docker run --rm \
+      if podman run --rm \
         --network "$network_name" \
         --entrypoint openshell \
         mirror-neuron-core:latest \
@@ -4062,7 +3596,7 @@ EOF
     done
 
     print_error "OpenShell worker service did not become ready at ${gateway_endpoint} after ${max_attempts} seconds."
-    print_error "Next: docker logs openshell-cluster-openshell"
+    print_error "Next: podman logs openshell-cluster-openshell"
     return 1
   }
 
@@ -4196,7 +3730,7 @@ MN_RESOURCE_GC_BATCH_SIZE=${MN_RESOURCE_GC_BATCH_SIZE:-100}
 MN_DOCKER_WORKER_IMAGE_CACHE_TTL_SECONDS=${MN_DOCKER_WORKER_IMAGE_CACHE_TTL_SECONDS:-604800}
 MN_DOCKER_WORKER_IMAGE_CACHE_MAX_BYTES=${MN_DOCKER_WORKER_IMAGE_CACHE_MAX_BYTES:-21474836480}
 MN_NATIVE_SDK_GRPC_PROXY_PORT=${MN_NATIVE_SDK_GRPC_PROXY_PORT:-${MN_NATIVE_SDK_GRPC_PORT:-55052}}
-MN_NATIVE_SDK_GRPC_PROXY_TARGET_HOST=${MN_NATIVE_SDK_GRPC_PROXY_TARGET_HOST:-host.docker.internal}
+MN_NATIVE_SDK_GRPC_PROXY_TARGET_HOST=${MN_NATIVE_SDK_GRPC_PROXY_TARGET_HOST:-host.containers.internal}
 MN_NATIVE_SDK_GRPC_PROXY_TARGET_PORT=${MN_NATIVE_SDK_GRPC_PROXY_TARGET_PORT:-${MN_NATIVE_SDK_GRPC_PORT:-55052}}
 MN_LITELLM_GATEWAY_BIND_HOST=${litellm_gateway_bind_host}
 MN_LITELLM_GATEWAY_PORT=${MN_LITELLM_GATEWAY_PORT:-4000}
@@ -4212,7 +3746,7 @@ MN_WEB_UI_NPM_REGISTRY=${MN_WEB_UI_NPM_REGISTRY:-https://${MN_GAR_LOCATION:-$MN_
 MN_WEB_UI_SOURCE_MODE=${MN_WEB_UI_SOURCE_MODE}
 MN_WEB_UI_SOURCE_MOUNT=${MN_WEB_UI_SOURCE_MOUNT}
 MN_WEB_UI_PACKAGE_VERSION=${MN_WEB_UI_PACKAGE_VERSION}
-MN_WEB_UI_API_HOST=${MN_WEB_UI_API_HOST:-host.docker.internal}
+MN_WEB_UI_API_HOST=${MN_WEB_UI_API_HOST:-host.containers.internal}
 MN_BLUEPRINT_WEB_UI_BIND_HOST=${MN_BLUEPRINT_WEB_UI_BIND_HOST:-0.0.0.0}
 MN_BLUEPRINT_WEB_UI_PUBLIC_HOST=${MN_BLUEPRINT_WEB_UI_PUBLIC_HOST:-localhost}
 ${runtime_port_settings}
@@ -4265,34 +3799,17 @@ OPENSHELL_GATEWAY_PORT=${OPENSHELL_GATEWAY_PORT:-58080}
 OPENSHELL_GATEWAY_ENDPOINT=${openshell_gateway_endpoint}
 OPENSHELL_GATEWAY_BIND_HOST=${openshell_gateway_bind_host}
 OPENSHELL_GATEWAY_USER=${OPENSHELL_GATEWAY_USER}
+MN_SYNCTHING_UID=${MN_SYNCTHING_UID}
+MN_SYNCTHING_GID=${MN_SYNCTHING_GID}
 OPENSHELL_GATEWAY_DOCKER_GROUP=${OPENSHELL_GATEWAY_DOCKER_GROUP}
 OPENSHELL_GATEWAY_IMAGE=${OPENSHELL_GATEWAY_IMAGE:-$MN_DEFAULT_OPENSHELL_GATEWAY_IMAGE}
-DOCKER_HOST_SOCKET=${DOCKER_HOST_SOCKET}
+PODMAN_HOST_SOCKET=${PODMAN_HOST_SOCKET}
 COMPOSE_PARALLEL_LIMIT=${COMPOSE_PARALLEL_LIMIT:-1}
 MN_COOKIE=${mn_cookie}
 MN_GRPC_AUTH_TOKEN=${grpc_auth_token}
 MN_GRPC_ADMIN_TOKEN=${grpc_admin_token}
 EOF
     chmod 600 "$RUNTIME_COMPOSE_ENV" 2>/dev/null || true
-  }
-
-  function runtime_compose() {
-    local status
-    if command -v docker-compose >/dev/null 2>&1; then
-      if COMPOSE_PARALLEL_LIMIT="${COMPOSE_PARALLEL_LIMIT:-1}" docker-compose --env-file "$RUNTIME_COMPOSE_ENV" -f "$RUNTIME_COMPOSE_FILE" "$@"; then
-        return 0
-      else
-        status=$?
-      fi
-    else
-      if COMPOSE_PARALLEL_LIMIT="${COMPOSE_PARALLEL_LIMIT:-1}" docker compose --env-file "$RUNTIME_COMPOSE_ENV" -f "$RUNTIME_COMPOSE_FILE" "$@"; then
-        return 0
-      else
-        status=$?
-      fi
-    fi
-    mn_report_docker_daemon_failure
-    return "$status"
   }
 
   function runtime_container_name_for_service() {
@@ -4311,16 +3828,16 @@ EOF
     local name="$1"
     local project
 
-    if ! docker container inspect "$name" >/dev/null 2>&1; then
+    if ! podman container inspect "$name" >/dev/null 2>&1; then
       return 0
     fi
 
-    project="$(docker container inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' "$name" 2>/dev/null || true)"
+    project="$(podman container inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' "$name" 2>/dev/null || true)"
     if [ "$project" = "mirror-neuron" ]; then
       return 0
     fi
 
-    docker rm -f "$name" >/dev/null 2>&1 || true
+    podman rm -f "$name" >/dev/null 2>&1 || true
   }
 
   function remove_stale_runtime_containers_for_services() {
@@ -4330,51 +3847,6 @@ EOF
       [ -n "$name" ] && remove_stale_runtime_container "$name"
     done
     return 0
-  }
-
-  function ensure_docker_model_runner() {
-    local linux_nvidia="N"
-    if mn_is_linux_nvidia_host; then
-      linux_nvidia="Y"
-    fi
-
-    if [ "$linux_nvidia" != "Y" ] && [ "${INSTALL_DOCKER_MODEL_RUNNER:-N}" != "Y" ] && [ "${MN_ENABLE_DOCKER_MODEL_RUNNER:-N}" != "Y" ]; then
-      return 0
-    fi
-
-    mn_prepare_docker_model_runner_cli
-    if ! docker model --help >/dev/null 2>&1; then
-      print_error "Docker Model Runner CLI is not available."
-      mn_print_docker_model_runner_install_hint
-      exit 1
-    fi
-
-    if [ "$linux_nvidia" = "Y" ]; then
-      mn_ensure_nvidia_llamacpp_runner
-      return 0
-    else
-      if docker model status >/dev/null 2>&1; then
-        return 0
-      fi
-
-      if mn_is_docker_desktop_host; then
-        print_warning "Docker Model Runner is not running after the Docker Desktop enable command."
-      else
-        print_warning "Docker Model Runner is not running; attempting to install and start it."
-      fi
-
-      if docker model install-runner --help >/dev/null 2>&1; then
-        docker model install-runner >/dev/null 2>&1 || true
-        docker model start-runner >/dev/null 2>&1 || true
-        if docker model status >/dev/null 2>&1; then
-          return 0
-        fi
-      fi
-    fi
-
-    print_error "Docker Model Runner is not ready."
-    mn_print_docker_model_runner_install_hint
-    exit 1
   }
 
   function prepare_runtime_compose_sidecars() {
@@ -4387,12 +3859,9 @@ EOF
     if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
       RUNTIME_COMPOSE_SIDECARS+=("membrane-context-engine")
     fi
-    if mn_is_linux_nvidia_host; then
-      ensure_docker_model_runner
-    fi
     if [ "${#RUNTIME_COMPOSE_SIDECARS[@]}" -gt 0 ]; then
       remove_stale_runtime_containers_for_services context-engine-model "${RUNTIME_COMPOSE_SIDECARS[@]}"
-      ensure_docker_model_runner
+
       if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
         mn_prepare_membrane_image
       fi
@@ -4461,53 +3930,21 @@ EOF
   fi
 
   mn_print_stage "Installing components"
-  print_step "Installing MirrorNeuron Core (Docker)"
+  print_step "Installing MirrorNeuron Core (Podman)"
 
   (
     mn_remove_path_or_exit "$INSTALL_DIR/core-source" "MirrorNeuron Core source"
     github_clone "$(core_git_url)" "$INSTALL_DIR/core-source" >/dev/null 2>&1
     cd "$INSTALL_DIR/core-source"
 
-    if [ ! -f "Dockerfile" ]; then
-      cat <<'EOF' >Dockerfile
-FROM elixir:1.16-slim
-
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    git \
-    make \
-    g++ \
-    libssl-dev \
-    protobuf-compiler \
-    curl \
-    python3 \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install hex and rebar
-RUN mix local.rebar --force && mix local.hex --force
-
-WORKDIR /app
-
-# Copy dependency files and fetch deps
-COPY mix.exs mix.lock ./
-RUN mix deps.get
-
-# Copy the rest of the application
-COPY . .
-
-# Compile the application
-RUN mix compile
-
-EXPOSE 55051
-
-# Set the default command
-CMD ["mix", "run", "--no-halt"]
-EOF
+    if [ ! -f Dockerfile ]; then
+      print_error "The Core checkout must include its runtime Dockerfile."
+      exit 1
     fi
 
-    DOCKER_BUILDKIT="${DOCKER_BUILDKIT:-1}" mn_run_docker_build -t mirror-neuron-core .
+    DOCKER_BUILDKIT="${DOCKER_BUILDKIT:-1}" mn_run_podman_build -t mirror-neuron-core .
   ) &
-  spinner $! "Cloning and building Core (Docker image mirror-neuron-core)"
+  spinner $! "Cloning and building Core (Podman image mirror-neuron-core)"
   write_runtime_compose_files
 
   if should_install_python_packages; then
@@ -4567,7 +4004,7 @@ EOF
   }
 
   if [ "$INSTALL_WEB_UI" = "Y" ]; then
-    print_step "Preparing Web UI source for Docker Compose"
+    print_step "Preparing Web UI source for Compose"
     if [ -z "${INSTALL_VERSION:-}" ] && [ -n "$SOURCE_WORKSPACE" ] && [ -d "$SOURCE_WORKSPACE/mn-web-ui" ]; then
       print_detail "Using local Web UI source: $SOURCE_WORKSPACE/mn-web-ui"
     fi
@@ -4591,7 +4028,7 @@ EOF
   if [ "$INSTALL_REDIS" = "Y" ] || [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] || [ "$INSTALL_OPENSHELL" = "Y" ] || [ "$INSTALL_WEB_UI" = "Y" ]; then
     if [ "$START_NOW" = "Y" ]; then
       prepare_runtime_compose_sidecars
-      print_detail "Docker services are prepared; automatic startup uses the installed runtime lifecycle entry point."
+      print_detail "Podman services are prepared; automatic startup uses the installed runtime lifecycle entry point."
     else
       if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
         mn_prepare_membrane_image
@@ -4699,7 +4136,6 @@ run_install_local() {
   MN_BLUEPRINT_PYTHON_ENVS_DIR="${MN_BLUEPRINT_PYTHON_ENVS_DIR:-}"
   MN_HOST_OPENSHELL_CONFIG_DIR="${OPENSHELL_CONTAINER_CONFIG_DIR:-${INSTALL_DIR}/.config/openshell-mirror-neuron}"
   MN_HOST_OPENSHELL_STATE_DIR="${MN_HOST_OPENSHELL_STATE_DIR:-${INSTALL_DIR}/openshell-state}"
-  OPENSHELL_GATEWAY_USER="${OPENSHELL_GATEWAY_USER:-$(id -u):$(id -g)}"
   MN_DYNAMIC_REDIS_PORT_START="${MN_DYNAMIC_REDIS_PORT_START:-56379}"
   MN_DYNAMIC_REDIS_PORT_END="${MN_DYNAMIC_REDIS_PORT_END:-56478}"
   MN_PYTHON_BIN=""
@@ -4965,8 +4401,8 @@ Options:
   -v, --verbose         Show installation details and command paths.
   --web-ui              Enable the local-source Web UI Compose service.
   --no-web-ui           Skip the local-source Web UI Compose service.
-  --redis               Enable Redis Docker setup.
-  --no-redis            Skip Redis Docker setup.
+  --redis               Enable Redis Podman setup.
+  --no-redis            Skip Redis Podman setup.
   --context-engine      Install/start Membrane context engine.
   --no-context-engine   Skip Membrane context engine setup.
   --build-membrane      Build local Membrane source instead of pulling GAR.
@@ -5202,7 +4638,7 @@ EOF
 
   function core_container_running() {
     local names
-    names="$(docker ps --format '{{.Names}}')"
+    names="$(podman ps --format '{{.Names}}')"
     grep -qx 'mirror-neuron-core' <<<"$names"
   }
 
@@ -5408,7 +4844,7 @@ EOF
 
   function redis_container_owns_port() {
     local port="$1"
-    docker port mirror-neuron-redis 6379/tcp 2>/dev/null | awk -F: -v port="$port" '$NF == port {found=1} END {exit found ? 0 : 1}'
+    podman port mirror-neuron-redis 6379/tcp 2>/dev/null | awk -F: -v port="$port" '$NF == port {found=1} END {exit found ? 0 : 1}'
   }
 
   function redis_port_available() {
@@ -5482,7 +4918,9 @@ finally:
   }
 
   function start_core_container() {
-    local cmd=("docker" "run" "-d" "--name" "mirror-neuron-core")
+    local cmd=("podman" "run" "-d" "--name" "mirror-neuron-core" "--security-opt" "label=disable"
+      "-v" "${PODMAN_HOST_SOCKET:?Podman API socket is required}:/run/podman/podman.sock"
+      "-e" "CONTAINER_HOST=unix:///run/podman/podman.sock")
     local openshell_config_dir="$HOME/.config/openshell"
     local openshell_container_config_dir="${OPENSHELL_CONTAINER_CONFIG_DIR:-${INSTALL_DIR}/.config/openshell-mirror-neuron}"
     local openshell_mount_dir="$openshell_config_dir"
@@ -5516,7 +4954,7 @@ finally:
     if [ "$(uname -s)" = "Darwin" ]; then
       cmd+=("-p" "${core_publish_host}:${grpc_port}:${grpc_port}" "-p" "${epmd_publish_host}:${epmd_port}:4369")
       cmd+=("-p" "${dist_publish_host}:${dist_port}:${dist_port}")
-      cmd+=("-e" "MN_REDIS_URL=redis://host.docker.internal:6379/0")
+      cmd+=("-e" "MN_REDIS_URL=redis://host.containers.internal:6379/0")
       cmd+=("-e" "MN_CORE_HOST=0.0.0.0")
       cmd+=("-e" "MN_EXECUTOR_MAX_CONCURRENCY=50")
     else
@@ -5559,7 +4997,7 @@ finally:
 
   function setup_context_engine() {
     remove_stale_runtime_containers_for_services context-engine-model membrane-context-engine
-    ensure_docker_model_runner
+
     mn_prepare_membrane_image
     runtime_compose up -d --no-build membrane-context-engine >/dev/null
   }
@@ -5626,6 +5064,7 @@ version = 1
 [openshell.gateway]
 bind_address = "0.0.0.0:${OPENSHELL_GATEWAY_PORT:-58080}"
 log_level = "info"
+# OpenShell uses its Docker-compatible driver against the mounted Podman API.
 compute_drivers = ["docker"]
 sandbox_namespace = "mirror-neuron"
 default_image = "${OPENSHELL_SANDBOX_IMAGE:-$MN_DEFAULT_OPENSHELL_SANDBOX_IMAGE}"
@@ -5660,7 +5099,7 @@ EOF
       return 0
     fi
 
-    if ! labels="$(docker network inspect -f '{{ index .Labels "com.docker.compose.project" }}|{{ index .Labels "com.docker.compose.network" }}' "$network_name" 2>/dev/null)"; then
+    if ! labels="$(podman network inspect -f '{{ index .Labels "com.docker.compose.project" }}|{{ index .Labels "com.docker.compose.network" }}' "$network_name" 2>/dev/null)"; then
       printf 'false\n'
       return 0
     fi
@@ -5670,27 +5109,26 @@ EOF
     if [ "$compose_project" = "mirror-neuron" ] && [ "$compose_network" = "runtime" ]; then
       printf 'false\n'
     else
-      print_warning "Docker network ${network_name} already exists outside this Compose project; reusing it as an external network."
+      print_warning "Podman network ${network_name} already exists outside this Compose project; reusing it as an external network."
       printf 'true\n'
     fi
   }
 
   function resolve_openshell_gateway_bind_host() {
     local network_name="$1"
-    local docker_os gateway
+    local gateway
 
     if [ -n "${OPENSHELL_GATEWAY_BIND_HOST:-}" ]; then
       printf '%s\n' "$OPENSHELL_GATEWAY_BIND_HOST"
       return 0
     fi
 
-    docker_os="$(docker info --format '{{.OperatingSystem}}' 2>/dev/null | tr '[:upper:]' '[:lower:]' || true)"
-    if [ "$(uname -s)" = "Darwin" ] || [[ "$docker_os" == *"docker desktop"* ]]; then
+    if [ "$(uname -s)" != Linux ]; then
       printf '127.0.0.1\n'
       return 0
     fi
 
-    gateway="$(docker network inspect -f '{{ (index .IPAM.Config 0).Gateway }}' "$network_name" 2>/dev/null || true)"
+    gateway="$(podman network inspect -f '{{ (index .Subnets 0).Gateway }}' "$network_name" 2>/dev/null || true)"
     printf '%s\n' "${gateway:-127.0.0.1}"
   }
 
@@ -5739,7 +5177,7 @@ EOF
     local readiness_announced="N"
 
     while [ "$attempt" -le "$max_attempts" ]; do
-      if docker run --rm \
+      if podman run --rm \
         --network "$network_name" \
         --entrypoint openshell \
         mirror-neuron-core:latest \
@@ -5759,7 +5197,7 @@ EOF
     done
 
     print_error "OpenShell worker service did not become ready at ${gateway_endpoint} after ${max_attempts} seconds."
-    print_error "Next: docker logs openshell-cluster-openshell"
+    print_error "Next: podman logs openshell-cluster-openshell"
     return 1
   }
 
@@ -5893,7 +5331,7 @@ MN_RESOURCE_GC_BATCH_SIZE=${MN_RESOURCE_GC_BATCH_SIZE:-100}
 MN_DOCKER_WORKER_IMAGE_CACHE_TTL_SECONDS=${MN_DOCKER_WORKER_IMAGE_CACHE_TTL_SECONDS:-604800}
 MN_DOCKER_WORKER_IMAGE_CACHE_MAX_BYTES=${MN_DOCKER_WORKER_IMAGE_CACHE_MAX_BYTES:-21474836480}
 MN_NATIVE_SDK_GRPC_PROXY_PORT=${MN_NATIVE_SDK_GRPC_PROXY_PORT:-${MN_NATIVE_SDK_GRPC_PORT:-55052}}
-MN_NATIVE_SDK_GRPC_PROXY_TARGET_HOST=${MN_NATIVE_SDK_GRPC_PROXY_TARGET_HOST:-host.docker.internal}
+MN_NATIVE_SDK_GRPC_PROXY_TARGET_HOST=${MN_NATIVE_SDK_GRPC_PROXY_TARGET_HOST:-host.containers.internal}
 MN_NATIVE_SDK_GRPC_PROXY_TARGET_PORT=${MN_NATIVE_SDK_GRPC_PROXY_TARGET_PORT:-${MN_NATIVE_SDK_GRPC_PORT:-55052}}
 MN_LITELLM_GATEWAY_BIND_HOST=${litellm_gateway_bind_host}
 MN_LITELLM_GATEWAY_PORT=${MN_LITELLM_GATEWAY_PORT:-4000}
@@ -5909,7 +5347,7 @@ MN_WEB_UI_NPM_REGISTRY=${MN_WEB_UI_NPM_REGISTRY:-https://${MN_GAR_LOCATION:-$MN_
 MN_WEB_UI_SOURCE_MODE=${MN_WEB_UI_SOURCE_MODE}
 MN_WEB_UI_SOURCE_MOUNT=${MN_WEB_UI_SOURCE_MOUNT}
 MN_WEB_UI_PACKAGE_VERSION=${MN_WEB_UI_PACKAGE_VERSION}
-MN_WEB_UI_API_HOST=${MN_WEB_UI_API_HOST:-host.docker.internal}
+MN_WEB_UI_API_HOST=${MN_WEB_UI_API_HOST:-host.containers.internal}
 MN_BLUEPRINT_WEB_UI_BIND_HOST=${MN_BLUEPRINT_WEB_UI_BIND_HOST:-0.0.0.0}
 MN_BLUEPRINT_WEB_UI_PUBLIC_HOST=${MN_BLUEPRINT_WEB_UI_PUBLIC_HOST:-localhost}
 ${runtime_port_settings}
@@ -5962,34 +5400,17 @@ OPENSHELL_GATEWAY_PORT=${OPENSHELL_GATEWAY_PORT:-58080}
 OPENSHELL_GATEWAY_ENDPOINT=${openshell_gateway_endpoint}
 OPENSHELL_GATEWAY_BIND_HOST=${openshell_gateway_bind_host}
 OPENSHELL_GATEWAY_USER=${OPENSHELL_GATEWAY_USER}
+MN_SYNCTHING_UID=${MN_SYNCTHING_UID}
+MN_SYNCTHING_GID=${MN_SYNCTHING_GID}
 OPENSHELL_GATEWAY_DOCKER_GROUP=${OPENSHELL_GATEWAY_DOCKER_GROUP}
 OPENSHELL_GATEWAY_IMAGE=${OPENSHELL_GATEWAY_IMAGE:-$MN_DEFAULT_OPENSHELL_GATEWAY_IMAGE}
-DOCKER_HOST_SOCKET=${DOCKER_HOST_SOCKET}
+PODMAN_HOST_SOCKET=${PODMAN_HOST_SOCKET}
 COMPOSE_PARALLEL_LIMIT=${COMPOSE_PARALLEL_LIMIT:-1}
 MN_COOKIE=${mn_cookie}
 MN_GRPC_AUTH_TOKEN=${grpc_auth_token}
 MN_GRPC_ADMIN_TOKEN=${grpc_admin_token}
 EOF
     chmod 600 "$RUNTIME_COMPOSE_ENV" 2>/dev/null || true
-  }
-
-  function runtime_compose() {
-    local status
-    if command -v docker-compose >/dev/null 2>&1; then
-      if COMPOSE_PARALLEL_LIMIT="${COMPOSE_PARALLEL_LIMIT:-1}" docker-compose --env-file "$RUNTIME_COMPOSE_ENV" -f "$RUNTIME_COMPOSE_FILE" "$@"; then
-        return 0
-      else
-        status=$?
-      fi
-    else
-      if COMPOSE_PARALLEL_LIMIT="${COMPOSE_PARALLEL_LIMIT:-1}" docker compose --env-file "$RUNTIME_COMPOSE_ENV" -f "$RUNTIME_COMPOSE_FILE" "$@"; then
-        return 0
-      else
-        status=$?
-      fi
-    fi
-    mn_report_docker_daemon_failure
-    return "$status"
   }
 
   function runtime_container_name_for_service() {
@@ -6008,16 +5429,16 @@ EOF
     local name="$1"
     local project
 
-    if ! docker container inspect "$name" >/dev/null 2>&1; then
+    if ! podman container inspect "$name" >/dev/null 2>&1; then
       return 0
     fi
 
-    project="$(docker container inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' "$name" 2>/dev/null || true)"
+    project="$(podman container inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' "$name" 2>/dev/null || true)"
     if [ "$project" = "mirror-neuron" ]; then
       return 0
     fi
 
-    docker rm -f "$name" >/dev/null 2>&1 || true
+    podman rm -f "$name" >/dev/null 2>&1 || true
   }
 
   function remove_stale_runtime_containers_for_services() {
@@ -6027,51 +5448,6 @@ EOF
       [ -n "$name" ] && remove_stale_runtime_container "$name"
     done
     return 0
-  }
-
-  function ensure_docker_model_runner() {
-    local linux_nvidia="N"
-    if mn_is_linux_nvidia_host; then
-      linux_nvidia="Y"
-    fi
-
-    if [ "$linux_nvidia" != "Y" ] && [ "${INSTALL_DOCKER_MODEL_RUNNER:-N}" != "Y" ] && [ "${MN_ENABLE_DOCKER_MODEL_RUNNER:-N}" != "Y" ]; then
-      return 0
-    fi
-
-    mn_prepare_docker_model_runner_cli
-    if ! docker model --help >/dev/null 2>&1; then
-      print_error "Docker Model Runner CLI is not available."
-      mn_print_docker_model_runner_install_hint
-      exit 1
-    fi
-
-    if [ "$linux_nvidia" = "Y" ]; then
-      mn_ensure_nvidia_llamacpp_runner
-      return 0
-    else
-      if docker model status >/dev/null 2>&1; then
-        return 0
-      fi
-
-      if mn_is_docker_desktop_host; then
-        print_warning "Docker Model Runner is not running after the Docker Desktop enable command."
-      else
-        print_warning "Docker Model Runner is not running; attempting to install and start it."
-      fi
-
-      if docker model install-runner --help >/dev/null 2>&1; then
-        docker model install-runner >/dev/null 2>&1 || true
-        docker model start-runner >/dev/null 2>&1 || true
-        if docker model status >/dev/null 2>&1; then
-          return 0
-        fi
-      fi
-    fi
-
-    print_error "Docker Model Runner is not ready."
-    mn_print_docker_model_runner_install_hint
-    exit 1
   }
 
   function prepare_runtime_compose_sidecars() {
@@ -6084,12 +5460,9 @@ EOF
     if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
       RUNTIME_COMPOSE_SIDECARS+=("membrane-context-engine")
     fi
-    if mn_is_linux_nvidia_host; then
-      ensure_docker_model_runner
-    fi
     if [ "${#RUNTIME_COMPOSE_SIDECARS[@]}" -gt 0 ]; then
       remove_stale_runtime_containers_for_services context-engine-model "${RUNTIME_COMPOSE_SIDECARS[@]}"
-      ensure_docker_model_runner
+
       if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
         mn_prepare_membrane_image
       fi
@@ -6129,7 +5502,7 @@ EOF
   if [ "$INSTALL_WEB_UI" = "Y" ]; then require_dir "$WEB_UI_DIR" "mn-web-ui"; fi
   if [ "$INSTALL_SKILLS" = "Y" ]; then require_dir "$SKILLS_DIR" "mn-skills"; fi
 
-  mn_prepare_runtime_docker || exit 1
+  mn_prepare_runtime_podman || exit 1
   require_mix_project_file "$CORE_DIR/mix.exs"
   mn_prepare_installer_paths
   print_header
@@ -6181,14 +5554,14 @@ EOF
   replace_symlink "$API_DIR" "$INSTALL_DIR/api-source"
   replace_symlink "$PY_SDK_DIR" "$INSTALL_DIR/python-sdk-source"
   write_local_install_metadata
-  print_step "Writing Docker Compose runtime configuration"
+  print_step "Writing Compose runtime configuration"
   write_runtime_compose_files
   print_detail "Local component links: ${INSTALL_DIR}"
 
-  print_step "Building MirrorNeuron Core Docker image from local source"
+  print_step "Building MirrorNeuron Core Podman image from local source"
   (
     cd "$CORE_DIR"
-    DOCKER_BUILDKIT="${DOCKER_BUILDKIT:-1}" mn_run_docker_build -t mirror-neuron-core:latest .
+    DOCKER_BUILDKIT="${DOCKER_BUILDKIT:-1}" mn_run_podman_build -t mirror-neuron-core:latest .
   )
   print_detail "Built local core image: mirror-neuron-core:latest"
 
@@ -6299,7 +5672,7 @@ EOF
   trap mn_reset_release_lock EXIT
 
   if [ "$INSTALL_WEB_UI" = "Y" ]; then
-    print_step "Preparing local Web UI source for Docker Compose"
+    print_step "Preparing local Web UI source for Compose"
     if [ -e "$UI_LINK_DIR" ] || [ -L "$UI_LINK_DIR" ]; then
       rm -rf "$UI_LINK_DIR"
     fi
@@ -6312,7 +5685,7 @@ EOF
   if [ "$INSTALL_REDIS" = "Y" ] || [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] || [ "$INSTALL_OPENSHELL" = "Y" ] || [ "$INSTALL_WEB_UI" = "Y" ]; then
     if [ "$START_NOW" = "Y" ]; then
       prepare_runtime_compose_sidecars
-      print_detail "Docker services are prepared; automatic startup uses the installed runtime lifecycle entry point."
+      print_detail "Podman services are prepared; automatic startup uses the installed runtime lifecycle entry point."
     else
       if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
         mn_prepare_membrane_image
@@ -6347,7 +5720,7 @@ EOF
   print_detail "State: ${INSTALL_DIR}"
   print_detail "Cookie: ${INSTALL_DIR}/erlang.cookie"
   if [ "$INSTALL_WEB_UI" = "Y" ]; then
-    print_detail "Web UI source: ${WEB_UI_DIR} (built inside Docker Compose)"
+    print_detail "Web UI source: ${WEB_UI_DIR} (built inside Compose)"
   fi
   if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
     print_detail "Membrane: ${MEMBRANE_DIR} (${MN_CONTEXT_ADDR:-localhost:50052})"
@@ -6418,7 +5791,6 @@ run_install_binary() {
   MN_BLUEPRINT_PYTHON_ENVS_DIR="${MN_BLUEPRINT_PYTHON_ENVS_DIR:-}"
   MN_HOST_OPENSHELL_CONFIG_DIR="${OPENSHELL_CONTAINER_CONFIG_DIR:-${INSTALL_DIR}/.config/openshell-mirror-neuron}"
   MN_HOST_OPENSHELL_STATE_DIR="${MN_HOST_OPENSHELL_STATE_DIR:-${INSTALL_DIR}/openshell-state}"
-  OPENSHELL_GATEWAY_USER="${OPENSHELL_GATEWAY_USER:-$(id -u):$(id -g)}"
   MN_DYNAMIC_REDIS_PORT_START="${MN_DYNAMIC_REDIS_PORT_START:-56379}"
   MN_DYNAMIC_REDIS_PORT_END="${MN_DYNAMIC_REDIS_PORT_END:-56478}"
   INSTALL_METADATA_FILE="${INSTALL_DIR}/install_metadata.json"
@@ -6456,7 +5828,7 @@ Options:
   -v, --verbose                 Show installation details and command paths.
   --no-reinstall                Keep an existing install instead of overwriting it.
   --web-ui / --no-web-ui        Enable or skip the Web UI Compose service.
-  --redis / --no-redis          Enable or skip Redis Docker setup.
+  --redis / --no-redis          Enable or skip Redis Podman setup.
   --context-engine / --no-context-engine
                                 Enable or skip Membrane context engine setup.
   --build-membrane              Local mode: build Membrane source instead of pulling GAR.
@@ -7099,9 +6471,9 @@ EOF
       exit 1
     fi
 
-    image_version="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' "$image" 2>/dev/null || true)"
-    image_revision="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$image" 2>/dev/null || true)"
-    image_digest="$(docker image inspect --format '{{ index .RepoDigests 0 }}' "$image" 2>/dev/null || true)"
+    image_version="$(podman image inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' "$image" 2>/dev/null || true)"
+    image_revision="$(podman image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$image" 2>/dev/null || true)"
+    image_digest="$(podman image inspect --format '{{ index .RepoDigests 0 }}' "$image" 2>/dev/null || true)"
     image_digest="${image_digest##*@}"
 
     if [ "$image_version" != "$tag" ]; then
@@ -7113,7 +6485,7 @@ EOF
       exit 1
     fi
 
-    docker image tag "$image" mirror-neuron-core:latest
+    podman image tag "$image" mirror-neuron-core:latest
     mkdir -p "$INSTALL_DIR"
     "$MN_PYTHON_BIN" - "$INSTALL_METADATA_FILE" "$tag" "$image" "$image_digest" "$image_revision" <<'PY_METADATA'
 import json, os, sys, tempfile
@@ -7336,7 +6708,7 @@ PYTHON
 
   function setup_context_engine() {
     remove_stale_runtime_containers_for_services context-engine-model membrane-context-engine
-    ensure_docker_model_runner
+
     mn_prepare_membrane_image
     runtime_compose up -d --no-build membrane-context-engine >/dev/null
   }
@@ -7403,6 +6775,7 @@ version = 1
 [openshell.gateway]
 bind_address = "0.0.0.0:${OPENSHELL_GATEWAY_PORT:-58080}"
 log_level = "info"
+# OpenShell uses its Docker-compatible driver against the mounted Podman API.
 compute_drivers = ["docker"]
 sandbox_namespace = "mirror-neuron"
 default_image = "${OPENSHELL_SANDBOX_IMAGE:-$MN_DEFAULT_OPENSHELL_SANDBOX_IMAGE}"
@@ -7584,7 +6957,7 @@ EOF
 
   function redis_container_owns_port() {
     local port="$1"
-    docker port mirror-neuron-redis 6379/tcp 2>/dev/null | awk -F: -v port="$port" '$NF == port {found=1} END {exit found ? 0 : 1}'
+    podman port mirror-neuron-redis 6379/tcp 2>/dev/null | awk -F: -v port="$port" '$NF == port {found=1} END {exit found ? 0 : 1}'
   }
 
   function redis_port_available() {
@@ -7650,7 +7023,7 @@ EOF
       return 0
     fi
 
-    if ! labels="$(docker network inspect -f '{{ index .Labels "com.docker.compose.project" }}|{{ index .Labels "com.docker.compose.network" }}' "$network_name" 2>/dev/null)"; then
+    if ! labels="$(podman network inspect -f '{{ index .Labels "com.docker.compose.project" }}|{{ index .Labels "com.docker.compose.network" }}' "$network_name" 2>/dev/null)"; then
       printf 'false\n'
       return 0
     fi
@@ -7660,27 +7033,26 @@ EOF
     if [ "$compose_project" = "mirror-neuron" ] && [ "$compose_network" = "runtime" ]; then
       printf 'false\n'
     else
-      print_warning "Docker network ${network_name} already exists outside this Compose project; reusing it as an external network."
+      print_warning "Podman network ${network_name} already exists outside this Compose project; reusing it as an external network."
       printf 'true\n'
     fi
   }
 
   function resolve_openshell_gateway_bind_host() {
     local network_name="$1"
-    local docker_os gateway
+    local gateway
 
     if [ -n "${OPENSHELL_GATEWAY_BIND_HOST:-}" ]; then
       printf '%s\n' "$OPENSHELL_GATEWAY_BIND_HOST"
       return 0
     fi
 
-    docker_os="$(docker info --format '{{.OperatingSystem}}' 2>/dev/null | tr '[:upper:]' '[:lower:]' || true)"
-    if [ "$(uname -s)" = "Darwin" ] || [[ "$docker_os" == *"docker desktop"* ]]; then
+    if [ "$(uname -s)" != Linux ]; then
       printf '127.0.0.1\n'
       return 0
     fi
 
-    gateway="$(docker network inspect -f '{{ (index .IPAM.Config 0).Gateway }}' "$network_name" 2>/dev/null || true)"
+    gateway="$(podman network inspect -f '{{ (index .Subnets 0).Gateway }}' "$network_name" 2>/dev/null || true)"
     printf '%s\n' "${gateway:-127.0.0.1}"
   }
 
@@ -7729,7 +7101,7 @@ EOF
     local readiness_announced="N"
 
     while [ "$attempt" -le "$max_attempts" ]; do
-      if docker run --rm \
+      if podman run --rm \
         --network "$network_name" \
         --entrypoint openshell \
         mirror-neuron-core:latest \
@@ -7749,7 +7121,7 @@ EOF
     done
 
     print_error "OpenShell worker service did not become ready at ${gateway_endpoint} after ${max_attempts} seconds."
-    print_error "Next: docker logs openshell-cluster-openshell"
+    print_error "Next: podman logs openshell-cluster-openshell"
     return 1
   }
 
@@ -7883,7 +7255,7 @@ MN_RESOURCE_GC_BATCH_SIZE=${MN_RESOURCE_GC_BATCH_SIZE:-100}
 MN_DOCKER_WORKER_IMAGE_CACHE_TTL_SECONDS=${MN_DOCKER_WORKER_IMAGE_CACHE_TTL_SECONDS:-604800}
 MN_DOCKER_WORKER_IMAGE_CACHE_MAX_BYTES=${MN_DOCKER_WORKER_IMAGE_CACHE_MAX_BYTES:-21474836480}
 MN_NATIVE_SDK_GRPC_PROXY_PORT=${MN_NATIVE_SDK_GRPC_PROXY_PORT:-${MN_NATIVE_SDK_GRPC_PORT:-55052}}
-MN_NATIVE_SDK_GRPC_PROXY_TARGET_HOST=${MN_NATIVE_SDK_GRPC_PROXY_TARGET_HOST:-host.docker.internal}
+MN_NATIVE_SDK_GRPC_PROXY_TARGET_HOST=${MN_NATIVE_SDK_GRPC_PROXY_TARGET_HOST:-host.containers.internal}
 MN_NATIVE_SDK_GRPC_PROXY_TARGET_PORT=${MN_NATIVE_SDK_GRPC_PROXY_TARGET_PORT:-${MN_NATIVE_SDK_GRPC_PORT:-55052}}
 MN_LITELLM_GATEWAY_BIND_HOST=${litellm_gateway_bind_host}
 MN_LITELLM_GATEWAY_PORT=${MN_LITELLM_GATEWAY_PORT:-4000}
@@ -7899,7 +7271,7 @@ MN_WEB_UI_NPM_REGISTRY=${MN_WEB_UI_NPM_REGISTRY:-https://${MN_GAR_LOCATION:-$MN_
 MN_WEB_UI_SOURCE_MODE=${MN_WEB_UI_SOURCE_MODE}
 MN_WEB_UI_SOURCE_MOUNT=${MN_WEB_UI_SOURCE_MOUNT}
 MN_WEB_UI_PACKAGE_VERSION=${MN_WEB_UI_PACKAGE_VERSION}
-MN_WEB_UI_API_HOST=${MN_WEB_UI_API_HOST:-host.docker.internal}
+MN_WEB_UI_API_HOST=${MN_WEB_UI_API_HOST:-host.containers.internal}
 MN_BLUEPRINT_WEB_UI_BIND_HOST=${MN_BLUEPRINT_WEB_UI_BIND_HOST:-0.0.0.0}
 MN_BLUEPRINT_WEB_UI_PUBLIC_HOST=${MN_BLUEPRINT_WEB_UI_PUBLIC_HOST:-localhost}
 ${runtime_port_settings}
@@ -7952,34 +7324,17 @@ OPENSHELL_GATEWAY_PORT=${OPENSHELL_GATEWAY_PORT:-58080}
 OPENSHELL_GATEWAY_ENDPOINT=${openshell_gateway_endpoint}
 OPENSHELL_GATEWAY_BIND_HOST=${openshell_gateway_bind_host}
 OPENSHELL_GATEWAY_USER=${OPENSHELL_GATEWAY_USER}
+MN_SYNCTHING_UID=${MN_SYNCTHING_UID}
+MN_SYNCTHING_GID=${MN_SYNCTHING_GID}
 OPENSHELL_GATEWAY_DOCKER_GROUP=${OPENSHELL_GATEWAY_DOCKER_GROUP}
 OPENSHELL_GATEWAY_IMAGE=${OPENSHELL_GATEWAY_IMAGE:-$MN_DEFAULT_OPENSHELL_GATEWAY_IMAGE}
-DOCKER_HOST_SOCKET=${DOCKER_HOST_SOCKET}
+PODMAN_HOST_SOCKET=${PODMAN_HOST_SOCKET}
 COMPOSE_PARALLEL_LIMIT=${COMPOSE_PARALLEL_LIMIT:-1}
 MN_COOKIE=${mn_cookie}
 MN_GRPC_AUTH_TOKEN=${grpc_auth_token}
 MN_GRPC_ADMIN_TOKEN=${grpc_admin_token}
 EOF
     chmod 600 "$RUNTIME_COMPOSE_ENV" 2>/dev/null || true
-  }
-
-  function runtime_compose() {
-    local status
-    if command -v docker-compose >/dev/null 2>&1; then
-      if COMPOSE_PARALLEL_LIMIT="${COMPOSE_PARALLEL_LIMIT:-1}" docker-compose --env-file "$RUNTIME_COMPOSE_ENV" -f "$RUNTIME_COMPOSE_FILE" "$@"; then
-        return 0
-      else
-        status=$?
-      fi
-    else
-      if COMPOSE_PARALLEL_LIMIT="${COMPOSE_PARALLEL_LIMIT:-1}" docker compose --env-file "$RUNTIME_COMPOSE_ENV" -f "$RUNTIME_COMPOSE_FILE" "$@"; then
-        return 0
-      else
-        status=$?
-      fi
-    fi
-    mn_report_docker_daemon_failure
-    return "$status"
   }
 
   function runtime_container_name_for_service() {
@@ -7998,16 +7353,16 @@ EOF
     local name="$1"
     local project
 
-    if ! docker container inspect "$name" >/dev/null 2>&1; then
+    if ! podman container inspect "$name" >/dev/null 2>&1; then
       return 0
     fi
 
-    project="$(docker container inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' "$name" 2>/dev/null || true)"
+    project="$(podman container inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' "$name" 2>/dev/null || true)"
     if [ "$project" = "mirror-neuron" ]; then
       return 0
     fi
 
-    docker rm -f "$name" >/dev/null 2>&1 || true
+    podman rm -f "$name" >/dev/null 2>&1 || true
   }
 
   function remove_stale_runtime_containers_for_services() {
@@ -8017,51 +7372,6 @@ EOF
       [ -n "$name" ] && remove_stale_runtime_container "$name"
     done
     return 0
-  }
-
-  function ensure_docker_model_runner() {
-    local linux_nvidia="N"
-    if mn_is_linux_nvidia_host; then
-      linux_nvidia="Y"
-    fi
-
-    if [ "$linux_nvidia" != "Y" ] && [ "${INSTALL_DOCKER_MODEL_RUNNER:-N}" != "Y" ] && [ "${MN_ENABLE_DOCKER_MODEL_RUNNER:-N}" != "Y" ]; then
-      return 0
-    fi
-
-    mn_prepare_docker_model_runner_cli
-    if ! docker model --help >/dev/null 2>&1; then
-      print_error "Docker Model Runner CLI is not available."
-      mn_print_docker_model_runner_install_hint
-      exit 1
-    fi
-
-    if [ "$linux_nvidia" = "Y" ]; then
-      mn_ensure_nvidia_llamacpp_runner
-      return 0
-    else
-      if docker model status >/dev/null 2>&1; then
-        return 0
-      fi
-
-      if mn_is_docker_desktop_host; then
-        print_warning "Docker Model Runner is not running after the Docker Desktop enable command."
-      else
-        print_warning "Docker Model Runner is not running; attempting to install and start it."
-      fi
-
-      if docker model install-runner --help >/dev/null 2>&1; then
-        docker model install-runner >/dev/null 2>&1 || true
-        docker model start-runner >/dev/null 2>&1 || true
-        if docker model status >/dev/null 2>&1; then
-          return 0
-        fi
-      fi
-    fi
-
-    print_error "Docker Model Runner is not ready."
-    mn_print_docker_model_runner_install_hint
-    exit 1
   }
 
   function prepare_runtime_compose_sidecars() {
@@ -8074,12 +7384,9 @@ EOF
     if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
       RUNTIME_COMPOSE_SIDECARS+=("membrane-context-engine")
     fi
-    if mn_is_linux_nvidia_host; then
-      ensure_docker_model_runner
-    fi
     if [ "${#RUNTIME_COMPOSE_SIDECARS[@]}" -gt 0 ]; then
       remove_stale_runtime_containers_for_services context-engine-model "${RUNTIME_COMPOSE_SIDECARS[@]}"
-      ensure_docker_model_runner
+
       if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
         mn_prepare_membrane_image
       fi
@@ -8126,7 +7433,7 @@ EOF
   fi
   INSTALL_PYTHON_SDK="Y"
 
-  mn_prepare_runtime_docker || exit 1
+  mn_prepare_runtime_podman || exit 1
   mn_prepare_installer_paths
   print_header
 
@@ -8177,7 +7484,7 @@ EOF
   print_step "Installing MirrorNeuron Core ${CORE_INSTALL_VERSION}"
   (install_core_from_release) &
   spinner $! "Installing Core runtime"
-  print_step "Writing Docker Compose runtime configuration"
+  print_step "Writing Compose runtime configuration"
   write_runtime_compose_files
 
   if should_install_python_packages; then
@@ -8189,7 +7496,7 @@ EOF
   fi
 
   if [ "$INSTALL_WEB_UI" = "Y" ]; then
-    print_step "Preparing Web UI package for Docker Compose"
+    print_step "Preparing Web UI package for Compose"
     mkdir -p "$MN_WEB_UI_SOURCE_MOUNT"
   fi
 
@@ -8198,7 +7505,7 @@ EOF
   if [ "$INSTALL_REDIS" = "Y" ] || [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] || [ "$INSTALL_OPENSHELL" = "Y" ] || [ "$INSTALL_WEB_UI" = "Y" ]; then
     if [ "$START_NOW" = "Y" ]; then
       prepare_runtime_compose_sidecars
-      print_detail "Docker services are prepared; automatic startup uses the installed runtime lifecycle entry point."
+      print_detail "Podman services are prepared; automatic startup uses the installed runtime lifecycle entry point."
     else
       if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
         mn_prepare_membrane_image

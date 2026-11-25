@@ -73,15 +73,11 @@ must not silently cross into another source type. Explicit component-version
 overrides take precedence over the shared release version only for their named
 component.
 
-Runtime installation checks Docker after argument validation and waits for its
-daemon before preparing install paths, pulling images, or setting up Model
-Runner. On macOS it installs the Docker Desktop app from the official disk image
-and uses Docker's `--accept-license` installer flag when sudo is authorized.
-On supported Linux systems it uses Docker's native Engine
-installer. A newly provisioned Linux account can continue in the Docker group
-in the same invocation, including when the script was streamed to Bash.
-Client-only installation requires Python tooling. Reset cleanup requires an
-accessible Docker daemon before touching existing runtime data.
+Runtime modes check Podman before preparing installed state. Linux uses its
+native API socket. macOS uses a Podman machine. The only container package
+installed on the host is the Podman CLI and its platform dependencies. The
+Compose provider runs in an image and Core includes the checksum-pinned remote
+CLI. Client-only installations require Python tooling.
 
 All modes use the single `mn runtime start` contract. There is no worker-only
 runtime, and worker-only installer flags are rejected.
@@ -440,59 +436,13 @@ Include the existing code-search and BEAM-analysis skill packages in the optiona
 skill inventory; neither becomes a binary default or an automatically enabled
 runtime capability.
 
-## Catalog-declared Docker Model Runner preparation
+## GPU model serving
 
-The Python SDK owns native DMR customization through catalog `preparation`
-recipes. Normal model installation and first use prepare/reuse the pinned
-runner/backend bundle on the selected owner and automatically select its control
-and gateway endpoints. Backend setup is not duplicated in the installer.
-`scripts/build-prism-dmr.py` delegates to `prepare_dmr_model` to warm Inkling's
-backend cache and start its controller without downloading weights.
-The installed SDK and catalog are the recipe source of truth.
-
-Normal preparation downloads checksum-pinned native runners from public GAR;
-users need no Go, Git, compiler or Google Cloud credentials. Bundles, models,
-logs and private runner state reside under `MN_HOME/model-runners`; the SDK uses
-pinned artifacts, safe archive extraction, atomic bundle publication and an owned
-HTTP policy. It keeps Docker Desktop's runner and historical support snapshots
-intact. The owner gateway receives generated authentication through an SDK
-Compose override and private env file; operators need no global endpoint exports.
-SDK offline preparation/lifecycle tests and the deploy adapter contract cover
-this boundary. Live Metal/Windows/Linux model inference remains an opt-in check.
-
-`scripts/publish-prepared-dmr.py --output <empty-directory>` builds the catalog's
-native runner platforms from its full source revision and SDK-owned patches.
-Only release builders need Git and Go 1.25.8+. Archives contain the executable,
-upstream license and source/policy/build provenance. Add `--apply` to publish
-them to the existing public `mirrorneuron-binaries` generic repository as the
-immutable `managed-dmr:<source-prefix>-policy<SDK-policy>` version. The generated
-`runner-assets.json` is the catalog's runner definition. Publish and verify
-anonymous downloads before shipping its URLs and checksums in the SDK catalog.
-
-`scripts/publish-dmr.sh` restores this shared native runner release after GAR
-cleanup, using the existing builder with `--match-catalog`. `--model` selects the
-SDK catalog recipe and defaults to `inkling-2-mini`. Select either `--output`
-for an empty build directory or `--from-directory` for saved archives and their
-manifest. The latter requires no Git or Go. Local validation checks recipe identity,
-the complete platform inventory, filenames, URLs, non-symlink archives and SHA-256.
-The restore entrypoint also requires the exact catalog pins. Without `--apply`,
-saved-release validation has no network or registry side effects. Apply stages
-only verified release files, rechecks their bytes, uploads with `--skip-existing`,
-then anonymously downloads and hashes every public archive. Existing versions are
-never deleted or overwritten, and conflicting remote bytes fail verification.
-The entrypoint selects `MN_PUBLISH_PYTHON`, the existing publishing environment,
-or `python3.12`, and defaults `CLOUDSDK_PYTHON` to that interpreter. Python 3.12+
-with the matching SDK and authenticated `gcloud` are publishing prerequisites.
-The original Python builder retains its new-release mode without catalog-pin
-matching so generated definitions can be reviewed before updating the SDK catalog.
-
-The prepared Spark Prism backend is an independent native archive, pinned to
-`adfffbe41b2cabcd51fff326ab045662265062bb` and published under
-`prism-llama-backend:prism-b10743-adfffbe-cuda13-sm121-arm64-v1`. Its catalog
-backend object requires a public HTTPS URL and SHA-256. It includes CUDA 13
-runtime libraries and license/provenance files; its support boundary is Ubuntu
-24.04 ARM64, GB10/SM 12.1 and NVIDIA driver 580+. Native Metal and native CUDA
-packages preserve hardware acceleration without requiring end-user compilers.
+The SDK prepares each catalog GGUF model with native llama.cpp on the owner.
+macOS selects Metal and Linux selects CUDA or Vulkan. The host stores weights
+and starts a dedicated authenticated server on first use. The LiteLLM gateway
+runs in Podman and reaches each native model through the host gateway.
+Legacy model and worker identifiers remain accepted by the SDK and Core.
 
 ## Federated live Web UI routing
 

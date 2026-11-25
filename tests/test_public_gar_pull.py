@@ -1,4 +1,4 @@
-"""Offline Docker credential/daemon contracts; never contacts a real daemon."""
+"""Offline Podman registry and connection contracts."""
 
 import json
 import os
@@ -22,27 +22,22 @@ def function(name):
     return [match.group() for match in re.finditer(pattern, SOURCE, re.M | re.S)]
 
 
-def run_pull(
-    tmp_path, *, target="core", host="", context="", endpoint="", status=0, image=None
-):
-    config = tmp_path / "caller config"
-    config.mkdir()
+def run_pull(tmp_path, *, target="core", host="", connection="", status=0, image=None):
+    authfile = tmp_path / "caller auth.json"
     original = '{"credHelpers":{"us-central1-docker.pkg.dev":"gcloud"}}'
-    (config / "config.json").write_text(original)
+    authfile.write_text(original)
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    docker = bin_dir / "docker"
-    docker.write_text(f"""#!{sys.executable}
+    podman = bin_dir / "podman"
+    podman.write_text(f"""#!{sys.executable}
 import json, os, pathlib, sys
 args = sys.argv[1:]
-if args[:2] == ['context', 'inspect']:
-    print(os.environ['TEST_ENDPOINT'])
-elif args[0] == 'pull':
-    config = pathlib.Path(os.environ['DOCKER_CONFIG'])
+if args[0] == 'pull':
+    authfile = args[args.index('--authfile')+1] if '--authfile' in args else os.environ['REGISTRY_AUTH_FILE']
+    record = dict(image=args[-1], authfile=authfile, auth=json.loads(pathlib.Path(authfile).read_text()),
+                  host=os.environ.get('CONTAINER_HOST'), connection=os.environ.get('CONTAINER_CONNECTION'))
     with open(os.environ['TEST_LOG'], 'a') as log:
-        log.write(json.dumps({{'image': args[1], 'config': str(config), 'host': os.getenv('DOCKER_HOST'), 'context': os.getenv('DOCKER_CONTEXT'), 'auth': os.getenv('DOCKER_AUTH_CONFIG')}}) + '\\n')
-    if args[1].startswith({PUBLIC!r}) and (config / 'config.json').exists():
-        sys.exit(99)  # An expired gcloud credential helper would fail here.
+        print(json.dumps(record), file=log)
     sys.exit(int(os.environ['TEST_STATUS']))
 elif args[:2] == ['image', 'inspect']:
     fmt = args[3]
@@ -50,7 +45,7 @@ elif args[:2] == ['image', 'inspect']:
     elif 'image.revision' in fmt: print('revision')
     elif 'RepoDigests' in fmt: print(args[-1] + '@sha256:' + 'a' * 64)
 """)
-    docker.chmod(0o755)
+    podman.chmod(0o755)
     selected_image = (
         image
         or PUBLIC
@@ -87,12 +82,9 @@ runtime_compose() { echo "compose:$*"; }
             "MN_INSTALL_VERBOSE": "N",
             "MN_INSTALL_ROLE": "full",
             "MN_PYTHON_BIN": sys.executable,
-            "DOCKER_CONFIG": str(config),
-            "DOCKER_HOST": host,
-            "DOCKER_CONTEXT": context,
-            "DOCKER_AUTH_CONFIG": '{"auths":{}}',
-            "DOCKER_HOST_SOCKET": "/platform/docker.sock",
-            "TEST_ENDPOINT": endpoint,
+            "REGISTRY_AUTH_FILE": str(authfile),
+            "CONTAINER_HOST": host,
+            "CONTAINER_CONNECTION": connection,
             "TEST_STATUS": str(status),
             "TEST_LOG": str(tmp_path / "log"),
             "TEST_IMAGE": selected_image,
@@ -103,41 +95,30 @@ runtime_compose() { echo "compose:$*"; }
             "TMPDIR": str(tmp_path),
         },
     )
-    assert (config / "config.json").read_text() == original
+    assert authfile.read_text() == original
     assert (tmp_path / "log").exists(), result.stderr
     records = [json.loads(line) for line in (tmp_path / "log").read_text().splitlines()]
-    return result, records, config
+    return result, records, authfile
 
 
 @pytest.mark.parametrize("target", ["core", "0", "1", "2"])
 @pytest.mark.parametrize(
-    "host,context,endpoint,expected",
-    [
-        ("", "", "", "unix:///platform/docker.sock"),
-        ("", "", "unix:///desktop/docker.sock", "unix:///desktop/docker.sock"),
-        ("tcp://explicit:2376", "", "unix:///unused.sock", "tcp://explicit:2376"),
-        (
-            "tcp://ignored:2376",
-            "desktop-linux",
-            "unix:///selected.sock",
-            "unix:///selected.sock",
-        ),
-    ],
+    "host,connection", [("", ""), ("ssh://compute", ""), ("", "podman-machine-default")]
 )
-def test_public_pulls_bypass_helpers_and_preserve_daemon(
-    tmp_path, target, host, context, endpoint, expected
+def test_public_pulls_bypass_helpers_and_preserve_connection(
+    tmp_path, target, host, connection
 ):
-    result, records, config = run_pull(
-        tmp_path, target=target, host=host, context=context, endpoint=endpoint
+    result, records, authfile = run_pull(
+        tmp_path, target=target, host=host, connection=connection
     )
     assert result.returncode == 0, result.stderr
     assert len(records) == 1
     record = records[0]
-    assert record["host"] == expected
-    assert record["context"] is None
-    assert record["auth"] is None
-    assert record["config"] != str(config)
-    assert not Path(record["config"]).exists()
+    assert record["host"] == host
+    assert record["connection"] == connection
+    assert record["auth"] == {"auths": {}}
+    assert record["authfile"] != str(authfile)
+    assert not Path(record["authfile"]).exists()
     if target == "core":
         metadata = json.loads((tmp_path / "installed/metadata.json").read_text())
         assert metadata["core_image_digest"] == "sha256:" + "a" * 64
@@ -149,14 +130,14 @@ def test_public_pull_failure_cleans_config_and_stops(tmp_path, target):
     assert result.returncode != 0
     assert "Could not pull" in result.stderr
     assert len(records) == 1
-    assert not Path(records[0]["config"]).exists()
+    assert not Path(records[0]["authfile"]).exists()
     assert not (tmp_path / "installed/metadata.json").exists()
 
 
 def test_private_core_override_keeps_credentials(tmp_path):
-    result, records, config = run_pull(
-        tmp_path, image="private.example/core:v1.3.57", host="tcp://private:2376"
+    result, records, authfile = run_pull(
+        tmp_path, image="private.example/core:v1.3.57", host="ssh://private"
     )
     assert result.returncode == 0, result.stderr
-    assert records[0]["config"] == str(config)
-    assert records[0]["host"] == "tcp://private:2376"
+    assert records[0]["authfile"] == str(authfile)
+    assert records[0]["host"] == "ssh://private"
