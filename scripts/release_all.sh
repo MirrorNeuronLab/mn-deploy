@@ -26,6 +26,7 @@ REPOSITORIES=(
   mn-web-ui
   mn-deploy
   mn-python-sdk
+  mn-surface
   mn-docs
   mn-agents
   mn-skills

@@ -19,7 +19,7 @@ def validate(workspace: Path) -> None:
     selected = (
         "mn-python-sdk",
         "mn-python-sdk/packages/contracts",
-        "mn-python-sdk/packages/surface",
+        "mn-surface",
         "mn-python-sdk/packages/runtime",
         "mn-cli",
         "mn-api",
@@ -29,7 +29,7 @@ def validate(workspace: Path) -> None:
         wheels = root / "wheels"
         wheels.mkdir()
         # Never consume a stale build/lib tree or modify the source checkout.
-        for repository in ("mn-python-sdk", "mn-cli", "mn-api"):
+        for repository in ("mn-python-sdk", "mn-surface", "mn-cli", "mn-api"):
             source = workspace / repository
             names = (
                 subprocess.check_output(

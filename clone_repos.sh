@@ -83,6 +83,7 @@ repos=(
   "git@github.com:MirrorNeuronLab/mn-deploy.git"
   "git@github.com:MirrorNeuronLab/mn-docs.git"
   "git@github.com:MirrorNeuronLab/mn-python-sdk.git"
+  "git@github.com:MirrorNeuronLab/mn-surface.git"
   "git@github.com:MirrorNeuronLab/mn-skills.git"
   "git@github.com:MirrorNeuronLab/mn-system-tests.git"
   "git@github.com:MirrorNeuronLab/mn-web-ui.git"

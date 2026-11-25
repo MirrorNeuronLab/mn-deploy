@@ -2630,7 +2630,8 @@ for package in packages:
     # Component names need not share a prefix (for example mn-blueprint-blocks).
     if path == "mn-python-sdk":
         continue
-    if not path.startswith("mn-python-sdk/packages/") or ".." in Path(path).parts:
+    sdk_component = path.startswith("mn-python-sdk/packages/") and ".." not in Path(path).parts
+    if not (sdk_component or (name == "mirrorneuron-surface" and path == "mn-surface")):
         raise SystemExit(f"Invalid SDK component source path: {path}")
     extras = package.get("default_extras") or []
     suffix = "[" + ",".join(extras) + "]" if extras else ""
@@ -2859,6 +2860,7 @@ run_install_github() {
       [ -n "$candidate" ] || continue
       if [ -d "$candidate/mn-python-sdk" ] &&
         [ -d "$candidate/mn-python-sdk/packages/common" ] &&
+        [ -d "$candidate/mn-surface" ] &&
         [ -d "$candidate/mn-cli" ] &&
         [ -d "$candidate/mn-api" ]; then
         (cd "$candidate" && pwd)
@@ -4451,7 +4453,7 @@ EOF
       "$MN_PYTHON_BIN" -m venv "$VENV_DIR" >/dev/null 2>&1
       run_quiet "pip-upgrade" "$VENV_DIR/bin/pip" install --upgrade pip
       # The Git runtime depends on the worker SDK even when only a surface was
-      # explicitly selected. Resolve its foundation and any Surface from this ref.
+      # explicitly selected. Use the requested ref in each source repository.
       local sdk_reference="git+https://github.com/MirrorNeuronLab/mn-python-sdk.git$(github_ref_suffix)"
       local -a sdk_requirements=("mirrorneuron-python-sdk @ $sdk_reference") sdk_groups=(sdk)
       local package_name package_path package_extras component_rows
@@ -4461,7 +4463,11 @@ EOF
       component_rows="$(mn_sdk_component_rows "${sdk_groups[@]}")" || return 1
       while IFS=$'\t' read -r package_name package_path package_extras; do
         [ -n "$package_name" ] || continue
-        sdk_requirements+=("${package_name}${package_extras} @ ${sdk_reference}#subdirectory=${package_path#mn-python-sdk/}")
+        if [ "$package_path" = "mn-surface" ]; then
+          sdk_requirements+=("${package_name}${package_extras} @ git+https://github.com/MirrorNeuronLab/mn-surface.git$(github_ref_suffix)")
+        else
+          sdk_requirements+=("${package_name}${package_extras} @ ${sdk_reference}#subdirectory=${package_path#mn-python-sdk/}")
+        fi
       done <<<"$component_rows"
       run_quiet "install-mn-python-sdk-github" "$VENV_DIR/bin/pip" install "${sdk_requirements[@]}"
       if [ "$INSTALL_CLI" = "Y" ]; then
@@ -4604,6 +4610,7 @@ run_install_local() {
   CLI_DIR="${WORKSPACE_DIR}/mn-cli"
   API_DIR="${WORKSPACE_DIR}/mn-api"
   PY_SDK_DIR="${WORKSPACE_DIR}/mn-python-sdk"
+  SURFACE_DIR="${WORKSPACE_DIR}/mn-surface"
   WEB_UI_DIR="${WORKSPACE_DIR}/mn-web-ui"
   MN_WEB_UI_SOURCE_MODE="${MN_WEB_UI_SOURCE_MODE:-source}"
   MN_WEB_UI_SOURCE_MOUNT="${MN_WEB_UI_SOURCE_MOUNT:-${WEB_UI_DIR}}"
@@ -5089,7 +5096,7 @@ EOF
       exit 1
     fi
 
-    for source_label in CORE_DIR CLI_DIR API_DIR PY_SDK_DIR WEB_UI_DIR SKILLS_DIR BLUEPRINTS_DIR DOCS_DIR SYSTEM_TESTS_DIR MEMBRANE_DIR; do
+    for source_label in CORE_DIR CLI_DIR API_DIR PY_SDK_DIR SURFACE_DIR WEB_UI_DIR SKILLS_DIR BLUEPRINTS_DIR DOCS_DIR SYSTEM_TESTS_DIR MEMBRANE_DIR; do
       source_path="$(canonical_path "${!source_label}")"
       if [ "$install_path" = "$source_path" ]; then
         print_error "Refusing to install MirrorNeuron state into source directory ${source_label}: ${INSTALL_DIR}"
@@ -6050,6 +6057,7 @@ EOF
   require_dir "$CLI_DIR" "mn-cli"
   require_dir "$API_DIR" "mn-api"
   require_dir "$PY_SDK_DIR" "mn-python-sdk"
+  require_file "$SURFACE_DIR/pyproject.toml" "mn-surface Python project"
   for component_project in "$PY_SDK_DIR"/packages/*/pyproject.toml; do
     require_file "$component_project" "SDK component project"
   done
@@ -6167,7 +6175,7 @@ EOF
       [ -f "$component_pyproject" ] || continue
       editable_requirements+=(-e "$(dirname "$component_pyproject")")
     done
-    editable_requirements+=(-e "$CLI_DIR" -e "$API_DIR")
+    editable_requirements+=(-e "$SURFACE_DIR" -e "$CLI_DIR" -e "$API_DIR")
     if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
       editable_requirements+=(-e "$MEMBRANE_DIR/mn-context-engine-python-sdk")
     fi

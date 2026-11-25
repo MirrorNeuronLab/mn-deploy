@@ -101,8 +101,10 @@ fi
 echo "=> Installing Python packages (SDK, CLI, API)..."
 "$VENV_DIR/bin/pip" install --upgrade pip
 
-echo "=> Installing mn-python-sdk from local folder..."
-"$VENV_DIR/bin/pip" install -e ../mn-python-sdk
+echo "=> Installing the SDK and Surface from local folders..."
+"$VENV_DIR/bin/pip" install -e ../mn-python-sdk/packages/common \
+  -e ../mn-python-sdk/packages/contracts -e ../mn-python-sdk/packages/web-ui \
+  -e ../mn-python-sdk -e ../mn-surface
 
 echo "=> Installing mn-cli from local folder..."
 "$VENV_DIR/bin/pip" install -e ../mn-cli

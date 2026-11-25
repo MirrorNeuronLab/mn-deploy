@@ -19,7 +19,7 @@ test -x "$VALIDATION_PYTHON" || {
 VALIDATION_HOME="$(mktemp -d "${TMPDIR:-/tmp}/mn-split-validation.XXXXXX")"
 trap 'rm -rf "$VALIDATION_HOME"' EXIT
 export MN_HOME="$VALIDATION_HOME" MN_ENV=test RUN_MN_SYSTEM_TESTS=1
-export PYTHONPATH="$WORKSPACE_ROOT/mn-python-sdk/packages/contracts/src:$WORKSPACE_ROOT/mn-python-sdk/packages/surface/src:$WORKSPACE_ROOT/mn-python-sdk/packages/runtime/src:$WORKSPACE_ROOT/mn-python-sdk/packages/runtime${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONPATH="$WORKSPACE_ROOT/mn-python-sdk/packages/contracts/src:$WORKSPACE_ROOT/mn-surface/src:$WORKSPACE_ROOT/mn-python-sdk/packages/runtime/src:$WORKSPACE_ROOT/mn-python-sdk/packages/runtime${PYTHONPATH:+:$PYTHONPATH}"
 
 (cd "$WORKSPACE_ROOT/mn-system-tests" && "$VALIDATION_PYTHON" -m pytest tests/integration/installer -q)
 (cd "$WORKSPACE_ROOT/mn-system-tests" && "$VALIDATION_PYTHON" -m pytest \
@@ -35,6 +35,7 @@ export PYTHONPATH="$WORKSPACE_ROOT/mn-python-sdk/packages/contracts/src:$WORKSPA
   tests/integration/contracts/test_blueprint_runtime_model_preflight_contract.py -q)
 (cd "$DEPLOY_DIR" && "$VALIDATION_PYTHON" -m pytest tests/test_job_ui_proxy.py -q)
 (cd "$WORKSPACE_ROOT/mn-python-sdk" && "$VALIDATION_PYTHON" -m pytest tests packages/runtime/tests_runtime -q)
+(cd "$WORKSPACE_ROOT/mn-surface" && "$VALIDATION_PYTHON" -m pytest -q)
 (cd "$WORKSPACE_ROOT/mn-cli" && "$VALIDATION_PYTHON" -m pytest -q)
 (cd "$WORKSPACE_ROOT/mn-api" && "$VALIDATION_PYTHON" -m pytest -q)
 (cd "$WORKSPACE_ROOT/MirrorNeuron" && mix test --no-start tests/unit/grpc/runtime_control_auth_test.exs tests/unit/grpc/runtime_membership_test.exs tests/unit/grpc/runtime_control_route_test.exs tests/unit/core_environment_test.exs tests/e2e/runner/core_connection_test.exs)
