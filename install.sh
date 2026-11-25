@@ -65,6 +65,8 @@ MN_DEFAULT_OPENSHELL_SANDBOX_IMAGE="${MN_DEFAULT_OPENSHELL_SANDBOX_IMAGE:-ghcr.i
 MN_DEFAULT_OPENSHELL_VERSION="${MN_DEFAULT_OPENSHELL_VERSION:-v0.0.47}"
 MN_DEFAULT_OPENSHELL_GATEWAY_IMAGE="${MN_DEFAULT_OPENSHELL_GATEWAY_IMAGE:-ghcr.io/nvidia/openshell/gateway:0.0.47}"
 MN_DEFAULT_OPENSHELL_SUPERVISOR_IMAGE="${MN_DEFAULT_OPENSHELL_SUPERVISOR_IMAGE:-ghcr.io/nvidia/openshell/supervisor:0.0.47}"
+# The WAC release and the platform digests in mn_install_wac are one pin.
+MN_WAC_VERSION="v0.12.0"
 
 # Docker Model Runner's NVIDIA source build.
 MN_DEFAULT_DOCKER_MODEL_PLUGIN_PACKAGE="${MN_DEFAULT_DOCKER_MODEL_PLUGIN_PACKAGE:-docker-model-plugin}"
@@ -1544,14 +1546,75 @@ function mn_run_runtime_start_command() {
   return "$status"
 }
 
+function mn_wac_matches() {
+  [ -f "$1" ] && "$VENV_DIR/bin/python" -c '
+import hashlib, sys
+with open(sys.argv[1], "rb") as binary:
+    sys.exit(hashlib.file_digest(binary, "sha256").hexdigest() != sys.argv[2])
+' "$1" "$2"
+}
+
+function mn_install_wac() (
+  local platform target digest binary="wac" staged
+  platform="$(uname -s):$(uname -m)"
+  case "$platform" in
+  Darwin:arm64 | Darwin:aarch64)
+    target=aarch64-apple-darwin
+    digest=891af0e6d591481daed3a7c52a3dc20fd34cc326e6e955d4c8fd85c4b1835e3d
+    ;;
+  Darwin:x86_64)
+    target=x86_64-apple-darwin
+    digest=805ff57132b81dfcd1f25632e5928eac1d5a1e1a32dead48e73f108571da4e17
+    ;;
+  Linux:aarch64 | Linux:arm64)
+    target=aarch64-unknown-linux-musl
+    digest=80fe01c4cbf1e59526069d46f51a8a396be6f8df09ecc060d949181a317c08f5
+    ;;
+  Linux:x86_64)
+    target=x86_64-unknown-linux-musl
+    digest=7cd490edbd452221ef89e6750fc43eacc9b71b1242095eb577cb9a3bf0d3beda
+    ;;
+  MINGW*:x86_64 | MSYS*:x86_64 | CYGWIN*:x86_64 | MINGW*:aarch64 | MSYS*:aarch64 | CYGWIN*:aarch64 | MINGW*:arm64 | MSYS*:arm64 | CYGWIN*:arm64)
+    target=x86_64-pc-windows-gnu
+    digest=33d92a2a73db1f8de69538038e594a14cc8f9e6feb8138bf29fdaf2598d425d9
+    binary=wac.exe
+    ;;
+  *)
+    print_error "No WAC runtime binary is available for $platform."
+    return 1
+    ;;
+  esac
+  mkdir -p "$BIN_DIR"
+  if mn_wac_matches "$BIN_DIR/$binary" "$digest"; then
+    chmod 755 "$BIN_DIR/$binary"
+    return
+  fi
+  staged="$(mktemp "$BIN_DIR/.wac.XXXXXX")"
+  trap 'rm -f "$staged"' EXIT
+  curl --proto '=https' --proto-redir '=https' -fsSL --retry 3 --connect-timeout 15 --max-time 180 \
+    -o "$staged" "https://github.com/bytecodealliance/wac/releases/download/$MN_WAC_VERSION/wac-cli-$target" || return 1
+  if ! mn_wac_matches "$staged" "$digest"; then
+    print_error "WAC $MN_WAC_VERSION checksum verification failed for $target."
+    return 1
+  fi
+  chmod 755 "$staged" && mv -f "$staged" "$BIN_DIR/$binary"
+)
+
 function mn_configure_installed_runtime() {
+  print_step "Preparing WAC $MN_WAC_VERSION for WebAssembly blueprints"
+  mn_install_wac || return 1
+  export PATH="$BIN_DIR:$PATH"
   run_quiet "runtime-installation" "$VENV_DIR/bin/python" -m mn_runtime.lifecycle prepare --role "$MN_INSTALL_ROLE"
   "$VENV_DIR/bin/python" - "$INSTALL_DIR" <<'PY_LAUNCHER'
 from pathlib import Path
 import shlex, sys
 home = Path(sys.argv[1]).resolve()
 (home / "bin").mkdir(exist_ok=True)
-command = "#!/usr/bin/env bash\nset -euo pipefail\nexport MN_HOME=" + shlex.quote(str(home)) + "\nexec " + shlex.quote(str(home / "venv/bin/python")) + ' -m mn_runtime.lifecycle "$@"\n'
+command = (
+    "#!/usr/bin/env bash\nset -euo pipefail\nexport MN_HOME=" + shlex.quote(str(home))
+    + '\nexport PATH="$MN_HOME/bin:$PATH"\nexec ' + shlex.quote(str(home / "venv/bin/python"))
+    + ' -m mn_runtime.lifecycle "$@"\n'
+)
 for target in (home / "bin/mn-runtime", home / "server.sh"):
     target.write_text(command)
     target.chmod(0o700)

@@ -13,6 +13,11 @@ The CLI and API depend on `mirrorneuron-surface`. Execution nodes install
 `mirrorneuron-runtime` and its worker SDK, `mirrorneuron-python-sdk`. Both
 roles install `mirrorneuron-sdk-contracts` for the gRPC and catalog contracts.
 
+Full and runtime installs place the Bytecode Alliance WAC executable in
+`MN_HOME/bin`. The native runtime uses it to link WebAssembly blueprint workers
+to their declared skill components during preparation. Reinstalls verify the
+managed binary against the pinned release digest and download it when needed.
+
 The role flags are mutually exclusive. Local and GitHub source modes print a
 notice, consume the flags, and install both parts. Client mode performs no Docker
 discovery, compute registration, model setup, or service startup. Runtime mode
