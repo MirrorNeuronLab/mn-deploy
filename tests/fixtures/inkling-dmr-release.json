@@ -122,14 +122,7 @@
           }
         ]
       },
-      "args": [
-        "-ngl",
-        "999",
-        "--jinja",
-        "--parallel",
-        "1",
-        "--metrics"
-      ]
+      "args": ["-ngl", "999", "--jinja", "--parallel", "1", "--metrics"]
     }
   }
 }

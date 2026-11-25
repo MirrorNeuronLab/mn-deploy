@@ -98,7 +98,6 @@ MN_DEFAULT_INSTALL_VERSION="${MN_DEFAULT_INSTALL_VERSION:-v1.4.0}"
 MN_DEFAULT_INSTALL_SUPPORT_VERSION="${MN_DEFAULT_INSTALL_SUPPORT_VERSION:-v1.4.31}"
 MN_INSTALL_VERSION="${MN_INSTALL_VERSION:-}"
 MN_INSTALL_SCRIPT_NAME="$(basename "${MN_INSTALL_STREAM_NAME:-$0}")"
-MN_INSTALL_ORIGINAL_ARGS=("$@")
 MN_INSTALL_ARGS=()
 
 # Presentation is shared by every mode and stays self-contained for curl | bash.
@@ -390,7 +389,10 @@ function mn_start_podman() {
       fi
     fi
     ;;
-  *) print_error "Unsupported Podman host OS: $host_os"; return 1 ;;
+  *)
+    print_error "Unsupported Podman host OS: $host_os"
+    return 1
+    ;;
   esac
   podman info >/dev/null || return 1
   [ "$mode" != only ] || print_success "Podman is ready."
@@ -403,8 +405,11 @@ function mn_prepare_runtime_podman() {
   mn_start_podman install || return 1
   PODMAN_HOST_SOCKET="$(mn_resolve_podman_socket)" || return 1
   case "$PODMAN_HOST_SOCKET" in
-    /*) ;;
-    *) print_error "Podman did not report an absolute API socket path."; return 1 ;;
+  /*) ;;
+  *)
+    print_error "Podman did not report an absolute API socket path."
+    return 1
+    ;;
   esac
   export PODMAN_HOST_SOCKET
   local rootless container_uid container_gid
