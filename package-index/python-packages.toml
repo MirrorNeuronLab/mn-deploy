@@ -65,6 +65,22 @@ binary_default = false
 source_hash = "v2:965c50909bb8bac91109c003a468be8ed19a6e208bef346b76d9eb170742cf45"
 
 [[packages]]
+name = "mirrorneuron-sdk-contracts"
+path = "mn-python-sdk/packages/contracts"
+publish_group = "runtime"
+version = "1.4.23"
+installer_groups = ["sdk"]
+binary_default = true
+
+[[packages]]
+name = "mirrorneuron-surface"
+path = "mn-python-sdk/packages/surface"
+publish_group = "runtime"
+version = "1.4.23"
+installer_groups = ["surface"]
+binary_default = true
+
+[[packages]]
 name = "mirrorneuron-python-sdk"
 path = "mn-python-sdk"
 publish_group = "runtime"

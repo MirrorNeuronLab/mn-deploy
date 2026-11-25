@@ -19,7 +19,7 @@ test -x "$VALIDATION_PYTHON" || {
 VALIDATION_HOME="$(mktemp -d "${TMPDIR:-/tmp}/mn-split-validation.XXXXXX")"
 trap 'rm -rf "$VALIDATION_HOME"' EXIT
 export MN_HOME="$VALIDATION_HOME" MN_ENV=test RUN_MN_SYSTEM_TESTS=1
-export PYTHONPATH="$WORKSPACE_ROOT/mn-python-sdk/packages/runtime/src:$WORKSPACE_ROOT/mn-python-sdk/packages/runtime${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONPATH="$WORKSPACE_ROOT/mn-python-sdk/packages/contracts/src:$WORKSPACE_ROOT/mn-python-sdk/packages/surface/src:$WORKSPACE_ROOT/mn-python-sdk/packages/runtime/src:$WORKSPACE_ROOT/mn-python-sdk/packages/runtime${PYTHONPATH:+:$PYTHONPATH}"
 
 (cd "$WORKSPACE_ROOT/mn-system-tests" && "$VALIDATION_PYTHON" -m pytest tests/integration/installer -q)
 (cd "$WORKSPACE_ROOT/mn-system-tests" && "$VALIDATION_PYTHON" -m pytest \

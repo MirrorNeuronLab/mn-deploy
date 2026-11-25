@@ -2616,13 +2616,15 @@ function mn_ensure_python_package_index_file() {
 function mn_sdk_component_rows() {
   local PACKAGE_INDEX_FILE="${MN_PACKAGE_INDEX_FILE:-${PACKAGE_INDEX_FILE:-$(mn_script_dir)/package-index/python-packages.toml}}"
   mn_ensure_python_package_index_file
-  "$MN_PYTHON_BIN" - "$PACKAGE_INDEX_FILE" <<'PYCODE'
+  if [ "$#" -eq 0 ]; then set -- sdk; fi
+  "$MN_PYTHON_BIN" - "$PACKAGE_INDEX_FILE" "$@" <<'PYCODE'
 import sys, tomllib
 from pathlib import Path
 packages = tomllib.loads(Path(sys.argv[1]).read_text())["packages"]
+groups = set(sys.argv[2:])
 for package in packages:
     name = package["name"]
-    if "sdk" not in package.get("installer_groups", []):
+    if groups.isdisjoint(package.get("installer_groups", [])):
         continue
     path = package["path"]
     # Component names need not share a prefix (for example mn-blueprint-blocks).
@@ -2783,7 +2785,13 @@ PY
     if [ -e "$VENV_DIR" ]; then mv "$VENV_DIR" "$client_backup"; fi
     install_python_packages
     # Fail an incompatible old package selection before replacing command links.
-    run_quiet "client-package-check" "$VENV_DIR/bin/python" -c 'from mn_sdk.runtime_connection import installation_role; from mn_sdk.runtime_control import RuntimeControlClient; from mn_cli.main import app; from mn_api.app import create_app; assert installation_role() == "client"; create_app()'
+    local client_imports
+    if [ -n "$(indexed_requirements_for_group surface)" ]; then
+      client_imports='from mn_surface import RuntimeControlClient; from mn_sdk_shared.runtime.connection import installation_role'
+    else
+      client_imports='from mn_sdk.runtime_connection import installation_role; from mn_sdk.runtime_control import RuntimeControlClient'
+    fi
+    run_quiet "client-package-check" "$VENV_DIR/bin/python" -c "$client_imports; from mn_cli.main import app; from mn_api.app import create_app; assert installation_role() == 'client'; create_app()"
     client_success="Y"
     rm -rf "$client_backup"
   )
@@ -4442,16 +4450,20 @@ EOF
     (
       "$MN_PYTHON_BIN" -m venv "$VENV_DIR" >/dev/null 2>&1
       run_quiet "pip-upgrade" "$VENV_DIR/bin/pip" install --upgrade pip
-      if [ "$INSTALL_PYTHON_SDK" = "Y" ]; then
-        local -a sdk_requirements=("mirrorneuron-python-sdk @ git+https://github.com/MirrorNeuronLab/mn-python-sdk.git$(github_ref_suffix)")
-        local package_name package_path package_extras component_rows
-        component_rows="$(mn_sdk_component_rows)" || return 1
-        while IFS=$'\t' read -r package_name package_path package_extras; do
-          [ -n "$package_name" ] || continue
-          sdk_requirements+=("${package_name}${package_extras} @ git+https://github.com/MirrorNeuronLab/mn-python-sdk.git$(github_ref_suffix)#subdirectory=${package_path#mn-python-sdk/}")
-        done <<<"$component_rows"
-        run_quiet "install-mn-python-sdk-github" "$VENV_DIR/bin/pip" install "${sdk_requirements[@]}"
+      # The Git runtime depends on the worker SDK even when only a surface was
+      # explicitly selected. Resolve its foundation and any Surface from this ref.
+      local sdk_reference="git+https://github.com/MirrorNeuronLab/mn-python-sdk.git$(github_ref_suffix)"
+      local -a sdk_requirements=("mirrorneuron-python-sdk @ $sdk_reference") sdk_groups=(sdk)
+      local package_name package_path package_extras component_rows
+      if [ "$INSTALL_CLI" = "Y" ] || [ "$INSTALL_API" = "Y" ]; then
+        sdk_groups+=(surface)
       fi
+      component_rows="$(mn_sdk_component_rows "${sdk_groups[@]}")" || return 1
+      while IFS=$'\t' read -r package_name package_path package_extras; do
+        [ -n "$package_name" ] || continue
+        sdk_requirements+=("${package_name}${package_extras} @ ${sdk_reference}#subdirectory=${package_path#mn-python-sdk/}")
+      done <<<"$component_rows"
+      run_quiet "install-mn-python-sdk-github" "$VENV_DIR/bin/pip" install "${sdk_requirements[@]}"
       if [ "$INSTALL_CLI" = "Y" ]; then
         run_quiet "install-mn-cli-github" "$VENV_DIR/bin/pip" install "git+https://github.com/MirrorNeuronLab/mn-cli.git$(github_ref_suffix)"
       fi
@@ -7230,6 +7242,10 @@ PYTHON
     fi
     if [ "$MN_INSTALL_ROLE" != "client" ]; then
       install_indexed_group runtime-node
+    fi
+    if { [ "$INSTALL_CLI" = "Y" ] || [ "$INSTALL_API" = "Y" ]; } &&
+      [ -n "$(indexed_requirements_for_group surface)" ]; then
+      install_indexed_group surface
     fi
     if [ "$INSTALL_CLI" = "Y" ]; then
       install_indexed_group cli

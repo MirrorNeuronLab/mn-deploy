@@ -16,7 +16,14 @@ def validate(workspace: Path) -> None:
     deploy = workspace / "mn-deploy"
     index = deploy / "package-index/python-packages.toml"
     projects = {p["path"]: p for p in tomllib.loads(index.read_text())["packages"]}
-    selected = ("mn-python-sdk", "mn-python-sdk/packages/runtime", "mn-cli", "mn-api")
+    selected = (
+        "mn-python-sdk",
+        "mn-python-sdk/packages/contracts",
+        "mn-python-sdk/packages/surface",
+        "mn-python-sdk/packages/runtime",
+        "mn-cli",
+        "mn-api",
+    )
     with tempfile.TemporaryDirectory(prefix="mn-wheel-contract-") as directory:
         root = Path(directory)
         wheels = root / "wheels"
@@ -77,10 +84,17 @@ def validate(workspace: Path) -> None:
         for wheel in wheels.glob("*.whl"):
             with zipfile.ZipFile(wheel) as archive:
                 names = archive.namelist()
-            runtime = wheel.name.startswith("mirrorneuron_runtime-")
-            assert any(name.startswith("mn_runtime/") for name in names) is runtime, (
-                wheel.name
-            )
+            for distribution, namespace in {
+                "mirrorneuron_python_sdk": "mn_sdk",
+                "mirrorneuron_sdk_contracts": "mn_sdk_shared",
+                "mirrorneuron_surface": "mn_surface",
+                "mirrorneuron_runtime": "mn_runtime",
+            }.items():
+                owns_namespace = wheel.name.startswith(distribution + "-")
+                assert (
+                    any(name.startswith(namespace + "/") for name in names)
+                    is owns_namespace
+                ), wheel.name
             assert not any(
                 "native_runtime_service.py" in name or "mn_cli/runtime/" in name
                 for name in names

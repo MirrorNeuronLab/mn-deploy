@@ -9,6 +9,10 @@ home and each installed command remembers its home.
 | `./install.sh --no-runtime`   | `client`  | CLI/API and their Python libraries                                       | `~/.mn-client`  |
 | `./install.sh --runtime-only` | `runtime` | Core, native runtime, Redis, Compose and selected execution dependencies | `~/.mn-runtime` |
 
+The CLI and API depend on `mirrorneuron-surface`. Execution nodes install
+`mirrorneuron-runtime` and its worker SDK, `mirrorneuron-python-sdk`. Both
+roles install `mirrorneuron-sdk-contracts` for the gRPC and catalog contracts.
+
 The role flags are mutually exclusive. Local and GitHub source modes print a
 notice, consume the flags, and install both parts. Client mode performs no Docker
 discovery, compute registration, model setup, or service startup. Runtime mode
