@@ -248,11 +248,13 @@ Preview never prepares an environment or installs dependencies.
 - The bulk commit/push helper publishes existing local commits even when the
   working tree is clean. Remote updates are fast-forwarded before local work
   is committed; pushes never force-update remote history.
-- Its opt-in `--prettier` flag runs the configured Prettier hook with `--write`
-  after synchronization and before committing. Selection covers pending push
-  files and non-ignored untracked files, honors hook types and exclusions, and
-  reuses its pinned formatter environment through `uvx`. Formatting errors stop
-  before commit/push; ordinary pre-push checks remain enabled.
+- After synchronization, `--markdown-prettier` applies Prettier to Markdown
+  and `--ruff-format` applies Ruff to Python files and type stubs. Each
+  flag is optional and the two may be combined.
+  Each uses its repository's configured hook and pinned environment through
+  `uvx`. Selection intersects the hook filters with pending push files,
+  including non-ignored untracked files. A formatter failure stops the
+  repository before commit or push. Ordinary pre-push checks remain enabled.
 
 ## Portability and Output
 

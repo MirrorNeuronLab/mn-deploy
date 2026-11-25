@@ -32,7 +32,7 @@ git --git-dir="$REMOTE" symbolic-ref HEAD refs/heads/main
 mkdir -p "$WORKSPACE" "$HELPER_DIR"
 cp "$REPO_DIR/git_commit_push_all.sh" "$HELPER_DIR/git_commit_push_all.sh"
 mkdir -p "$HELPER_DIR/scripts"
-cp "$REPO_DIR/scripts/format-prettier.py" "$HELPER_DIR/scripts/format-prettier.py"
+cp "$REPO_DIR/scripts/format-pending.py" "$HELPER_DIR/scripts/"
 git clone "$REMOTE" "$TARGET" >/dev/null
 git -C "$TARGET" config user.name "mn-deploy test"
 git -C "$TARGET" config user.email "mn-deploy-test@example.invalid"
@@ -101,36 +101,65 @@ test "$1" = "--from"
 test "$2" = "pre-commit==4.5.1"
 test "$3" = "python"
 test -f "$4"
-test "${4##*/}" = "format-prettier.py"
+test "${4##*/}" = "format-pending.py"
 test "$5" = "refs/remotes/origin/main"
-printf '%s\n' "$PWD" >>"$UVX_LOG"
+shift 5
+printf '%s\n' "$*" >>"$UVX_LOG"
 if [ "${FORMAT_SHOULD_FAIL:-N}" = "Y" ]; then
   echo "formatter failed" >&2
   exit 1
 fi
-printf '%s\n' '# Formatted' >README.md
+for formatter in "$@"; do
+  case "$formatter" in
+  prettier) printf '%s\n' '# Formatted' >README.md ;;
+  ruff-format) printf '%s\n' 'value = 1' >sample.py ;;
+  *) exit 2 ;;
+  esac
+done
 SH
 chmod +x "$TEST_ROOT/bin/uvx"
 export UVX_LOG="$TEST_ROOT/uvx.log"
 export PATH="$TEST_ROOT/bin:$PATH"
 
 printf '%s\n' '#   Unformatted' >"$TARGET/README.md"
+printf '%s\n' 'value=1' >"$TARGET/sample.py"
+if "$HELPER_DIR/git_commit_push_all.sh" --prettier >"$OUTPUT" 2>&1; then
+  echo "expected the removed --prettier option to fail" >&2
+  exit 1
+fi
+grep -q 'invalid option --prettier' "$OUTPUT"
 "$HELPER_DIR/git_commit_push_all.sh" -m "without formatter" >"$OUTPUT" 2>&1
 test ! -f "$UVX_LOG"
 test "$(cat "$TARGET/README.md")" = '#   Unformatted'
 
 printf '%s\n' '#    Pending format' >"$TARGET/README.md"
-"$HELPER_DIR/git_commit_push_all.sh" --prettier -m "formatted work" >"$OUTPUT" 2>&1
+"$HELPER_DIR/git_commit_push_all.sh" --markdown-prettier -m "formatted work" >"$OUTPUT" 2>&1
+test "$(tail -n 1 "$UVX_LOG")" = 'prettier'
+test "$(cat "$TARGET/sample.py")" = 'value=1'
 test "$(cat "$TARGET/README.md")" = '# Formatted'
 test "$(git -C "$TARGET" log -1 --format=%s)" = "formatted work"
 test "$(git --git-dir="$REMOTE" show main:README.md)" = '# Formatted'
 test -z "$(git -C "$TARGET" status --porcelain)"
 
+printf '%s\n' '#   Pending Markdown' >"$TARGET/README.md"
+printf '%s\n' 'value  =  1' >"$TARGET/sample.py"
+"$HELPER_DIR/git_commit_push_all.sh" --ruff-format >"$OUTPUT" 2>&1
+test "$(tail -n 1 "$UVX_LOG")" = 'ruff-format'
+test "$(git --git-dir="$REMOTE" show main:sample.py)" = 'value = 1'
+test "$(git --git-dir="$REMOTE" show main:README.md)" = '#   Pending Markdown'
+
+printf '%s\n' '#    Combined' >"$TARGET/README.md"
+printf '%s\n' 'value =1' >"$TARGET/sample.py"
+"$HELPER_DIR/git_commit_push_all.sh" --markdown-prettier --ruff-format >"$OUTPUT" 2>&1
+test "$(tail -n 1 "$UVX_LOG")" = 'prettier ruff-format'
+test "$(git --git-dir="$REMOTE" show main:README.md)" = '# Formatted'
+test "$(git --git-dir="$REMOTE" show main:sample.py)" = 'value = 1'
+
 # A formatting failure must leave both histories and the dirty work untouched.
 printf '%s\n' 'broken formatting' >"$TARGET/README.md"
 LOCAL_COMMIT="$(git -C "$TARGET" rev-parse HEAD)"
 REMOTE_COMMIT="$(git --git-dir="$REMOTE" rev-parse main)"
-if FORMAT_SHOULD_FAIL=Y "$HELPER_DIR/git_commit_push_all.sh" -m "must not commit" --prettier >"$OUTPUT" 2>&1; then
+if FORMAT_SHOULD_FAIL=Y "$HELPER_DIR/git_commit_push_all.sh" -m "must not commit" --ruff-format >"$OUTPUT" 2>&1; then
   echo "expected formatting failure to stop before commit/push" >&2
   exit 1
 fi
@@ -144,7 +173,7 @@ printf '%s\n' '# Formatted' >"$TARGET/README.md"
 printf '%s\n' '#   Committed format' >"$TARGET/README.md"
 git -C "$TARGET" add README.md
 git -C "$TARGET" commit -m "unpublished formatting" >/dev/null
-"$HELPER_DIR/git_commit_push_all.sh" -m "format local commit" --prettier >"$OUTPUT" 2>&1
+"$HELPER_DIR/git_commit_push_all.sh" -m "format local commit" --markdown-prettier >"$OUTPUT" 2>&1
 test "$(git --git-dir="$REMOTE" show main:README.md)" = '# Formatted'
 test "$(git -C "$TARGET" log -1 --format=%s)" = "format local commit"
 test -z "$(git -C "$TARGET" status --porcelain)"

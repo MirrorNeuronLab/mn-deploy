@@ -5,17 +5,21 @@ set -e
 
 # Commit message (default if not provided)
 COMMIT_MSG="auto: update all repos"
-RUN_PRETTIER="N"
+FORMAT_HOOKS=()
 
 usage() {
-  echo "Usage: $0 [--prettier] [-m \"commit message\"]"
-  echo "  --prettier  Run the configured Prettier formatter on files being published."
+  echo "Usage: $0 [--markdown-prettier] [--ruff-format] [-m \"commit message\"]"
+  echo "  --markdown-prettier  Format pending Markdown with Prettier."
+  echo "  --ruff-format        Format pending Python with Ruff."
 }
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
-  --prettier)
-    RUN_PRETTIER="Y"
+  --markdown-prettier)
+    FORMAT_HOOKS+=(prettier)
+    ;;
+  --ruff-format)
+    FORMAT_HOOKS+=(ruff-format)
     ;;
   -m)
     if [ "$#" -lt 2 ]; then
@@ -53,8 +57,8 @@ if [ "$#" -gt 0 ]; then
   exit 2
 fi
 
-if [ "$RUN_PRETTIER" = "Y" ] && ! command -v uvx >/dev/null 2>&1; then
-  echo "error: --prettier requires uvx. Install uv and rerun." >&2
+if ((${#FORMAT_HOOKS[@]})) && ! command -v uvx >/dev/null 2>&1; then
+  echo "error: formatting requires uvx. Install uv and rerun." >&2
   exit 1
 fi
 
@@ -147,8 +151,8 @@ for dir in "$TARGET_DIR"/*/; do
     BRANCH=$(git rev-parse --abbrev-ref HEAD)
     sync_branch_before_commit "$BRANCH"
 
-    if [ "$RUN_PRETTIER" = "Y" ]; then
-      uvx --from pre-commit==4.5.1 python "$SCRIPT_DIR/scripts/format-prettier.py" "refs/remotes/origin/$BRANCH"
+    if ((${#FORMAT_HOOKS[@]})); then
+      uvx --from pre-commit==4.5.1 python "$SCRIPT_DIR/scripts/format-pending.py" "refs/remotes/origin/$BRANCH" "${FORMAT_HOOKS[@]}"
     fi
 
     # Check if there are changes

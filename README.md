@@ -322,17 +322,19 @@ Commit and push changes across sibling development repositories:
 ./git_commit_push_all.sh -m "Describe the update"
 ```
 
-Add `--prettier` to run Prettier with `--write` before committing:
+Use `--markdown-prettier` to format pending Markdown, or `--ruff-format`
+to format pending Python files and type stubs.
+To apply both before committing, run
 
 ```bash
-./git_commit_push_all.sh --prettier -m "Describe the update"
+./git_commit_push_all.sh --markdown-prettier --ruff-format -m "Describe the update"
 ```
 
-This requires `uvx` (provided by uv) and uses each repository's configured
-Prettier version, file types, exclusions, and ignore files. It formats only
-pending push files, including untracked files and unpublished local commits.
-A formatting error stops that repository before commit or push. Other checks
-still run normally at push time.
+Both flags use `uvx` (provided by uv) and the corresponding hook in each
+repository's pre-commit configuration. They honor hook filters and formatter
+settings. The pending files include untracked files and changes in unpublished
+local commits. A formatting error stops that repository before commit or push.
+The usual validation hooks run at push time.
 
 The bulk helper fetches the current branch and all remote tags before updating.
 It commits uncommitted changes and pushes unpublished commits, including when
