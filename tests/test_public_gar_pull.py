@@ -120,8 +120,8 @@ elif args[:2] == ['image', 'inspect']:
         script += 'core_gar_image_for_tag() { printf "%s" "$TEST_IMAGE"; }\n'
         call = "install_core_from_gar"
     else:
-        script += function("pull_context_engine_image")[int(target)] + "\n"
-        script += 'read_env_value() { printf "%s" "$TEST_IMAGE"; }\n'
+        script += "\n".join(function("pull_context_engine_image")) + "\n"
+        script += 'mn_read_env_value() { printf "%s" "$TEST_IMAGE"; }\n'
         call = "pull_context_engine_image"
     script += """
 print_detail() { :; }
@@ -161,7 +161,7 @@ runtime_compose() { echo "compose:$*"; }
     return result, records, authfile
 
 
-@pytest.mark.parametrize("target", ["core", "0", "1", "2"])
+@pytest.mark.parametrize("target", ["core", "membrane"])
 @pytest.mark.parametrize(
     "host,connection", [("", ""), ("ssh://compute", ""), ("", "podman-machine-default")]
 )
@@ -184,7 +184,7 @@ def test_public_pulls_bypass_helpers_and_preserve_connection(
         assert metadata["core_image_digest"] == "sha256:" + "a" * 64
 
 
-@pytest.mark.parametrize("target", ["core", "0", "1", "2"])
+@pytest.mark.parametrize("target", ["core", "membrane"])
 def test_public_pull_failure_cleans_config_and_stops(tmp_path, target):
     result, records, _ = run_pull(tmp_path, target=target, status=7)
     assert result.returncode != 0

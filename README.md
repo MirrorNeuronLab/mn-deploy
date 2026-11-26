@@ -2,9 +2,12 @@
 
 ## Installer interface
 
-The installer shows the selected mode, home, components and startup behavior,
-then three numbered stages (four when starting the runtime). It prints one
-completion message after all requested work succeeds, with a primary `Next:`
+The OtterDesk Installer shows the selected mode, home, components, host
+architecture, memory and detected GPU. A full install prepares the native
+client commands before setting up Podman and the execution runtime. The
+installer reports when each part is ready and when runtime startup has passed
+its readiness check. With `--no-start`, it reports that runtime verification
+was skipped. One completion message gives a primary `Next:`
 command that also loads the current shell's environment. A connected client
 reinstall suggests `mn node list`; a new client suggests connection setup.
 When the installer starts a runtime, its final line is a copyable `mn node add`
@@ -23,12 +26,9 @@ Component prompts accept `y`/`n`, retry invalid input,
 and report an error on missing input. `--reset` still requires the exact `YES`
 confirmation even with `--yes`. Terminal progress shows activity and elapsed
 time; redirected output, `TERM=dumb`, and `NO_COLOR` use stable plain lines.
-`--verbose` shows routine Docker and local editable Python build output. Failed
+`--verbose` shows Podman and local editable Python build output. Failed
 commands identify their diagnostic logs in the default output. Use
 `--detect-only` for machine-readable JSON status.
-
-This presentation update keeps component selections, package pins, service
-startup policy and historical support snapshots unchanged.
 
 ## Installation roles
 
@@ -190,7 +190,8 @@ by default. Core reaches it by its Compose service name.
 ## Podman runtime
 
 Core and Redis run in Podman. Runtime installation automatically installs the Podman CLI if it is missing.
-With `--reset`, setup runs after you type `YES` and before cleanup begins.
+With `--reset`, Podman setup runs after you type `YES` so the installer can
+verify and clean the previous runtime before installing the client and runtime.
 If the package manager needs administrator access, sudo can prompt for your
 password in the terminal. Unattended runs and explicit `--yes` use non-interactive
 sudo. On Linux the installer starts the native API socket for the invoking user.
@@ -198,7 +199,6 @@ On macOS Homebrew installs the Podman formula without a confirmation prompt,
 and workloads run in a Podman machine. The installer accepts the machine's API
 socket as either an absolute path or a `unix://` URI and checks the path before
 reset deletes any data. The Compose provider runs in a pinned container.
-Client-only installation requires Python tooling.
 
 Start an existing engine or machine with:
 
@@ -209,7 +209,10 @@ Start an existing engine or machine with:
 Use `podman info` to check the selected container engine. GGUF models run
 directly on the host with native llama.cpp. macOS uses Metal, and Linux uses
 CUDA or Vulkan. Podman keeps its own workload container and volume storage.
-Provision existing job data on Podman when moving a node from Docker.
+When moving a node from Docker, stop its legacy MirrorNeuron Compose project
+before starting the Podman runtime so it can bind the configured ports.
+The runtime selects available Syncthing ports when the installer receives no
+explicit `MN_SYNCTHING_GUI_PORT` or `MN_SYNCTHING_SYNC_PORT` values.
 
 ## Quick Start
 
@@ -225,12 +228,12 @@ Detect an existing runtime without installing or changing anything:
 ./install.sh --detect-only
 ```
 
-The command exits successfully after printing one JSON object. `status` is
-`not_installed`, `stopped`, `running`, or `docker_not_running`. The last status
-means an install was found but the Docker daemon was unavailable, so runtime
-`running` is `null`. `docker_installed` and `docker_running` report Docker's
-state separately. `runtime_ready` is true only when the installed `mn runtime
-status` health check succeeds; an installation can therefore report
+The command exits successfully after printing one JSON object. `status` can be
+`not_installed`, `stopped`, `running`, `podman_not_running`, `identity_invalid`
+or `client`. `podman_not_running` means an install was found but Podman was
+unavailable, so runtime `running` is `null`. `podman_installed` and
+`podman_running` report the engine state. `runtime_ready` is true only when
+the installed `mn-runtime status` health check succeeds. An installation can report
 `installed: true` and `runtime_ready: false` when repair or reinstallation may
 be needed. `version` is the installed Core release when it can be determined,
 otherwise `null`.

@@ -34,12 +34,22 @@ def local_install(tmp_path):
     tools = tmp_path / "tools"
     tools.mkdir()
     # Keep host Cargo off PATH even on Ubuntu hosts with a system Cargo package.
-    for name in "basename cat chmod dirname mkdir mktemp mv ps rm rmdir uname".split():
+    for name in (
+        "awk basename cat chmod cmp cp dirname ln mkdir mktemp mv ps rm rmdir uname"
+    ).split():
         (tools / name).symlink_to(shutil.which(name))
     cargo_home = tmp_path / "cargo home"
     cargo = cargo_home / "bin/cargo"
     cargo.parent.mkdir(parents=True)
-    cargo.write_text("#!/bin/sh\nexit 0\n")
+    cargo.write_text("""#!/bin/sh
+set -eu
+echo build >> "$MN_TEST_COMMANDS"
+while [ "$1" != --target-dir ]; do shift; done
+mkdir -p "$2/release"
+for command in mn mn-api mn-client-support mn-web-ui-server; do
+    printf '#!/bin/sh\nexit 0\n' > "$2/release/$command"
+done
+""")
     cargo.chmod(0o755)
     for name, source in {
         "git": """#!/bin/sh
@@ -52,7 +62,7 @@ printf '[package]\\nname = "mn-client-support"\\n' > "$5/Cargo.toml"
 exit "$MN_TEST_CLONE_STATUS"
 """,
         "podman": """#!/bin/sh
-command -v cargo >> "$MN_TEST_COMMANDS"
+command -v cargo >> "$MN_TEST_COMMANDS" || :
 echo podman >> "$MN_TEST_COMMANDS"
 exit 1
 """,
@@ -78,6 +88,7 @@ exit 1
                 "MN_HOME": str(runtime),
                 "PATH": str(tools),
                 "CARGO_HOME": str(cargo_home),
+                "SHELL": "/bin/sh",
                 "TMPDIR": str(tmp_path),
                 "MN_TEST_COMMANDS": str(commands),
                 "MN_TEST_CLONE_STATUS": str(clone_status),
@@ -93,7 +104,7 @@ exit 1
 
 
 def test_bootstraps_missing_checkout_and_reuses_it(local_install):
-    run, workspace, _, commands = local_install
+    run, workspace, runtime, commands = local_install
     support = workspace / "mn-client-support"
     cancelled = run("--reset", answer="no\n")
     assert cancelled.returncode == 0, cancelled.stdout + cancelled.stderr
@@ -114,9 +125,11 @@ def test_bootstraps_missing_checkout_and_reuses_it(local_install):
     commands.write_text("")
     reinstall = run(clone_status=1)
     events = commands.read_text().splitlines()
-    assert "podman" in events and "clone" not in events, (
+    assert events[:4] == ["build", "build", "build", "podman"], (
         reinstall.stdout + reinstall.stderr
     )
+    assert "Podman setup failed" in reinstall.stdout
+    assert (runtime / "bin/mn").is_file()
     assert manifest.read_text().endswith("# local edit\n")
 
 

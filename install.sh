@@ -2,8 +2,8 @@
 
 set -euo pipefail
 
-# Keep a streamed Linux installer available if it has to restart in the
-# Podman group after provisioning the engine. The stream itself is one-shot.
+# Give streamed Linux installs a script path while keeping the streamed
+# invocation's name and asset lookup behavior.
 if [ -z "${BASH_SOURCE[0]:-}" ] && [ -z "${BASH_EXECUTION_STRING:-}" ] && [ "$(uname -s)" = "Linux" ]; then
   mn_streamed_installer="$(mktemp "${TMPDIR:-/tmp}/mn-install.XXXXXX")"
   trap 'rm -f "$mn_streamed_installer"' EXIT
@@ -109,6 +109,7 @@ fi
 MN_INSTALL_STAGE=0
 MN_INSTALL_STAGES=3
 MN_INSTALL_STARTED=$SECONDS
+MN_INSTALL_CLIENT_COMPONENTS=""
 
 function mn_ui_animated() {
   [ -t 3 ] && [ -z "${NO_COLOR+x}" ] && [ "${TERM:-dumb}" != "dumb" ] && [ "$MN_INSTALL_VERBOSE" != "Y" ]
@@ -119,7 +120,7 @@ function mn_ui_clear_line() {
 }
 
 function print_header() {
-  printf '\n%sMirrorNeuron installer%s\n' "$BOLD" "$RESET" >&3
+  printf '\n  %sOtterDesk Installer%s\n  %s──────────────────────────────────────────%s\n' "$BOLD" "$RESET" "$DIM" "$RESET" >&3
 }
 
 function print_detail() {
@@ -150,6 +151,44 @@ function print_warning() {
 function mn_print_stage() {
   MN_INSTALL_STAGE=$((MN_INSTALL_STAGE + 1))
   printf '%s==>%s [%s/%s] %s\n' "${CYAN}${BOLD}" "$RESET" "$MN_INSTALL_STAGE" "$MN_INSTALL_STAGES" "$1" >&3
+}
+
+function mn_print_stage_result() {
+  printf '  %s✓%s %-22s %s\n' "${GREEN}${BOLD}" "$RESET" "$1" "$2" >&3
+}
+
+function mn_report_system() {
+  local os arch platform ram="" gpu="" vendor device
+  mn_print_stage "Checking the system"
+  os="$(uname -s)"
+  arch="$(uname -m)"
+  platform="$os · $arch"
+  case "$os" in
+  Darwin)
+    platform="macOS · $arch"
+    if [ "$arch" = arm64 ] || [ "$arch" = aarch64 ]; then
+      platform="macOS · Apple Silicon"
+      gpu="Metal GPU (host)"
+    fi
+    ram="$(sysctl -n hw.memsize 2>/dev/null | LC_ALL=C awk '/^[0-9]+$/ {printf "%.1f GiB RAM", $1 / 1073741824}' 2>/dev/null || true)"
+    ;;
+  Linux)
+    ram="$(LC_ALL=C awk '$1 == "MemTotal:" {printf "%.1f GiB RAM", $2 / 1048576; exit}' /proc/meminfo 2>/dev/null || true)"
+    if [ -d /proc/driver/nvidia/gpus ]; then gpu="NVIDIA GPU"; fi
+    for device in /sys/class/drm/card[0-9]*/device/vendor; do
+      if [ -n "$gpu" ]; then break; fi
+      [ -r "$device" ] && IFS= read -r vendor <"$device" || continue
+      case "$vendor" in
+      0x10de) gpu="NVIDIA GPU" ;;
+      0x1002) gpu="AMD GPU" ;;
+      0x8086) gpu="Intel GPU" ;;
+      *) gpu="GPU present" ;;
+      esac
+    done
+    ;;
+  esac
+  mn_print_stage_result "System detected" "$platform"
+  mn_print_stage_result "Hardware detection" "${gpu:-GPU not detected}${ram:+ · $ram}"
 }
 
 # Capture chatty external tools without hiding failure details or changing their
@@ -238,15 +277,15 @@ function ask() {
 
 function print_unified_usage() {
   cat >&3 <<EOF
-MirrorNeuron installer
+OtterDesk Installer
 
 Usage: ./$MN_INSTALL_SCRIPT_NAME [--mode github|local|binary] [options]
 
-Install a local runtime with Podman setup, or a client for a remote node.
+Install the client and a local Podman runtime, or select either part.
 Component choices use defaults. sudo can prompt in a terminal to install Podman.
 
 Common options:
-  --no-runtime       Client mode: CLI/API only. Home: ~/.mn.
+  --no-runtime       Client mode: CLI, API and client support. Home: ~/.mn.
   --runtime-only     Runtime mode: execution services only. Home: ~/.mn-runtime.
                      Binary only. Override either home with MN_HOME.
   --mode MODE        binary (default), github, or local source.
@@ -273,13 +312,13 @@ EOF
 
 function print_extended_usage() {
   cat >&3 <<EOF
-MirrorNeuron installer: full option reference
+OtterDesk Installer: full option reference
 
 Common controls (available before mode-specific setup):
   --mode MODE          binary (released packages, default), github, or local.
   --no-runtime         Client mode: install CLI/API for remote execution only.
   --runtime-only       Runtime mode: execution services without CLI/API or Web UI.
-                       Default home: ~/.mn.
+                       Default home: ~/.mn-runtime.
   --start-podman       Start existing Podman only; install nothing.
   --detect-only        Print installation status as JSON; make no changes.
   --reset              Permanently clear existing data; always requires typing YES.
@@ -505,6 +544,14 @@ function mn_detect_runtime_is_ready() {
   return 1
 }
 
+function mn_has_runtime_files() {
+  local home="$1"
+  [ -f "$home/install_metadata.json" ] || [ -f "$home/docker-compose.yml" ] ||
+    [ -f "$home/docker-compose.env" ] || [ -x "$home/bin/mn-runtime" ] ||
+    [ -x "$home/venv/bin/mn-runtime" ] || [ -x "$home/venv/bin/mn" ] ||
+    { [ -x "$home/bin/mn" ] && [ ! -L "$home/client-current" ]; }
+}
+
 function mn_detect_runtime() {
   local install_dir="${MN_HOME:-${HOME}/.mn}"
   local metadata_file="${install_dir}/install_metadata.json"
@@ -527,7 +574,6 @@ function mn_detect_runtime() {
   local version=""
   local podman_installed="false"
   local podman_running="false"
-  local docker_ready="N"
   local core_container_exists="N"
   local cli=""
   local MN_DETECT_IDENTITY_INVALID="N"
@@ -536,16 +582,13 @@ function mn_detect_runtime() {
     podman_installed="true"
     if podman info >/dev/null 2>&1; then
       podman_running="true"
-      docker_ready="Y"
       if podman container inspect mirror-neuron-core >/dev/null 2>&1; then
         core_container_exists="Y"
       fi
     fi
   fi
 
-  if [ -f "$metadata_file" ] || [ -f "${install_dir}/docker-compose.yml" ] ||
-    [ -x "${install_dir}/bin/mn" ] || [ -x "${install_dir}/venv/bin/mn" ] ||
-    [ "$core_container_exists" = "Y" ]; then
+  if mn_has_runtime_files "$install_dir" || [ "$core_container_exists" = "Y" ]; then
     installed="true"
   fi
 
@@ -560,7 +603,7 @@ function mn_detect_runtime() {
   fi
 
   if [ "$installed" = "true" ]; then
-    if [ "$docker_ready" != "Y" ]; then
+    if [ "$podman_running" != "true" ]; then
       running="null"
       status="podman_not_running"
     elif [ "$(podman container inspect --format '{{.State.Running}}' mirror-neuron-core 2>/dev/null || true)" = "true" ]; then
@@ -571,11 +614,11 @@ function mn_detect_runtime() {
     fi
   fi
 
-  if [ "$MN_DETECT_IDENTITY_INVALID" = "Y" ] && [ "$docker_ready" = "Y" ]; then
+  if [ "$MN_DETECT_IDENTITY_INVALID" = "Y" ] && [ "$podman_running" = "true" ]; then
     status="identity_invalid"
   fi
   version="$(mn_detect_version_from_metadata "$metadata_file" || true)"
-  if [ -z "$version" ] && [ "$docker_ready" = "Y" ]; then
+  if [ -z "$version" ] && [ "$podman_running" = "true" ]; then
     version="$(mn_detect_version_from_podman || true)"
   fi
   if [ -z "$version" ]; then
@@ -769,7 +812,8 @@ function mn_run_podman_build() {
 
 function mn_prepare_installer_paths() {
   MN_EXISTING_INSTALL="N"
-  if [ -d "$INSTALL_DIR" ] || [ -f "$BIN_DIR/mn" ]; then
+  # A failed runtime setup can leave a ready client and download directories.
+  if mn_has_runtime_files "$INSTALL_DIR" || [ -e "$VENV_DIR" ] || [ -L "$VENV_DIR" ]; then
     MN_EXISTING_INSTALL="Y"
   fi
   # Keep downloads, logs and package caches away from macOS protected folders.
@@ -957,7 +1001,7 @@ function mn_print_next_shell_command() {
 
 # Presentation only: report the resolved selections after interactive prompts.
 function mn_print_install_summary() {
-  local components="Core, Runtime" services="" mode="Full" source_label display_home="$INSTALL_DIR"
+  local client="" components="Core, Runtime" services="" mode="Full" source_label display_home="$INSTALL_DIR"
   case "$MN_INSTALL_MODE" in
   binary) source_label="released packages" ;;
   github) source_label="GitHub source" ;;
@@ -969,8 +1013,10 @@ function mn_print_install_summary() {
   "$HOME"/*) display_home="~/${INSTALL_DIR#"$HOME"/}" ;;
   esac
   [ "${INSTALL_PYTHON_SDK:-Y}" = "Y" ] && components="${components}, SDK"
-  [ "${INSTALL_CLI:-Y}" = "Y" ] && components="${components}, CLI"
-  [ "${INSTALL_API:-Y}" = "Y" ] && components="${components}, API"
+  [ "${INSTALL_CLI:-Y}" != "Y" ] || client="CLI"
+  [ "${INSTALL_API:-Y}" != "Y" ] || client="${client:+$client, }API"
+  [ "${INSTALL_WEB_UI:-N}" != "Y" ] || client="${client:+$client, }Web UI server"
+  MN_INSTALL_CLIENT_COMPONENTS="${client:+$client, client support}"
   [ "${INSTALL_AGENTS:-N}" = "Y" ] && components="${components}, Agents"
   [ "${INSTALL_SKILLS:-N}" = "Y" ] && components="${components}, Skills"
   [ "${INSTALL_WEB_UI:-N}" = "Y" ] && services="${services}, Web UI"
@@ -981,13 +1027,20 @@ function mn_print_install_summary() {
   *) services="${services}, Syncthing" ;;
   esac
   MN_INSTALL_STAGE=0
-  MN_INSTALL_STAGES=3
+  MN_INSTALL_STAGES=1
+  if [ -n "$MN_INSTALL_CLIENT_COMPONENTS" ]; then
+    MN_INSTALL_STAGES=$((MN_INSTALL_STAGES + 1))
+  fi
   if [ "$MN_NO_RUNTIME" = "Y" ]; then
     mode="Client"
-    components="CLI, API, client support"
+    components="$MN_INSTALL_CLIENT_COMPONENTS"
     services=""
-  elif [ "$MN_RUNTIME_ONLY" = "Y" ]; then
-    mode="Runtime"
+  else
+    MN_INSTALL_STAGES=$((MN_INSTALL_STAGES + 1))
+    if [ "$MN_RUNTIME_ONLY" = "Y" ]; then mode="Runtime"; fi
+    if [ -n "$MN_INSTALL_CLIENT_COMPONENTS" ]; then
+      components="$MN_INSTALL_CLIENT_COMPONENTS, $components"
+    fi
   fi
   printf '  %sMode%s     %s (%s)\n' "$DIM" "$RESET" "$mode" "$source_label" >&3
   printf '  %sHome%s     %s\n' "$DIM" "$RESET" "$display_home" >&3
@@ -998,7 +1051,7 @@ function mn_print_install_summary() {
   if [ "$MN_NO_RUNTIME" = "Y" ]; then
     printf '  %sStartup%s  Manual; no services started\n' "$DIM" "$RESET" >&3
   elif [ "$START_NOW" = "Y" ]; then
-    MN_INSTALL_STAGES=4
+    MN_INSTALL_STAGES=$((MN_INSTALL_STAGES + 1))
     printf '  %sStartup%s  Automatic\n' "$DIM" "$RESET" >&3
   else
     printf '  %sStartup%s  Manual; no services started\n' "$DIM" "$RESET" >&3
@@ -1046,7 +1099,7 @@ PY_CONNECT
 function mn_print_install_complete() {
   printf '\n' >&3
   if [ "$MN_NO_RUNTIME" = "Y" ]; then
-    print_success "MirrorNeuron client installed ($((SECONDS - MN_INSTALL_STARTED))s)."
+    print_success "OtterDesk client installed ($((SECONDS - MN_INSTALL_STARTED))s)."
     printf '  Blueprints run on your remote node.\n' >&3
     printf '  Optional local API: mn-api (foreground)\n' >&3
     print_detail "Local API bearer credential: ${INSTALL_DIR}/api.token"
@@ -1057,11 +1110,11 @@ function mn_print_install_complete() {
     fi
   else
     if [ "$START_NOW" = "Y" ]; then
-      print_success "MirrorNeuron installed; runtime running ($((SECONDS - MN_INSTALL_STARTED))s)."
+      print_success "OtterDesk installed; runtime running ($((SECONDS - MN_INSTALL_STARTED))s)."
     else
-      print_success "MirrorNeuron installed ($((SECONDS - MN_INSTALL_STARTED))s)."
+      print_success "OtterDesk installed ($((SECONDS - MN_INSTALL_STARTED))s)."
     fi
-    if [ "${INSTALL_WEB_UI:-N}" = "Y" ]; then
+    if [ "${INSTALL_WEB_UI:-N}" = "Y" ] && [ "$START_NOW" = "Y" ]; then
       printf '  Web UI: http://%s:%s\n' "${MN_WEB_UI_HOST:-localhost}" "${MN_WEB_UI_PORT:-55173}" >&3
     fi
     if [ "${INSTALL_CLI:-Y}" = "Y" ]; then
@@ -1087,33 +1140,84 @@ function runtime_compose() {
   "$VENV_DIR/bin/python" -m mn_sdk.containers.podman_compose --env-file "$RUNTIME_COMPOSE_ENV" -f "$RUNTIME_COMPOSE_FILE" "$@"
 }
 
-function mn_run_runtime_compose() {
-  local log_dir="${TMPDIR:-/tmp}/mirror_neuron_install"
-  local log_file="${log_dir}/docker-compose.$$.log"
-  local status
-
-  if [ "$MN_INSTALL_VERBOSE" = "Y" ]; then
-    runtime_compose "$@"
-    return
-  fi
-
-  mkdir -p "$log_dir"
-  if runtime_compose "$@" >"$log_file" 2>&1; then
-    rm -f "$log_file"
-    return 0
-  else
-    status=$?
-  fi
-
-  print_error "Compose failed. Details: $log_file"
-  printf '  Re-run with --verbose to show Compose output directly.\n' >&3
-  return "$status"
-}
-
 function mn_read_env_value() {
   local file="$1" key="$2"
   [ -f "$file" ] || return 0
   awk -F= -v key="$key" '$1 == key {print substr($0, index($0, "=") + 1); exit}' "$file"
+}
+
+function mn_runtime_network_external() {
+  local network_name="$1"
+  # Compose templates and saved installations share these environment keys.
+  local configured="${MN_DOCKER_NETWORK_EXTERNAL:-}"
+  local labels compose_project compose_network
+
+  if [ -n "$configured" ]; then
+    printf '%s\n' "$configured"
+    return 0
+  fi
+
+  if ! labels="$(podman network inspect -f '{{ index .Labels "com.docker.compose.project" }}|{{ index .Labels "com.docker.compose.network" }}' "$network_name" 2>/dev/null)"; then
+    printf 'false\n'
+    return 0
+  fi
+
+  compose_project="${labels%%|*}"
+  compose_network="${labels#*|}"
+  if [ "$compose_project" = "mirror-neuron" ] && [ "$compose_network" = "runtime" ]; then
+    printf 'false\n'
+  else
+    print_warning "Podman network ${network_name} already exists outside this Compose project; reusing it as an external network."
+    printf 'true\n'
+  fi
+}
+
+function pull_context_engine_image() {
+  local image
+  image="$(mn_read_env_value "$RUNTIME_COMPOSE_ENV" "MN_MEMBRANE_ENGINE_IMAGE")"
+  [ -n "$image" ] || image="$(mn_read_env_value "$RUNTIME_COMPOSE_ENV" "ENGINE_IMAGE")"
+  [ -n "$image" ] || {
+    print_error "Membrane context-engine image is not configured."
+    return 1
+  }
+  case "$image" in
+  us-central1-docker.pkg.dev/mirrorneuron-public-packages/*)
+    if ! mn_pull_public_gar_image "$image"; then
+      print_error "Could not pull the public Membrane image from Google Artifact Registry."
+      return 1
+    fi
+    ;;
+  *)
+    runtime_compose pull membrane-context-engine
+    ;;
+  esac
+}
+
+function remove_stale_runtime_container() {
+  local name="$1"
+  local project
+
+  if ! podman container inspect "$name" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  project="$(podman container inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' "$name" 2>/dev/null || true)"
+  if [ "$project" = "mirror-neuron" ]; then
+    return 0
+  fi
+
+  podman rm -f "$name" >/dev/null 2>&1 || true
+}
+
+function prepare_runtime_compose_sidecars() {
+  remove_stale_runtime_container mirror-neuron-context-engine-model
+  if [ "$INSTALL_REDIS" = "Y" ]; then
+    remove_stale_runtime_container mirror-neuron-redis
+  fi
+  if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
+    remove_stale_runtime_container mirror-neuron-context-engine
+    mn_prepare_membrane_image
+  fi
 }
 
 function mn_runtime_port_settings() {
@@ -1135,13 +1239,19 @@ function mn_runtime_port_settings() {
     fi
     printf '%s=%s\n' "$start_key" "$start" "$end_key" "$end" "$policy_key" "$policy"
   done
+
+  # Empty values let the runtime select available Syncthing ports. A default
+  # written here would be treated as an explicit pin, preventing that search.
+  printf 'MN_SYNCTHING_GUI_PORT=%s\nMN_SYNCTHING_SYNC_PORT=%s\n' \
+    "${MN_SYNCTHING_GUI_PORT:-}" "${MN_SYNCTHING_SYNC_PORT:-}"
 }
 
 function mn_run_runtime_start_command() {
   local log_dir="${TMPDIR:-/tmp}/mirror_neuron_install"
   local log_file="${log_dir}/runtime-start.$$.log"
-  local status busy_port="" bind_error
+  local status busy_port="" port_setting="" bind_error
   local bind_error_pattern='(failed to bind host port |Bind for |listen tcp[46]? )[^[:space:]]+:([0-9]+)(/tcp: address already in use| failed: port is already allocated|: bind: address already in use)'
+  local syncthing_error_pattern='(MN_SYNCTHING_(GUI|SYNC)_PORT)=([0-9]+) is already in use[.]'
 
   # Never hide command output while leaving it attached to interactive input.
   # A future CLI prompt must be visible instead of appearing as an installer hang.
@@ -1161,13 +1271,18 @@ function mn_run_runtime_start_command() {
       status=$?
     fi
     print_warning "Runtime startup details: $log_file"
-    bind_error="$(grep -m 1 -E "$bind_error_pattern" "$log_file" || true)"
-    if [[ "$bind_error" =~ $bind_error_pattern ]]; then
+    bind_error="$(grep -m 1 -E "$bind_error_pattern|$syncthing_error_pattern" "$log_file" || true)"
+    if [[ "$bind_error" =~ $syncthing_error_pattern ]]; then
+      port_setting="${BASH_REMATCH[1]}"
+      busy_port="${BASH_REMATCH[3]}"
+    elif [[ "$bind_error" =~ $bind_error_pattern ]]; then
       busy_port="${BASH_REMATCH[2]}"
     fi
   fi
 
-  if [ -n "$busy_port" ]; then
+  if [ -n "$port_setting" ]; then
+    print_error "Runtime startup failed. $port_setting=$busy_port is already in use. Set $port_setting to a free port, then retry mn-runtime start."
+  elif [ -n "$busy_port" ]; then
     print_error "Runtime startup failed. Podman could not publish TCP port $busy_port because it is already in use. Free the port or change its mapping, then retry mn-runtime start."
   else
     print_error "Runtime startup failed. Resolve the reported error, then retry mn-runtime start."
@@ -1230,9 +1345,17 @@ function mn_install_wac() (
 )
 
 function mn_configure_installed_runtime() {
+  local client_command
   print_step "Preparing WAC $MN_WAC_VERSION for WebAssembly blueprints"
   mn_install_wac || return 1
   export PATH="$BIN_DIR:$PATH"
+  # Runtime lifecycle also looks for the selected client commands in the venv.
+  if [ -n "$MN_INSTALL_CLIENT_COMPONENTS" ]; then
+    for client_command in "$INSTALL_DIR"/client-current/bin/*; do
+      client_command="${client_command##*/}"
+      ln -sfn "$BIN_DIR/$client_command" "$VENV_DIR/bin/$client_command"
+    done
+  fi
   run_quiet "runtime-installation" "$VENV_DIR/bin/python" -m mn_runtime.lifecycle prepare --role "$MN_INSTALL_ROLE"
   "$VENV_DIR/bin/python" - "$INSTALL_DIR" <<'PY_LAUNCHER'
 from pathlib import Path
@@ -1248,6 +1371,38 @@ for target in (home / "bin/mn-runtime", home / "server.sh"):
     target.write_text(command)
     target.chmod(0o700)
 PY_LAUNCHER
+}
+
+function mn_begin_runtime_install() {
+  mn_print_stage "Installing the execution runtime"
+  if ! mn_prepare_runtime_podman; then
+    print_error "Podman setup failed. Check the Podman output and rerun the installer."
+    return 1
+  fi
+  mn_print_stage_result "Container engine" "Podman ready"
+}
+
+function mn_finish_runtime_install() {
+  if [ "$START_NOW" = "Y" ]; then
+    if [ "$INSTALL_REDIS" = "Y" ] || [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
+      prepare_runtime_compose_sidecars
+    fi
+  elif [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
+    mn_prepare_membrane_image
+  fi
+
+  if [ -z "$MN_INSTALL_CLIENT_COMPONENTS" ]; then mn_write_shell_environment; fi
+  mn_print_stage_result "Runtime installation" "Complete"
+  if [ "$START_NOW" = "Y" ]; then
+    mn_print_stage "Starting and verifying the runtime"
+    if [ "$MN_INSTALL_MODE" = local ]; then
+      "$BIN_DIR/mn-runtime" stop >/dev/null 2>&1 || true
+    fi
+    mn_run_runtime_start_command "$BIN_DIR/mn-runtime" start || return 1
+    mn_print_stage_result "Runtime verification" "Ready"
+  else
+    printf '  ○ %-22s Skipped (--no-start)\n' "Runtime verification" >&3
+  fi
 }
 
 function mn_is_client_home() {
@@ -1306,6 +1461,7 @@ while [ "$#" -gt 0 ]; do
     MN_INSTALL_DETECT_ONLY="Y"
     ;;
   --start-podman | --start-docker)
+    # Accept the legacy spelling for scripts that start the selected engine.
     MN_INSTALL_START_PODMAN="Y"
     ;;
   --no-runtime)
@@ -1632,7 +1788,7 @@ function mn_reset_capture_cleanup_images() {
   done < <(podman ps -aq --filter "label=com.docker.compose.project=${project_name}" 2>/dev/null || true)
 
   # A prior reset may already have removed the containers while leaving
-  # Docker-owned bind-mount files behind. Redis is part of the managed
+  # container-owned bind-mount files behind. Redis is part of the managed
   # runtime, and its locally cached image provides a small POSIX shell.
   redis_image="$(mn_read_env_value "$compose_env_file" "MN_REDIS_IMAGE")"
   redis_image="${redis_image:-$MN_DEFAULT_REDIS_IMAGE}"
@@ -1641,7 +1797,7 @@ function mn_reset_capture_cleanup_images() {
   fi
 }
 
-function mn_reset_remove_docker_owned_files() {
+function mn_reset_remove_container_owned_files() {
   local cleanup_image
   local cleanup_command='rm -rf /mnt/mn-reset/* /mnt/mn-reset/.[!.]* /mnt/mn-reset/..?*'
 
@@ -1686,7 +1842,7 @@ function mn_reset_confirm_or_exit() {
   fi
 }
 
-function mn_reset_docker_state_or_exit() {
+function mn_reset_podman_state_or_exit() {
   local compose_file="${MN_RESET_HOME}/docker-compose.yml"
   local compose_env_file="${MN_RESET_HOME}/docker-compose.env"
   local project_name=""
@@ -1990,10 +2146,10 @@ MN_RESET_PROCESSES
   fi
 }
 
-function mn_reset_additional_docker_state_or_exit() {
+function mn_reset_additional_podman_state_or_exit() {
   local reset_python
   reset_python="$(command -v python3 || command -v python)"
-  if ! "$reset_python" - "$MN_RESET_HOME" <<'MN_RESET_DOCKER_OWNERS'; then
+  if ! "$reset_python" - "$MN_RESET_HOME" <<'MN_RESET_PODMAN_OWNERS'; then
 import hashlib
 import json
 from pathlib import Path
@@ -2002,7 +2158,7 @@ import sys
 
 home = Path(sys.argv[1]).resolve()
 
-def docker(*args):
+def podman(*args):
     return subprocess.run(["podman", *args], check=True, capture_output=True, text=True, timeout=60).stdout.strip()
 
 # Worker Compose uses a separate project. Bind mounts establish installation
@@ -2013,18 +2169,18 @@ if env.exists():
     for line in env.read_text().splitlines():
         if line.startswith("MN_DOCKER_WORKER_COMPOSE_PROJECT="):
             project = line.split("=", 1)[1]
-for container in docker("ps", "-aq", "--filter", f"label=com.docker.compose.project={project}").splitlines():
-    mounts = json.loads(docker("inspect", "--format", "{{json .Mounts}}", container))
+for container in podman("ps", "-aq", "--filter", f"label=com.docker.compose.project={project}").splitlines():
+    mounts = json.loads(podman("inspect", "--format", "{{json .Mounts}}", container))
     if any(str(mount.get("Source", "")) == str(home) or
            str(mount.get("Source", "")).startswith(str(home) + "/") for mount in mounts):
-        docker("rm", "-f", container)
+        podman("rm", "-f", container)
 
 # Clean also interrupted pulls that had not yet published a registry record.
 home_filter = f"label=io.mirrorneuron.model.home={home}"
-for container in docker("ps", "-aq", "--filter", home_filter).splitlines():
-    docker("rm", "-f", container)
-for volume in docker("volume", "ls", "-q", "--filter", home_filter).splitlines():
-    docker("volume", "rm", volume)
+for container in podman("ps", "-aq", "--filter", home_filter).splitlines():
+    podman("rm", "-f", container)
+for volume in podman("volume", "ls", "-q", "--filter", home_filter).splitlines():
+    podman("volume", "rm", volume)
 
 # Podman models own labeled cache volumes outside MN_HOME. Only remove
 # the exact model identities recorded by this installation, never shared images.
@@ -2045,8 +2201,8 @@ if registry.exists():
             labels = json.loads(found.stdout)
             if not isinstance(labels, dict) or labels.get("io.mirrorneuron.model.id") != model_id:
                 raise SystemExit("Model resource ownership could not be verified; reset stopped.")
-            docker("rm", "-f", name) if kind == "container" else docker("volume", "rm", name)
-MN_RESET_DOCKER_OWNERS
+            podman("rm", "-f", name) if kind == "container" else podman("volume", "rm", name)
+MN_RESET_PODMAN_OWNERS
     mn_reset_error "Additional runtime Podman resources could not be cleared; data was preserved."
     exit 1
   fi
@@ -2071,8 +2227,8 @@ function mn_reset_install_state() {
     MN_HOME="$MN_RESET_HOME" "$MN_RESET_HOME/venv/bin/python" -m mn_sdk.models.native_llama stop-all || exit 1
   fi
   mn_reset_host_processes_or_exit
-  mn_reset_additional_docker_state_or_exit
-  mn_reset_docker_state_or_exit
+  mn_reset_additional_podman_state_or_exit
+  mn_reset_podman_state_or_exit
   # An inherited environment from a previous sourced installation must not
   # restore its credentials, identity, endpoints, or old storage roots.
   unset MN_NODE_NAME MN_CLUSTER_NODES MN_GRPC_AUTH_TOKEN MN_GRPC_ADMIN_TOKEN
@@ -2092,7 +2248,7 @@ function mn_reset_install_state() {
     # Podman can remove entries the host user cannot delete from the bind mount.
     if ! host_remove_error="$(rm -rf "$MN_RESET_HOME" 2>&1)"; then
       print_detail "Removing the remaining runtime files through Podman."
-      if ! mn_reset_remove_docker_owned_files; then
+      if ! mn_reset_remove_container_owned_files; then
         if [ -n "$host_remove_error" ]; then
           printf '%s\n' "$host_remove_error" >&2
         fi
@@ -2185,23 +2341,6 @@ function mn_write_runtime_compose_file() {
   rm -f "$(dirname "$target")/docker-compose.models.yml"
 }
 
-function mn_remove_dockerfile_frontend_directive() {
-  local dockerfile="$1"
-  local first_line tmp_file
-
-  [ -f "$dockerfile" ] || return 0
-  IFS= read -r first_line <"$dockerfile" || return 0
-  case "$first_line" in
-  "# syntax=docker/dockerfile:"* | "# syntax = docker/dockerfile:"*) ;;
-  *) return 0 ;;
-  esac
-
-  tmp_file="$(mktemp "${TMPDIR:-/tmp}/mn-dockerfile.XXXXXX")"
-  tail -n +2 "$dockerfile" >"$tmp_file"
-  cat "$tmp_file" >"$dockerfile"
-  rm -f "$tmp_file"
-}
-
 function mn_stop_runtime_containers_for_reinstall() {
   local container_ids container_id kind resource_kind
   local runtime_ids=()
@@ -2282,10 +2421,10 @@ function mn_remove_path_or_exit() {
 function mn_remove_existing_install_paths() {
   mn_reconcile_native_resources_before_reinstall
   mn_stop_runtime_containers_for_reinstall
-  # Durable state stays in place, including Docker-owned/read-only directories.
+  # Durable state and the newly installed client commands stay in place.
   mn_remove_path_or_exit "$VENV_DIR" "MirrorNeuron Python virtual environment"
-  mn_remove_path_or_exit "$BIN_DIR/mn" "MirrorNeuron CLI executable"
-  mn_remove_path_or_exit "$BIN_DIR/mn-api" "MirrorNeuron API executable"
+  if [ "$INSTALL_CLI" != "Y" ]; then mn_remove_path_or_exit "$BIN_DIR/mn" "MirrorNeuron CLI executable"; fi
+  if [ "$INSTALL_API" != "Y" ]; then mn_remove_path_or_exit "$BIN_DIR/mn-api" "MirrorNeuron API executable"; fi
 }
 
 function mn_python_package_index_is_valid() {
@@ -2477,9 +2616,8 @@ function mn_client_asset() {
 
 function mn_install_native_clients() (
   set -e
-  local mode="$MN_INSTALL_MODE" root tag cli_tag api_tag repo ref command target target_dir stage gen item component_tag
+  local mode="$MN_INSTALL_MODE" root tag cli_tag api_tag repo ref command target target_dir stage gen component_tag
   local -a repos=(mn-client-support) commands=(mn-client-support)
-  if [ "${INSTALL_CLI:-Y}" != Y ] && [ "${INSTALL_API:-Y}" != Y ] && [ "${INSTALL_WEB_UI:-N}" != Y ]; then return 0; fi
   root="$(cd "$(mn_script_dir)/.." && pwd)"
   tag="${MN_CLIENT_VERSION:-$MN_DEFAULT_CLIENT_VERSION}"
   if [ "$MN_INSTALL_ROLE" = client ]; then tag="${MN_CLIENT_VERSION:-${MN_INSTALL_VERSION:-$tag}}"; fi
@@ -2505,8 +2643,10 @@ function mn_install_native_clients() (
   mkdir "$stage/bin"
   case "$mode" in
   local | github)
-    mn_require_cargo || return 1
-    if [ "$mode" = github ]; then
+    if [ "$mode" = local ]; then
+      mn_prepare_local_clients "$root" || return 1
+    else
+      mn_require_cargo || return 1
       root="$stage/src"
       mkdir "$root"
       for repo in "${repos[@]}"; do
@@ -2550,7 +2690,12 @@ function mn_install_native_clients() (
     done
     ;;
   esac
-  for command in "${commands[@]}"; do "$stage/bin/$command" --version >/dev/null; done
+  for command in "${commands[@]}"; do
+    if ! "$stage/bin/$command" --version >/dev/null; then
+      print_error "Could not run the staged $command executable. Check the client build or release target and rerun."
+      return 1
+    fi
+  done
   # Keep running API processes paired with their original support executable.
   # The shared link changes only after every binary is present and executable.
   gen="$(mktemp -d "$INSTALL_DIR/client-releases/rust.XXXXXXXX")"
@@ -2561,14 +2706,22 @@ function mn_install_native_clients() (
     mv -fh "$stage/active" "$INSTALL_DIR/client-current"
   for command in "${commands[@]}"; do
     ln -s "../client-current/bin/$command" "$stage/$command"
-    mv -f "$stage/$command" "$INSTALL_DIR/bin/$command"
+    mv -f "$stage/$command" "$BIN_DIR/"
   done
   print_detail "Command links: $INSTALL_DIR/bin"
-  # Runtime lifecycle discovers these names in its own executable directory.
-  if [ "$MN_INSTALL_ROLE" != client ] && [ -d "${VENV_DIR:-}/bin" ]; then
-    for item in "${commands[@]}"; do ln -sfn "$INSTALL_DIR/bin/$item" "$VENV_DIR/bin/$item"; done
-  fi
 )
+
+function mn_install_client_stage() {
+  [ -n "$MN_INSTALL_CLIENT_COMPONENTS" ] || return 0
+  mn_print_stage "Installing the client"
+  print_step "Installing native client commands in $BIN_DIR"
+  mn_install_native_clients
+  if [ "$MN_INSTALL_ROLE" = client ]; then
+    "$BIN_DIR/mn-client-support" init-client
+  fi
+  mn_write_shell_environment
+  mn_print_stage_result "Client installation" "$MN_INSTALL_CLIENT_COMPONENTS ready"
+}
 
 # Full installations serve these static assets with mn-web-ui-server. Local
 # checkouts can supply a built dist. Binary installs use the published web app.
@@ -2685,9 +2838,12 @@ function mn_install_client() {
   # binary mode, streamed installs and version pins always select release assets.
   if [ "$MN_INSTALL_MODE" = binary ] && [ "$MN_INSTALL_MODE_EXPLICIT" = N ] && [ -z "${MN_INSTALL_STREAM_NAME:-}${MN_INSTALL_VERSION:-}${MN_CLIENT_VERSION:-}${MN_CLIENT_DIST_DIR:-}${MN_CLI_VERSION:-}${MN_API_VERSION:-}${MN_CLI_VERSION_OVERRIDE:-}${MN_API_VERSION_OVERRIDE:-}" ] &&
     [ -f "$root/mn-client-support/Cargo.toml" ] && [ -f "$root/mn-cli/Cargo.toml" ] && [ -f "$root/mn-api/Cargo.toml" ]; then MN_INSTALL_MODE=local; fi
+  INSTALL_CLI=Y
+  INSTALL_API=Y
+  INSTALL_WEB_UI=N
   print_header
   mn_print_install_summary
-  mn_print_stage "Checking requirements"
+  mn_report_system
   if [ -L "$BIN_DIR" ] || [ -L "$INSTALL_DIR/client-releases" ] || [ -e "$INSTALL_DIR/docker-compose.yml" ] || [ -e "$INSTALL_DIR/docker-compose.env" ] ||
     { [ -d "$INSTALL_DIR" ] && [ -n "$(find "$INSTALL_DIR" -mindepth 1 -maxdepth 1 -print -quit)" ] && ! mn_is_client_home "$INSTALL_DIR"; }; then
     print_error "Choose an empty directory or an existing client installation for MN_HOME."
@@ -2704,8 +2860,8 @@ function mn_install_client() {
     print_success "Keeping the existing Rust client."
     return 0
   fi
-  if [ "$MN_INSTALL_MODE" = local ]; then mn_prepare_local_clients "$root" || return 1; fi
   if [ "$MN_INSTALL_RESET" = Y ]; then
+    if [ "$MN_INSTALL_MODE" = local ]; then mn_prepare_local_clients "$root" || return 1; fi
     rm -f "$INSTALL_DIR/client.json" "$INSTALL_DIR/api.token"
     rm -rf "$INSTALL_DIR/outputs" "$INSTALL_DIR/logs"
   fi
@@ -2714,25 +2870,11 @@ function mn_install_client() {
   if [ ! -f "$INSTALL_DIR/install_metadata.json" ]; then
     printf '{"install_role":"client","install_type":"%s"}\n' "$MN_INSTALL_MODE" >"$INSTALL_DIR/install_metadata.json"
   fi
-  INSTALL_CLI=Y
-  INSTALL_API=Y
-  mn_print_stage "Installing components"
-  print_step "Installing native Rust CLI, API and client support in $INSTALL_DIR"
-  mn_install_native_clients
-  mn_print_stage "Configuring commands and services"
-  "$BIN_DIR/mn-client-support" init-client
-  mn_write_shell_environment
+  mn_install_client_stage
   mn_print_install_complete
 }
 
 run_install_github() {
-  #!/usr/bin/env bash
-
-  set -euo pipefail
-
-  # Keep installer output visible even when a subcommand redirects stdout/stderr.
-  exec 3>&1
-
   # Never let git/pip block the installer by asking for GitHub credentials.
   export GIT_TERMINAL_PROMPT="${GIT_TERMINAL_PROMPT:-0}"
   export GH_PROMPT_DISABLED="${GH_PROMPT_DISABLED:-1}"
@@ -2746,35 +2888,6 @@ run_install_github() {
   MN_GITHUB_TOKEN_LOOKED_UP="N"
   MN_GITHUB_TOKEN_VALUE=""
   MN_GITHUB_GIT_AUTH_CONFIGURED="N"
-
-  function find_source_workspace() {
-    local script_dir
-    script_dir="$(mn_script_dir)"
-
-    local candidates=()
-    [ -n "${MN_SOURCE_DIR:-}" ] && candidates+=("$MN_SOURCE_DIR")
-    candidates+=(
-      "$PWD"
-      "$(dirname "$PWD")"
-      "$(dirname "$script_dir")"
-      "$HOME/Projects/mirror-neuron-set"
-    )
-
-    local candidate
-    for candidate in "${candidates[@]}"; do
-      [ -n "$candidate" ] || continue
-      if [ -d "$candidate/mn-python-sdk" ] &&
-        [ -d "$candidate/mn-python-sdk/packages/common" ] &&
-        [ -d "$candidate/mn-client-support" ] &&
-        [ -d "$candidate/mn-cli" ] &&
-        [ -d "$candidate/mn-api" ]; then
-        (cd "$candidate" && pwd)
-        return 0
-      fi
-    done
-
-    return 1
-  }
 
   function run_quiet() {
     local label="$1"
@@ -3075,7 +3188,6 @@ EOF
   BIN_DIR="${INSTALL_DIR}/bin"
   VENV_DIR="${INSTALL_DIR}/venv"
   MN_PYTHON_BIN=""
-  SOURCE_WORKSPACE=""
   SCRIPT_DIR="$(mn_script_dir)"
   RUNTIME_COMPOSE_TEMPLATE="${MN_RUNTIME_COMPOSE_TEMPLATE:-}"
   RUNTIME_COMPOSE_FILE="${INSTALL_DIR}/docker-compose.yml"
@@ -3097,13 +3209,9 @@ EOF
   MN_HOST_SHARED_STORAGE_ROOT="${MN_HOST_SHARED_STORAGE_ROOT:-${MN_HOST_SHARED_ARTIFACT_ROOT:-${MN_HOST_HOME_DIR}/shared}}"
   MN_SYNCTHING_ENABLED="${MN_SYNCTHING_ENABLED:-auto}"
   MN_SYNCTHING_IMAGE="${MN_SYNCTHING_IMAGE:-$MN_DEFAULT_SYNCTHING_IMAGE}"
-  MN_SYNCTHING_GUI_PORT="${MN_SYNCTHING_GUI_PORT:-58384}"
-  MN_SYNCTHING_SYNC_PORT="${MN_SYNCTHING_SYNC_PORT:-22000}"
   MN_SYNCTHING_RESCAN_INTERVAL_SECONDS="${MN_SYNCTHING_RESCAN_INTERVAL_SECONDS:-3600}"
   MN_BLUEPRINT_PYTHON_ENVS_DIR="${MN_BLUEPRINT_PYTHON_ENVS_DIR:-}"
   MN_HOST_OPENSHELL_STATE_DIR="${MN_HOST_OPENSHELL_STATE_DIR:-${INSTALL_DIR}/openshell-state}"
-  MN_DYNAMIC_REDIS_PORT_START="${MN_DYNAMIC_REDIS_PORT_START:-56379}"
-  MN_DYNAMIC_REDIS_PORT_END="${MN_DYNAMIC_REDIS_PORT_END:-56478}"
 
   INSTALL_WEB_UI="Y"
   INSTALL_REDIS="Y"
@@ -3314,7 +3422,6 @@ EOF
 
   finalize_github_install_version
 
-  mn_prepare_runtime_podman || exit 1
   mn_prepare_installer_paths
   print_header
 
@@ -3332,25 +3439,6 @@ EOF
       git clone --branch "$INSTALL_VERSION" --depth 1 "$url" "$target"
     else
       git clone --depth 1 "$url" "$target"
-    fi
-  }
-
-  function github_checkout_existing() {
-    local default_branch
-
-    if [ -n "$INSTALL_VERSION" ]; then
-      git fetch --tags origin "$INSTALL_VERSION" >/dev/null 2>&1
-      git checkout --force "$INSTALL_VERSION" >/dev/null 2>&1
-      return 0
-    fi
-
-    default_branch="$(git remote show origin 2>/dev/null | awk -F': ' '/HEAD branch/ {print $2; exit}')"
-    if [ -n "$default_branch" ]; then
-      git fetch origin "$default_branch" >/dev/null 2>&1
-      git checkout --force "$default_branch" >/dev/null 2>&1
-      git pull --ff-only origin "$default_branch" >/dev/null 2>&1
-    else
-      git pull --ff-only >/dev/null 2>&1
     fi
   }
 
@@ -3458,58 +3546,6 @@ EOF
 
     validate_agents_root "$root"
     printf '%s\n' "$root"
-  }
-
-  function context_engine_source_dir() {
-    if [ -z "${INSTALL_VERSION:-}" ] && [ -n "$SOURCE_WORKSPACE" ] && [ -f "$SOURCE_WORKSPACE/Membrane/Dockerfile" ]; then
-      MEMBRANE_DIR="$(cd "$SOURCE_WORKSPACE/Membrane" && pwd)"
-      printf '%s' "$SOURCE_WORKSPACE/Membrane"
-      return 0
-    fi
-    if [ -z "${INSTALL_VERSION:-}" ] && [ -n "${MN_MEMBRANE_DIR:-}" ] && [ -f "$MN_MEMBRANE_DIR/Dockerfile" ]; then
-      MEMBRANE_DIR="$(cd "$MN_MEMBRANE_DIR" && pwd)"
-      printf '%s' "$MN_MEMBRANE_DIR"
-      return 0
-    fi
-    if [ ! -d "$MEMBRANE_DIR" ]; then
-      run_quiet "clone-membrane-context-engine" github_clone "$(context_engine_git_url)" "$MEMBRANE_DIR"
-    else
-      (
-        cd "$MEMBRANE_DIR"
-        github_checkout_existing
-      )
-    fi
-    MEMBRANE_DIR="$(cd "$MEMBRANE_DIR" && pwd)"
-    mn_remove_dockerfile_frontend_directive "$MEMBRANE_DIR/Dockerfile"
-    printf '%s' "$MEMBRANE_DIR"
-  }
-
-  function setup_context_engine() {
-    remove_stale_runtime_containers_for_services context-engine-model membrane-context-engine
-
-    mn_prepare_membrane_image
-    runtime_compose up -d --no-build membrane-context-engine >/dev/null
-  }
-
-  function pull_context_engine_image() {
-    local image
-    image="$(read_env_value "$RUNTIME_COMPOSE_ENV" "MN_MEMBRANE_ENGINE_IMAGE")"
-    [ -n "$image" ] || image="$(read_env_value "$RUNTIME_COMPOSE_ENV" "ENGINE_IMAGE")"
-    [ -n "$image" ] || {
-      print_error "Membrane context-engine image is not configured."
-      return 1
-    }
-    case "$image" in
-    us-central1-docker.pkg.dev/mirrorneuron-public-packages/*)
-      if ! mn_pull_public_gar_image "$image"; then
-        print_error "Could not pull the public Membrane image from Google Artifact Registry."
-        return 1
-      fi
-      ;;
-    *)
-      runtime_compose pull membrane-context-engine
-      ;;
-    esac
   }
 
   function compose_profiles() {
@@ -3668,103 +3704,6 @@ EOF
     esac
   }
 
-  function read_env_value() {
-    local file="$1"
-    local key="$2"
-    [ -f "$file" ] || return 0
-    awk -F= -v key="$key" '$1 == key {print substr($0, index($0, "=") + 1); exit}' "$file"
-  }
-
-  function redis_probe_host() {
-    case "${1:-}" in
-    "" | 0.0.0.0 | :: | localhost) printf '127.0.0.1' ;;
-    *) printf '%s' "$1" ;;
-    esac
-  }
-
-  function redis_container_owns_port() {
-    local port="$1"
-    podman port mirror-neuron-redis 6379/tcp 2>/dev/null | awk -F: -v port="$port" '$NF == port {found=1} END {exit found ? 0 : 1}'
-  }
-
-  function redis_port_available() {
-    local host="$1"
-    local port="$2"
-    local probe_host
-    probe_host="$(redis_probe_host "$host")"
-
-    if redis_container_owns_port "$port"; then
-      return 0
-    fi
-    if (echo >"/dev/tcp/${probe_host}/${port}") >/dev/null 2>&1; then
-      return 1
-    fi
-    return 0
-  }
-
-  function resolve_redis_port() {
-    local bind_host="$1"
-    local persisted_port="$2"
-    local candidate
-
-    if [ -n "${MN_REDIS_PORT:-}" ]; then
-      candidate="$MN_REDIS_PORT"
-      if ! [[ "$candidate" =~ ^[0-9]+$ ]] || [ "$candidate" -lt 1 ] || [ "$candidate" -gt 65535 ]; then
-        print_error "MN_REDIS_PORT must be a TCP port between 1 and 65535."
-        exit 1
-      fi
-      if ! redis_port_available "$bind_host" "$candidate"; then
-        print_error "Redis port ${candidate} is already in use."
-        exit 1
-      fi
-      printf '%s\n' "$candidate"
-      return 0
-    fi
-
-    if [[ "$persisted_port" =~ ^[0-9]+$ ]] &&
-      [ "$persisted_port" -ge "$MN_DYNAMIC_REDIS_PORT_START" ] &&
-      [ "$persisted_port" -le "$MN_DYNAMIC_REDIS_PORT_END" ] &&
-      redis_port_available "$bind_host" "$persisted_port"; then
-      printf '%s\n' "$persisted_port"
-      return 0
-    fi
-
-    for candidate in $(seq "$MN_DYNAMIC_REDIS_PORT_START" "$MN_DYNAMIC_REDIS_PORT_END"); do
-      if redis_port_available "$bind_host" "$candidate"; then
-        printf '%s\n' "$candidate"
-        return 0
-      fi
-    done
-
-    print_error "No Redis port is available in ${MN_DYNAMIC_REDIS_PORT_START}-${MN_DYNAMIC_REDIS_PORT_END}."
-    exit 1
-  }
-
-  function resolve_docker_network_external() {
-    local network_name="$1"
-    local configured="${MN_DOCKER_NETWORK_EXTERNAL:-}"
-    local labels compose_project compose_network
-
-    if [ -n "$configured" ]; then
-      printf '%s\n' "$configured"
-      return 0
-    fi
-
-    if ! labels="$(podman network inspect -f '{{ index .Labels "com.docker.compose.project" }}|{{ index .Labels "com.docker.compose.network" }}' "$network_name" 2>/dev/null)"; then
-      printf 'false\n'
-      return 0
-    fi
-
-    compose_project="${labels%%|*}"
-    compose_network="${labels#*|}"
-    if [ "$compose_project" = "mirror-neuron" ] && [ "$compose_network" = "runtime" ]; then
-      printf 'false\n'
-    else
-      print_warning "Podman network ${network_name} already exists outside this Compose project; reusing it as an external network."
-      printf 'true\n'
-    fi
-  }
-
   function ensure_runtime_host_directory() {
     local path="$1"
     local description="$2"
@@ -3808,7 +3747,7 @@ EOF
     api_host="${MN_API_HOST:-localhost}"
     litellm_gateway_bind_host="${MN_LITELLM_GATEWAY_BIND_HOST:-0.0.0.0}"
     network_name="${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
-    network_external="$(resolve_docker_network_external "$network_name")"
+    network_external="$(mn_runtime_network_external "$network_name")"
     network_token="$(resolve_network_token)"
     redis_password="$(resolve_redis_password "mirror_neuron_password_admin")"
     mn_cookie="$(resolve_mn_cookie)"
@@ -3849,8 +3788,6 @@ MN_HOST_BLOB_STORE_DIR=${MN_HOST_BLOB_STORE_DIR}
 MN_HOST_SHARED_STORAGE_ROOT=${MN_HOST_SHARED_STORAGE_ROOT}
 MN_SYNCTHING_ENABLED=${MN_SYNCTHING_ENABLED}
 MN_SYNCTHING_IMAGE=${MN_SYNCTHING_IMAGE}
-MN_SYNCTHING_GUI_PORT=${MN_SYNCTHING_GUI_PORT}
-MN_SYNCTHING_SYNC_PORT=${MN_SYNCTHING_SYNC_PORT}
 MN_SYNCTHING_RESCAN_INTERVAL_SECONDS=${MN_SYNCTHING_RESCAN_INTERVAL_SECONDS}
 MN_BLUEPRINT_PYTHON_ENVS_DIR=${MN_BLUEPRINT_PYTHON_ENVS_DIR}
 MN_HOST_OPENSHELL_STATE_DIR=${MN_HOST_OPENSHELL_STATE_DIR}
@@ -3955,67 +3892,6 @@ EOF
     chmod 600 "$RUNTIME_COMPOSE_ENV" 2>/dev/null || true
   }
 
-  function runtime_container_name_for_service() {
-    case "$1" in
-    redis) echo "mirror-neuron-redis" ;;
-    web-ui) echo "mirror-neuron-web-ui" ;;
-    openshell) echo "openshell-cluster-openshell" ;;
-    context-engine-model) echo "mirror-neuron-context-engine-model" ;;
-    membrane-context-engine) echo "mirror-neuron-context-engine" ;;
-    mirror-neuron-core) echo "mirror-neuron-core" ;;
-    *) return 1 ;;
-    esac
-  }
-
-  function remove_stale_runtime_container() {
-    local name="$1"
-    local project
-
-    if ! podman container inspect "$name" >/dev/null 2>&1; then
-      return 0
-    fi
-
-    project="$(podman container inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' "$name" 2>/dev/null || true)"
-    if [ "$project" = "mirror-neuron" ]; then
-      return 0
-    fi
-
-    podman rm -f "$name" >/dev/null 2>&1 || true
-  }
-
-  function remove_stale_runtime_containers_for_services() {
-    local service name
-    for service in "$@"; do
-      name="$(runtime_container_name_for_service "$service" || true)"
-      [ -n "$name" ] && remove_stale_runtime_container "$name"
-    done
-    return 0
-  }
-
-  function prepare_runtime_compose_sidecars() {
-    RUNTIME_COMPOSE_SIDECARS=()
-    [ "$INSTALL_REDIS" = "Y" ] && RUNTIME_COMPOSE_SIDECARS+=("redis")
-    grep -q '^  mn-native-sdk-grpc:' "$RUNTIME_COMPOSE_FILE" 2>/dev/null && RUNTIME_COMPOSE_SIDECARS+=("mn-native-sdk-grpc")
-    grep -q '^  mn-litellm-proxy:' "$RUNTIME_COMPOSE_FILE" 2>/dev/null && RUNTIME_COMPOSE_SIDECARS+=("mn-litellm-proxy")
-    if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
-      RUNTIME_COMPOSE_SIDECARS+=("membrane-context-engine")
-    fi
-    if [ "${#RUNTIME_COMPOSE_SIDECARS[@]}" -gt 0 ]; then
-      remove_stale_runtime_containers_for_services context-engine-model "${RUNTIME_COMPOSE_SIDECARS[@]}"
-
-      if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
-        mn_prepare_membrane_image
-      fi
-    fi
-  }
-
-  function start_runtime_compose_sidecars() {
-    prepare_runtime_compose_sidecars
-    if [ "${#RUNTIME_COMPOSE_SIDECARS[@]}" -gt 0 ]; then
-      mn_run_runtime_compose up -d --no-build "${RUNTIME_COMPOSE_SIDECARS[@]}"
-    fi
-  }
-
   EXISTING_INSTALL="N"
   if [ "$MN_EXISTING_INSTALL" = "Y" ]; then
     if [ "$MN_INSTALL_RESET" != "Y" ]; then
@@ -4047,25 +3923,20 @@ EOF
   validate_selections
 
   mn_print_install_summary
-  mn_print_stage "Checking requirements"
-  resolve_python_runtime
-  print_step "Checking dependencies"
+  mn_report_system
 
   require_cmd git
   require_cmd curl
   configure_github_git_auth
-  if should_install_python_packages; then
-    resolve_python_runtime
-  fi
+  mn_install_client_stage
 
-  print_step "All dependencies found or installed."
-
+  mn_begin_runtime_install || return 1
+  resolve_python_runtime
   if [ "$EXISTING_INSTALL" = "Y" ]; then
     print_step "Preparing fresh install"
     mn_remove_existing_install_paths
   fi
 
-  mn_print_stage "Installing components"
   print_step "Installing MirrorNeuron Core (Podman)"
 
   (
@@ -4078,7 +3949,7 @@ EOF
       exit 1
     fi
 
-    DOCKER_BUILDKIT="${DOCKER_BUILDKIT:-1}" mn_run_podman_build -t mirror-neuron-core .
+    mn_run_podman_build -t mirror-neuron-core .
   ) &
   spinner $! "Cloning and building Core (Podman image mirror-neuron-core)"
   write_runtime_compose_files
@@ -4110,21 +3981,8 @@ EOF
     print_step "Python component installation disabled by selection."
   fi
 
-  mn_prepare_native_web_assets "${SOURCE_WORKSPACE:+$SOURCE_WORKSPACE/mn-web-ui}"
-  mn_install_native_clients
+  mn_prepare_native_web_assets
   mn_configure_installed_runtime
-  mn_print_stage "Configuring commands and services"
-  if [ "$INSTALL_REDIS" = "Y" ] || [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
-    if [ "$START_NOW" = "Y" ]; then
-      prepare_runtime_compose_sidecars
-      print_detail "Podman services are prepared; automatic startup uses the installed runtime lifecycle entry point."
-    else
-      if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
-        mn_prepare_membrane_image
-      fi
-      print_detail "Services are configured and remain stopped (--no-start)."
-    fi
-  fi
 
   if [ "$INSTALL_CLI" = "Y" ]; then
     print_detail "CLI: mn"
@@ -4136,33 +3994,11 @@ EOF
     print_detail "Membrane endpoint: ${MN_CONTEXT_ADDR:-localhost:50052}"
   fi
 
-  function shell_escape_value() {
-    printf '%q' "$1"
-  }
-
-  function ensure_shell_profile_exports() {
-    mn_write_shell_environment
-  }
-
-  ensure_shell_profile_exports
-
-  if [ "$START_NOW" = "Y" ]; then
-    mn_print_stage "Starting MirrorNeuron services"
-    mn_run_runtime_start_command "$BIN_DIR/mn-runtime" start || return 1
-    print_step "MirrorNeuron services are running."
-  fi
-
+  mn_finish_runtime_install
   mn_print_install_complete
 }
 
 run_install_local() {
-  #!/usr/bin/env bash
-
-  set -euo pipefail
-
-  # Keep installer output visible even when a subcommand redirects stdout/stderr.
-  exec 3>&1
-
   SCRIPT_DIR="$(mn_script_dir)"
   WORKSPACE_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
@@ -4196,13 +4032,9 @@ run_install_local() {
   MN_HOST_SHARED_STORAGE_ROOT="${MN_HOST_SHARED_STORAGE_ROOT:-${MN_HOST_SHARED_ARTIFACT_ROOT:-${MN_HOST_HOME_DIR}/shared}}"
   MN_SYNCTHING_ENABLED="${MN_SYNCTHING_ENABLED:-auto}"
   MN_SYNCTHING_IMAGE="${MN_SYNCTHING_IMAGE:-$MN_DEFAULT_SYNCTHING_IMAGE}"
-  MN_SYNCTHING_GUI_PORT="${MN_SYNCTHING_GUI_PORT:-58384}"
-  MN_SYNCTHING_SYNC_PORT="${MN_SYNCTHING_SYNC_PORT:-22000}"
   MN_SYNCTHING_RESCAN_INTERVAL_SECONDS="${MN_SYNCTHING_RESCAN_INTERVAL_SECONDS:-3600}"
   MN_BLUEPRINT_PYTHON_ENVS_DIR="${MN_BLUEPRINT_PYTHON_ENVS_DIR:-}"
   MN_HOST_OPENSHELL_STATE_DIR="${MN_HOST_OPENSHELL_STATE_DIR:-${INSTALL_DIR}/openshell-state}"
-  MN_DYNAMIC_REDIS_PORT_START="${MN_DYNAMIC_REDIS_PORT_START:-56379}"
-  MN_DYNAMIC_REDIS_PORT_END="${MN_DYNAMIC_REDIS_PORT_END:-56478}"
   MN_PYTHON_BIN=""
   MN_MANAGED_PYTHON="${MN_MANAGED_PYTHON:-1}"
   MN_MANAGED_PYTHON_VERSION="${MN_MANAGED_PYTHON_VERSION:-$MN_DEFAULT_MANAGED_PYTHON_VERSION}"
@@ -4699,12 +4531,6 @@ EOF
 EOF
   }
 
-  function core_container_running() {
-    local names
-    names="$(podman ps --format '{{.Names}}')"
-    grep -qx 'mirror-neuron-core' <<<"$names"
-  }
-
   function generate_mn_cookie() {
     local secret
     local python_fallback="${MN_PYTHON_BIN:-}"
@@ -4891,201 +4717,6 @@ EOF
     esac
   }
 
-  function read_env_value() {
-    local file="$1"
-    local key="$2"
-    [ -f "$file" ] || return 0
-    awk -F= -v key="$key" '$1 == key {print substr($0, index($0, "=") + 1); exit}' "$file"
-  }
-
-  function redis_probe_host() {
-    case "${1:-}" in
-    "" | 0.0.0.0 | :: | localhost) printf '127.0.0.1' ;;
-    *) printf '%s' "$1" ;;
-    esac
-  }
-
-  function redis_container_owns_port() {
-    local port="$1"
-    podman port mirror-neuron-redis 6379/tcp 2>/dev/null | awk -F: -v port="$port" '$NF == port {found=1} END {exit found ? 0 : 1}'
-  }
-
-  function redis_port_available() {
-    local host="$1"
-    local port="$2"
-    local probe_host
-    probe_host="$(redis_probe_host "$host")"
-
-    if redis_container_owns_port "$port"; then
-      return 0
-    fi
-
-    if command -v lsof >/dev/null 2>&1 &&
-      lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
-      return 1
-    fi
-
-    if [ -n "${MN_PYTHON_BIN:-}" ] &&
-      "$MN_PYTHON_BIN" -c 'import socket, sys
-host = sys.argv[1]
-port = int(sys.argv[2])
-sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-sock.settimeout(0.25)
-try:
-    raise SystemExit(0 if sock.connect_ex((host, port)) == 0 else 1)
-finally:
-    sock.close()
-' "$probe_host" "$port" >/dev/null 2>&1; then
-      return 1
-    fi
-
-    return 0
-  }
-
-  function resolve_redis_port() {
-    local bind_host="$1"
-    local persisted_port="$2"
-    local candidate
-
-    if [ -n "${MN_REDIS_PORT:-}" ]; then
-      candidate="$MN_REDIS_PORT"
-      if ! [[ "$candidate" =~ ^[0-9]+$ ]] || [ "$candidate" -lt 1 ] || [ "$candidate" -gt 65535 ]; then
-        print_error "MN_REDIS_PORT must be a TCP port between 1 and 65535."
-        exit 1
-      fi
-      if ! redis_port_available "$bind_host" "$candidate"; then
-        print_error "Redis port ${candidate} is already in use."
-        exit 1
-      fi
-      printf '%s\n' "$candidate"
-      return 0
-    fi
-
-    if [[ "$persisted_port" =~ ^[0-9]+$ ]] &&
-      [ "$persisted_port" -ge "$MN_DYNAMIC_REDIS_PORT_START" ] &&
-      [ "$persisted_port" -le "$MN_DYNAMIC_REDIS_PORT_END" ] &&
-      redis_port_available "$bind_host" "$persisted_port"; then
-      printf '%s\n' "$persisted_port"
-      return 0
-    fi
-
-    for candidate in $(seq "$MN_DYNAMIC_REDIS_PORT_START" "$MN_DYNAMIC_REDIS_PORT_END"); do
-      if redis_port_available "$bind_host" "$candidate"; then
-        printf '%s\n' "$candidate"
-        return 0
-      fi
-    done
-
-    print_error "No Redis port is available in ${MN_DYNAMIC_REDIS_PORT_START}-${MN_DYNAMIC_REDIS_PORT_END}."
-    exit 1
-  }
-
-  function start_core_container() {
-    local cmd=("podman" "run" "-d" "--name" "mirror-neuron-core" "--security-opt" "label=disable"
-      "-v" "${PODMAN_HOST_SOCKET:?Podman API socket is required}:/run/podman/podman.sock"
-      "-e" "CONTAINER_HOST=unix:///run/podman/podman.sock")
-    local openshell_config_dir="$HOME/.config/openshell"
-    local openshell_container_config_dir="${OPENSHELL_CONTAINER_CONFIG_DIR:-${INSTALL_DIR}/.config/openshell-mirror-neuron}"
-    local openshell_mount_dir="$openshell_config_dir"
-    local core_host="${MN_CORE_HOST:-localhost}"
-    local redis_host="${MN_REDIS_HOST:-localhost}"
-    local epmd_host="${MN_EPMD_HOST:-localhost}"
-    local dist_host="${MN_DIST_HOST:-localhost}"
-    local grpc_port="${MN_GRPC_PORT:-55051}"
-    local epmd_port="${MN_EPMD_PORT:-54369}"
-    local dist_port="${MN_DIST_PORT:-54370}"
-    local core_publish_host="$core_host"
-    local epmd_publish_host="$epmd_host"
-    local dist_publish_host="$dist_host"
-    local mn_cookie
-    mn_cookie="$(resolve_mn_cookie)"
-    [ "$core_publish_host" = "localhost" ] && core_publish_host="127.0.0.1"
-    [ "$epmd_publish_host" = "localhost" ] && epmd_publish_host="127.0.0.1"
-    [ "$dist_publish_host" = "localhost" ] && dist_publish_host="127.0.0.1"
-
-    local grpc_auth_token grpc_admin_token
-    grpc_auth_token="$(resolve_secret_file "${MN_GRPC_AUTH_TOKEN:-}" "${INSTALL_DIR}/grpc_auth.token" "MN_GRPC_AUTH_TOKEN")"
-    grpc_admin_token="$(resolve_secret_file "${MN_GRPC_ADMIN_TOKEN:-}" "${INSTALL_DIR}/grpc_admin.token" "MN_GRPC_ADMIN_TOKEN")"
-    cmd+=("-e" "MN_COOKIE=${mn_cookie}")
-    cmd+=("-e" "MN_GRPC_AUTH_TOKEN=${grpc_auth_token}")
-    cmd+=("-e" "MN_GRPC_ADMIN_TOKEN=${grpc_admin_token}")
-    cmd+=("-e" "MN_GRPC_PORT=${grpc_port}")
-    if [ -n "${MN_NODE_NAME:-}" ]; then
-      cmd+=("-e" "MN_NODE_NAME=${MN_NODE_NAME}")
-    fi
-
-    if [ "$(uname -s)" = "Darwin" ]; then
-      cmd+=("-p" "${core_publish_host}:${grpc_port}:${grpc_port}" "-p" "${epmd_publish_host}:${epmd_port}:4369")
-      cmd+=("-p" "${dist_publish_host}:${dist_port}:${dist_port}")
-      cmd+=("-e" "MN_REDIS_URL=redis://host.containers.internal:6379/0")
-      cmd+=("-e" "MN_CORE_HOST=0.0.0.0")
-      cmd+=("-e" "MN_EXECUTOR_MAX_CONCURRENCY=50")
-    else
-      cmd+=("--network" "host")
-      cmd+=("-e" "MN_CORE_HOST=${core_host}")
-      cmd+=("-e" "MN_REDIS_HOST=${redis_host}")
-      cmd+=("-e" "ERL_EPMD_ADDRESS=${epmd_host}")
-      cmd+=("-e" "MN_EXECUTOR_MAX_CONCURRENCY=50")
-    fi
-    cmd+=("-e" "MN_DIST_PORT=${dist_port}")
-
-    if [ -d "$openshell_container_config_dir/gateways/openshell" ]; then
-      openshell_mount_dir="$openshell_container_config_dir"
-    fi
-    if [ -d "$openshell_mount_dir/gateways/openshell" ]; then
-      cmd+=("-v" "$openshell_mount_dir:/root/.config/openshell:ro")
-      cmd+=("-v" "$openshell_mount_dir:/opt/mirror_neuron/.config/openshell:ro")
-    fi
-
-    for env_name in \
-      SLACK_BOT_TOKEN \
-      SLACK_DEFAULT_CHANNEL \
-      SLACK_API_BASE_URL \
-      MN_SLACK_BOT_TOKEN \
-      MN_SLACK_DEFAULT_CHANNEL \
-      MN_SLACK_API_BASE_URL; do
-      if [ -n "${!env_name:-}" ]; then
-        cmd+=("-e" "$env_name")
-      fi
-    done
-
-    cmd+=("mirror-neuron-core:latest")
-    "${cmd[@]}" >/dev/null
-  }
-
-  function restart_core_container() {
-    # Resolve and validate the persistent identity before replacing a container.
-    mn_run_runtime_start_command "$BIN_DIR/mn-runtime" start
-  }
-
-  function setup_context_engine() {
-    remove_stale_runtime_containers_for_services context-engine-model membrane-context-engine
-
-    mn_prepare_membrane_image
-    runtime_compose up -d --no-build membrane-context-engine >/dev/null
-  }
-
-  function pull_context_engine_image() {
-    local image
-    image="$(read_env_value "$RUNTIME_COMPOSE_ENV" "MN_MEMBRANE_ENGINE_IMAGE")"
-    [ -n "$image" ] || image="$(read_env_value "$RUNTIME_COMPOSE_ENV" "ENGINE_IMAGE")"
-    [ -n "$image" ] || {
-      print_error "Membrane context-engine image is not configured."
-      return 1
-    }
-    case "$image" in
-    us-central1-docker.pkg.dev/mirrorneuron-public-packages/*)
-      if ! mn_pull_public_gar_image "$image"; then
-        print_error "Could not pull the public Membrane image from Google Artifact Registry."
-        return 1
-      fi
-      ;;
-    *)
-      runtime_compose pull membrane-context-engine
-      ;;
-    esac
-  }
-
   function compose_profiles() {
     local profiles=()
     [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] && profiles+=("context")
@@ -5099,31 +4730,6 @@ finally:
     fi
     local IFS=,
     printf '%s' "${profiles[*]}"
-  }
-
-  function resolve_docker_network_external() {
-    local network_name="$1"
-    local configured="${MN_DOCKER_NETWORK_EXTERNAL:-}"
-    local labels compose_project compose_network
-
-    if [ -n "$configured" ]; then
-      printf '%s\n' "$configured"
-      return 0
-    fi
-
-    if ! labels="$(podman network inspect -f '{{ index .Labels "com.docker.compose.project" }}|{{ index .Labels "com.docker.compose.network" }}' "$network_name" 2>/dev/null)"; then
-      printf 'false\n'
-      return 0
-    fi
-
-    compose_project="${labels%%|*}"
-    compose_network="${labels#*|}"
-    if [ "$compose_project" = "mirror-neuron" ] && [ "$compose_network" = "runtime" ]; then
-      printf 'false\n'
-    else
-      print_warning "Podman network ${network_name} already exists outside this Compose project; reusing it as an external network."
-      printf 'true\n'
-    fi
   }
 
   function ensure_runtime_host_directory() {
@@ -5169,7 +4775,7 @@ finally:
     api_host="${MN_API_HOST:-localhost}"
     litellm_gateway_bind_host="${MN_LITELLM_GATEWAY_BIND_HOST:-0.0.0.0}"
     network_name="${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
-    network_external="$(resolve_docker_network_external "$network_name")"
+    network_external="$(mn_runtime_network_external "$network_name")"
     network_token="$(resolve_network_token)"
     redis_password="$(resolve_redis_password "mirror_neuron_password_admin")"
     mn_cookie="$(resolve_mn_cookie)"
@@ -5210,8 +4816,6 @@ MN_HOST_BLOB_STORE_DIR=${MN_HOST_BLOB_STORE_DIR}
 MN_HOST_SHARED_STORAGE_ROOT=${MN_HOST_SHARED_STORAGE_ROOT}
 MN_SYNCTHING_ENABLED=${MN_SYNCTHING_ENABLED}
 MN_SYNCTHING_IMAGE=${MN_SYNCTHING_IMAGE}
-MN_SYNCTHING_GUI_PORT=${MN_SYNCTHING_GUI_PORT}
-MN_SYNCTHING_SYNC_PORT=${MN_SYNCTHING_SYNC_PORT}
 MN_SYNCTHING_RESCAN_INTERVAL_SECONDS=${MN_SYNCTHING_RESCAN_INTERVAL_SECONDS}
 MN_BLUEPRINT_PYTHON_ENVS_DIR=${MN_BLUEPRINT_PYTHON_ENVS_DIR}
 MN_HOST_OPENSHELL_STATE_DIR=${MN_HOST_OPENSHELL_STATE_DIR}
@@ -5316,94 +4920,11 @@ EOF
     chmod 600 "$RUNTIME_COMPOSE_ENV" 2>/dev/null || true
   }
 
-  function runtime_container_name_for_service() {
-    case "$1" in
-    redis) echo "mirror-neuron-redis" ;;
-    web-ui) echo "mirror-neuron-web-ui" ;;
-    openshell) echo "openshell-cluster-openshell" ;;
-    context-engine-model) echo "mirror-neuron-context-engine-model" ;;
-    membrane-context-engine) echo "mirror-neuron-context-engine" ;;
-    mirror-neuron-core) echo "mirror-neuron-core" ;;
-    *) return 1 ;;
-    esac
-  }
-
-  function remove_stale_runtime_container() {
-    local name="$1"
-    local project
-
-    if ! podman container inspect "$name" >/dev/null 2>&1; then
-      return 0
-    fi
-
-    project="$(podman container inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' "$name" 2>/dev/null || true)"
-    if [ "$project" = "mirror-neuron" ]; then
-      return 0
-    fi
-
-    podman rm -f "$name" >/dev/null 2>&1 || true
-  }
-
-  function remove_stale_runtime_containers_for_services() {
-    local service name
-    for service in "$@"; do
-      name="$(runtime_container_name_for_service "$service" || true)"
-      [ -n "$name" ] && remove_stale_runtime_container "$name"
-    done
-    return 0
-  }
-
-  function prepare_runtime_compose_sidecars() {
-    RUNTIME_COMPOSE_SIDECARS=()
-    [ "$INSTALL_REDIS" = "Y" ] && RUNTIME_COMPOSE_SIDECARS+=("redis")
-    grep -q '^  mn-native-sdk-grpc:' "$RUNTIME_COMPOSE_FILE" 2>/dev/null && RUNTIME_COMPOSE_SIDECARS+=("mn-native-sdk-grpc")
-    grep -q '^  mn-litellm-proxy:' "$RUNTIME_COMPOSE_FILE" 2>/dev/null && RUNTIME_COMPOSE_SIDECARS+=("mn-litellm-proxy")
-    if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
-      RUNTIME_COMPOSE_SIDECARS+=("membrane-context-engine")
-    fi
-    if [ "${#RUNTIME_COMPOSE_SIDECARS[@]}" -gt 0 ]; then
-      remove_stale_runtime_containers_for_services context-engine-model "${RUNTIME_COMPOSE_SIDECARS[@]}"
-
-      if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
-        mn_prepare_membrane_image
-      fi
-    fi
-  }
-
-  function start_runtime_compose_sidecars() {
-    prepare_runtime_compose_sidecars
-    if [ "${#RUNTIME_COMPOSE_SIDECARS[@]}" -gt 0 ]; then
-      mn_run_runtime_compose up -d --no-build "${RUNTIME_COMPOSE_SIDECARS[@]}"
-    fi
-  }
-
-  function shell_escape_value() {
-    printf '%q' "$1"
-  }
-
-  function ensure_shell_profile_exports() {
-    mn_write_shell_environment
-  }
-
   require_install_dir_not_source
-  require_dir "$CORE_DIR" "MirrorNeuron core"
-  require_file "$CORE_DIR/Dockerfile" "MirrorNeuron Dockerfile"
-  require_dir "$PY_SDK_DIR" "mn-python-sdk"
-  if [ "$MN_INSTALL_RESET" != "Y" ]; then mn_prepare_local_clients "$WORKSPACE_DIR" || exit 1; fi
-  for component_project in "$PY_SDK_DIR"/packages/*/pyproject.toml; do
-    require_file "$component_project" "SDK component project"
-  done
-
-  if [ "$INSTALL_WEB_UI" = "Y" ]; then require_dir "$WEB_UI_DIR" "mn-web-ui"; fi
-  if [ "$INSTALL_SKILLS" = "Y" ]; then require_dir "$SKILLS_DIR" "mn-skills"; fi
-
-  mn_prepare_runtime_podman || exit 1
-  require_mix_project_file "$CORE_DIR/mix.exs"
   mn_prepare_installer_paths
   print_header
 
-  if [ "$MN_INSTALL_RESET" != "Y" ] &&
-    { [ -d "$INSTALL_DIR" ] || [ -L "$INSTALL_DIR" ] || [ -d "$VENV_DIR" ] || [ -f "$BIN_DIR/mn" ]; }; then
+  if [ "$MN_INSTALL_RESET" != "Y" ] && [ "$MN_EXISTING_INSTALL" = "Y" ]; then
     print_step "Refreshing the existing local source installation."
   fi
 
@@ -5419,19 +4940,27 @@ EOF
   fi
 
   mn_print_install_summary
-  mn_print_stage "Checking requirements"
-  resolve_python_runtime
-  print_step "Checking dependencies"
-  resolve_python_runtime
+  mn_report_system
+  mn_install_client_stage
 
+  mn_begin_runtime_install || return 1
+  require_dir "$CORE_DIR" "MirrorNeuron core"
+  require_file "$CORE_DIR/Dockerfile" "MirrorNeuron Dockerfile"
+  require_mix_project_file "$CORE_DIR/mix.exs"
+  require_dir "$PY_SDK_DIR" "mn-python-sdk"
+  for component_project in "$PY_SDK_DIR"/packages/*/pyproject.toml; do
+    require_file "$component_project" "SDK component project"
+  done
+
+  if [ "$INSTALL_WEB_UI" = "Y" ]; then require_dir "$WEB_UI_DIR" "mn-web-ui"; fi
+  if [ "$INSTALL_SKILLS" = "Y" ]; then require_dir "$SKILLS_DIR" "mn-skills"; fi
   if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
     require_dir "$MEMBRANE_DIR" "Membrane context engine"
     require_file "$MEMBRANE_DIR/Dockerfile" "Membrane Dockerfile"
   fi
 
-  print_step "Dependencies look good."
+  resolve_python_runtime
 
-  mn_print_stage "Installing components"
   print_step "Preparing local install state"
   mkdir -p "$INSTALL_DIR" "$BIN_DIR" "$INSTALL_DIR/.pids" "$INSTALL_DIR/.logs"
 
@@ -5452,7 +4981,7 @@ EOF
   print_step "Building MirrorNeuron Core Podman image from local source"
   (
     cd "$CORE_DIR"
-    DOCKER_BUILDKIT="${DOCKER_BUILDKIT:-1}" mn_run_podman_build -t mirror-neuron-core:latest .
+    mn_run_podman_build -t mirror-neuron-core:latest .
   )
   print_detail "Built local core image: mirror-neuron-core:latest"
 
@@ -5528,53 +5057,25 @@ EOF
   trap mn_reset_release_lock EXIT
 
   mn_prepare_native_web_assets "$WEB_UI_DIR"
-  mn_install_native_clients
   mn_configure_installed_runtime
-  mn_print_stage "Configuring commands and services"
-  if [ "$INSTALL_REDIS" = "Y" ] || [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
-    if [ "$START_NOW" = "Y" ]; then
-      prepare_runtime_compose_sidecars
-      print_detail "Podman services are prepared; automatic startup uses the installed runtime lifecycle entry point."
-    else
-      if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
-        mn_prepare_membrane_image
-      fi
-      print_detail "Services are configured and remain stopped (--no-start)."
-    fi
-  fi
-
-  ensure_shell_profile_exports
-
-  if [ "$START_NOW" = "Y" ]; then
-    mn_print_stage "Starting MirrorNeuron services"
-    "$BIN_DIR/mn-runtime" stop >/dev/null 2>&1 || true
-    mn_run_runtime_start_command "$BIN_DIR/mn-runtime" start || return 1
-    print_step "MirrorNeuron services are running."
-  fi
 
   print_detail "Core image: mirror-neuron-core:latest (${CORE_DIR})"
-  print_detail "CLI/API: editable installs from the local workspace"
+  print_detail "CLI/API: native builds from the local workspace"
   print_detail "State: ${INSTALL_DIR}"
   print_detail "Cookie: ${INSTALL_DIR}/erlang.cookie"
   if [ "$INSTALL_WEB_UI" = "Y" ]; then
-    print_detail "Web UI source: ${WEB_UI_DIR} (built inside Compose)"
+    print_detail "Web UI source: ${WEB_UI_DIR}"
   fi
   if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
     print_detail "Membrane: ${MEMBRANE_DIR} (${MN_CONTEXT_ADDR:-localhost:50052})"
   fi
   print_detail "Rebuild after Elixir changes: ${SCRIPT_DIR}/install.sh --mode local --no-web-ui --no-skills"
 
+  mn_finish_runtime_install
   mn_print_install_complete
 }
 
 run_install_binary() {
-  #!/usr/bin/env bash
-
-  set -euo pipefail
-
-  # Keep installer output visible even when a subcommand redirects stdout/stderr.
-  exec 3>&1
-
   # Never let pip block the installer by asking for input.
   export PIP_NO_INPUT="${PIP_NO_INPUT:-1}"
 
@@ -5588,7 +5089,6 @@ run_install_binary() {
   RUNTIME_COMPOSE_TEMPLATE="${MN_RUNTIME_COMPOSE_TEMPLATE:-}"
   RUNTIME_COMPOSE_FILE="${INSTALL_DIR}/docker-compose.yml"
   RUNTIME_COMPOSE_ENV="${INSTALL_DIR}/docker-compose.env"
-  CORE_REPO="${MN_CORE_REPO:-MirrorNeuronLab/MirrorNeuron}"
   INSTALL_VERSION="${MN_INSTALL_VERSION:-}"
   CORE_RELEASE_TAG=""
   CORE_INSTALL_VERSION="${MN_CORE_VERSION:-}"
@@ -5603,8 +5103,8 @@ run_install_binary() {
   CORE_IMAGE="${MN_CORE_IMAGE:-}"
   CORE_GAR_PROJECT="${MN_CORE_GAR_PROJECT:-$MN_DEFAULT_CORE_GAR_PROJECT}"
   CORE_GAR_LOCATION="${MN_CORE_GAR_LOCATION:-$MN_DEFAULT_CORE_GAR_LOCATION}"
-  CORE_GAR_DOCKER_REPOSITORY="${MN_CORE_GAR_DOCKER_REPOSITORY:-$MN_DEFAULT_CORE_GAR_DOCKER_REPOSITORY}"
-  CORE_GAR_DOCKER_IMAGE_NAME="${MN_CORE_GAR_DOCKER_IMAGE_NAME:-$MN_DEFAULT_CORE_GAR_DOCKER_IMAGE_NAME}"
+  CORE_GAR_REPOSITORY="${MN_CORE_GAR_DOCKER_REPOSITORY:-$MN_DEFAULT_CORE_GAR_DOCKER_REPOSITORY}"
+  CORE_GAR_IMAGE_NAME="${MN_CORE_GAR_DOCKER_IMAGE_NAME:-$MN_DEFAULT_CORE_GAR_DOCKER_IMAGE_NAME}"
   MN_PACKAGE_VERSION=""
   MN_PYTHON_SDK_PACKAGE_VERSION=""
   MEMBRANE_DIR="${MN_MEMBRANE_DIR:-${INSTALL_DIR}/Membrane}"
@@ -5622,13 +5122,9 @@ run_install_binary() {
   MN_HOST_SHARED_STORAGE_ROOT="${MN_HOST_SHARED_STORAGE_ROOT:-${MN_HOST_SHARED_ARTIFACT_ROOT:-${MN_HOST_HOME_DIR}/shared}}"
   MN_SYNCTHING_ENABLED="${MN_SYNCTHING_ENABLED:-auto}"
   MN_SYNCTHING_IMAGE="${MN_SYNCTHING_IMAGE:-$MN_DEFAULT_SYNCTHING_IMAGE}"
-  MN_SYNCTHING_GUI_PORT="${MN_SYNCTHING_GUI_PORT:-58384}"
-  MN_SYNCTHING_SYNC_PORT="${MN_SYNCTHING_SYNC_PORT:-22000}"
   MN_SYNCTHING_RESCAN_INTERVAL_SECONDS="${MN_SYNCTHING_RESCAN_INTERVAL_SECONDS:-3600}"
   MN_BLUEPRINT_PYTHON_ENVS_DIR="${MN_BLUEPRINT_PYTHON_ENVS_DIR:-}"
   MN_HOST_OPENSHELL_STATE_DIR="${MN_HOST_OPENSHELL_STATE_DIR:-${INSTALL_DIR}/openshell-state}"
-  MN_DYNAMIC_REDIS_PORT_START="${MN_DYNAMIC_REDIS_PORT_START:-56379}"
-  MN_DYNAMIC_REDIS_PORT_END="${MN_DYNAMIC_REDIS_PORT_END:-56478}"
   INSTALL_METADATA_FILE="${INSTALL_DIR}/install_metadata.json"
   MN_MANAGED_PYTHON="${MN_MANAGED_PYTHON:-1}"
   MN_MANAGED_PYTHON_VERSION="${MN_MANAGED_PYTHON_VERSION:-$MN_DEFAULT_MANAGED_PYTHON_VERSION}"
@@ -6006,16 +5502,6 @@ EOF
     fi
   }
 
-  function try_quiet() {
-    local label="$1"
-    shift
-    local log_dir="${TMPDIR:-/tmp}/mirror_neuron_install"
-    mkdir -p "$log_dir"
-    LAST_LOG_FILE="${log_dir}/${label//[^A-Za-z0-9_.-]/_}.$$.log"
-
-    "$@" >"$LAST_LOG_FILE" 2>&1
-  }
-
   function require_cmd() {
     if ! command -v "$1" >/dev/null 2>&1; then
       print_error "'$1' is required but not installed."
@@ -6286,8 +5772,8 @@ EOF
     printf '%s-docker.pkg.dev/%s/%s/%s:%s' \
       "$CORE_GAR_LOCATION" \
       "$CORE_GAR_PROJECT" \
-      "$CORE_GAR_DOCKER_REPOSITORY" \
-      "$CORE_GAR_DOCKER_IMAGE_NAME" \
+      "$CORE_GAR_REPOSITORY" \
+      "$CORE_GAR_IMAGE_NAME" \
       "$tag"
   }
 
@@ -6527,34 +6013,6 @@ PYTHON
     run_quiet "python-dependency-check" "$VENV_DIR/bin/pip" check
   }
 
-  function setup_context_engine() {
-    remove_stale_runtime_containers_for_services context-engine-model membrane-context-engine
-
-    mn_prepare_membrane_image
-    runtime_compose up -d --no-build membrane-context-engine >/dev/null
-  }
-
-  function pull_context_engine_image() {
-    local image
-    image="$(read_env_value "$RUNTIME_COMPOSE_ENV" "MN_MEMBRANE_ENGINE_IMAGE")"
-    [ -n "$image" ] || image="$(read_env_value "$RUNTIME_COMPOSE_ENV" "ENGINE_IMAGE")"
-    [ -n "$image" ] || {
-      print_error "Membrane context-engine image is not configured."
-      return 1
-    }
-    case "$image" in
-    us-central1-docker.pkg.dev/mirrorneuron-public-packages/*)
-      if ! mn_pull_public_gar_image "$image"; then
-        print_error "Could not pull the public Membrane image from Google Artifact Registry."
-        return 1
-      fi
-      ;;
-    *)
-      runtime_compose pull membrane-context-engine
-      ;;
-    esac
-  }
-
   function compose_profiles() {
     local profiles=()
     [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] && profiles+=("context")
@@ -6711,103 +6169,6 @@ PYTHON
     esac
   }
 
-  function read_env_value() {
-    local file="$1"
-    local key="$2"
-    [ -f "$file" ] || return 0
-    awk -F= -v key="$key" '$1 == key {print substr($0, index($0, "=") + 1); exit}' "$file"
-  }
-
-  function redis_probe_host() {
-    case "${1:-}" in
-    "" | 0.0.0.0 | :: | localhost) printf '127.0.0.1' ;;
-    *) printf '%s' "$1" ;;
-    esac
-  }
-
-  function redis_container_owns_port() {
-    local port="$1"
-    podman port mirror-neuron-redis 6379/tcp 2>/dev/null | awk -F: -v port="$port" '$NF == port {found=1} END {exit found ? 0 : 1}'
-  }
-
-  function redis_port_available() {
-    local host="$1"
-    local port="$2"
-    local probe_host
-    probe_host="$(redis_probe_host "$host")"
-
-    if redis_container_owns_port "$port"; then
-      return 0
-    fi
-    if (echo >"/dev/tcp/${probe_host}/${port}") >/dev/null 2>&1; then
-      return 1
-    fi
-    return 0
-  }
-
-  function resolve_redis_port() {
-    local bind_host="$1"
-    local persisted_port="$2"
-    local candidate
-
-    if [ -n "${MN_REDIS_PORT:-}" ]; then
-      candidate="$MN_REDIS_PORT"
-      if ! [[ "$candidate" =~ ^[0-9]+$ ]] || [ "$candidate" -lt 1 ] || [ "$candidate" -gt 65535 ]; then
-        print_error "MN_REDIS_PORT must be a TCP port between 1 and 65535."
-        exit 1
-      fi
-      if ! redis_port_available "$bind_host" "$candidate"; then
-        print_error "Redis port ${candidate} is already in use."
-        exit 1
-      fi
-      printf '%s\n' "$candidate"
-      return 0
-    fi
-
-    if [[ "$persisted_port" =~ ^[0-9]+$ ]] &&
-      [ "$persisted_port" -ge "$MN_DYNAMIC_REDIS_PORT_START" ] &&
-      [ "$persisted_port" -le "$MN_DYNAMIC_REDIS_PORT_END" ] &&
-      redis_port_available "$bind_host" "$persisted_port"; then
-      printf '%s\n' "$persisted_port"
-      return 0
-    fi
-
-    for candidate in $(seq "$MN_DYNAMIC_REDIS_PORT_START" "$MN_DYNAMIC_REDIS_PORT_END"); do
-      if redis_port_available "$bind_host" "$candidate"; then
-        printf '%s\n' "$candidate"
-        return 0
-      fi
-    done
-
-    print_error "No Redis port is available in ${MN_DYNAMIC_REDIS_PORT_START}-${MN_DYNAMIC_REDIS_PORT_END}."
-    exit 1
-  }
-
-  function resolve_docker_network_external() {
-    local network_name="$1"
-    local configured="${MN_DOCKER_NETWORK_EXTERNAL:-}"
-    local labels compose_project compose_network
-
-    if [ -n "$configured" ]; then
-      printf '%s\n' "$configured"
-      return 0
-    fi
-
-    if ! labels="$(podman network inspect -f '{{ index .Labels "com.docker.compose.project" }}|{{ index .Labels "com.docker.compose.network" }}' "$network_name" 2>/dev/null)"; then
-      printf 'false\n'
-      return 0
-    fi
-
-    compose_project="${labels%%|*}"
-    compose_network="${labels#*|}"
-    if [ "$compose_project" = "mirror-neuron" ] && [ "$compose_network" = "runtime" ]; then
-      printf 'false\n'
-    else
-      print_warning "Podman network ${network_name} already exists outside this Compose project; reusing it as an external network."
-      printf 'true\n'
-    fi
-  }
-
   function ensure_runtime_host_directory() {
     local path="$1"
     local description="$2"
@@ -6851,7 +6212,7 @@ PYTHON
     api_host="${MN_API_HOST:-localhost}"
     litellm_gateway_bind_host="${MN_LITELLM_GATEWAY_BIND_HOST:-0.0.0.0}"
     network_name="${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
-    network_external="$(resolve_docker_network_external "$network_name")"
+    network_external="$(mn_runtime_network_external "$network_name")"
     network_token="$(resolve_network_token)"
     redis_password="$(resolve_redis_password "mirror_neuron_password_admin")"
     mn_cookie="$(resolve_mn_cookie)"
@@ -6892,8 +6253,6 @@ MN_HOST_BLOB_STORE_DIR=${MN_HOST_BLOB_STORE_DIR}
 MN_HOST_SHARED_STORAGE_ROOT=${MN_HOST_SHARED_STORAGE_ROOT}
 MN_SYNCTHING_ENABLED=${MN_SYNCTHING_ENABLED}
 MN_SYNCTHING_IMAGE=${MN_SYNCTHING_IMAGE}
-MN_SYNCTHING_GUI_PORT=${MN_SYNCTHING_GUI_PORT}
-MN_SYNCTHING_SYNC_PORT=${MN_SYNCTHING_SYNC_PORT}
 MN_SYNCTHING_RESCAN_INTERVAL_SECONDS=${MN_SYNCTHING_RESCAN_INTERVAL_SECONDS}
 MN_BLUEPRINT_PYTHON_ENVS_DIR=${MN_BLUEPRINT_PYTHON_ENVS_DIR}
 MN_HOST_OPENSHELL_STATE_DIR=${MN_HOST_OPENSHELL_STATE_DIR}
@@ -6998,75 +6357,6 @@ EOF
     chmod 600 "$RUNTIME_COMPOSE_ENV" 2>/dev/null || true
   }
 
-  function runtime_container_name_for_service() {
-    case "$1" in
-    redis) echo "mirror-neuron-redis" ;;
-    web-ui) echo "mirror-neuron-web-ui" ;;
-    openshell) echo "openshell-cluster-openshell" ;;
-    context-engine-model) echo "mirror-neuron-context-engine-model" ;;
-    membrane-context-engine) echo "mirror-neuron-context-engine" ;;
-    mirror-neuron-core) echo "mirror-neuron-core" ;;
-    *) return 1 ;;
-    esac
-  }
-
-  function remove_stale_runtime_container() {
-    local name="$1"
-    local project
-
-    if ! podman container inspect "$name" >/dev/null 2>&1; then
-      return 0
-    fi
-
-    project="$(podman container inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' "$name" 2>/dev/null || true)"
-    if [ "$project" = "mirror-neuron" ]; then
-      return 0
-    fi
-
-    podman rm -f "$name" >/dev/null 2>&1 || true
-  }
-
-  function remove_stale_runtime_containers_for_services() {
-    local service name
-    for service in "$@"; do
-      name="$(runtime_container_name_for_service "$service" || true)"
-      [ -n "$name" ] && remove_stale_runtime_container "$name"
-    done
-    return 0
-  }
-
-  function prepare_runtime_compose_sidecars() {
-    RUNTIME_COMPOSE_SIDECARS=()
-    [ "$INSTALL_REDIS" = "Y" ] && RUNTIME_COMPOSE_SIDECARS+=("redis")
-    grep -q '^  mn-native-sdk-grpc:' "$RUNTIME_COMPOSE_FILE" 2>/dev/null && RUNTIME_COMPOSE_SIDECARS+=("mn-native-sdk-grpc")
-    grep -q '^  mn-litellm-proxy:' "$RUNTIME_COMPOSE_FILE" 2>/dev/null && RUNTIME_COMPOSE_SIDECARS+=("mn-litellm-proxy")
-    if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
-      RUNTIME_COMPOSE_SIDECARS+=("membrane-context-engine")
-    fi
-    if [ "${#RUNTIME_COMPOSE_SIDECARS[@]}" -gt 0 ]; then
-      remove_stale_runtime_containers_for_services context-engine-model "${RUNTIME_COMPOSE_SIDECARS[@]}"
-
-      if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
-        mn_prepare_membrane_image
-      fi
-    fi
-  }
-
-  function start_runtime_compose_sidecars() {
-    prepare_runtime_compose_sidecars
-    if [ "${#RUNTIME_COMPOSE_SIDECARS[@]}" -gt 0 ]; then
-      mn_run_runtime_compose up -d --no-build "${RUNTIME_COMPOSE_SIDECARS[@]}"
-    fi
-  }
-
-  function shell_escape_value() {
-    printf '%q' "$1"
-  }
-
-  function add_shell_profile_exports() {
-    mn_write_shell_environment
-  }
-
   if [ "$MN_RUNTIME_ONLY" = "Y" ]; then
     for arg in "${MN_INSTALL_ARGS[@]:-}"; do
       case "$arg" in
@@ -7083,7 +6373,6 @@ EOF
   fi
   INSTALL_PYTHON_SDK="Y"
 
-  mn_prepare_runtime_podman || exit 1
   mn_prepare_installer_paths
   print_header
 
@@ -7104,16 +6393,6 @@ EOF
 
   validate_selections
 
-  mn_print_install_summary
-  mn_print_stage "Checking requirements"
-  require_cmd curl
-  if should_install_python_packages; then
-    mn_ensure_python_package_index_file
-    resolve_python_runtime
-    ensure_pip
-  fi
-  print_step "System ready."
-
   if [ "$MN_EXISTING_INSTALL" = "Y" ]; then
     if [ "$MN_INSTALL_RESET" = "Y" ]; then
       REINSTALL="Y"
@@ -7125,11 +6404,21 @@ EOF
       print_warning "Installation cancelled."
       exit 0
     fi
-    echo "" >&3
-    mn_remove_existing_install_paths
   fi
 
-  mn_print_stage "Installing components"
+  mn_print_install_summary
+  mn_report_system
+  require_cmd curl
+  mn_install_client_stage
+
+  mn_begin_runtime_install || return 1
+  if should_install_python_packages; then
+    mn_ensure_python_package_index_file
+    resolve_python_runtime
+    ensure_pip
+  fi
+  if [ "$MN_EXISTING_INSTALL" = "Y" ]; then mn_remove_existing_install_paths; fi
+
   print_step "Installing MirrorNeuron Core ${CORE_INSTALL_VERSION}"
   (install_core_from_release) &
   spinner $! "Installing Core runtime"
@@ -7145,33 +6434,7 @@ EOF
   fi
 
   mn_prepare_native_web_assets
-  mn_install_native_clients
   mn_configure_installed_runtime
-  mn_print_stage "Configuring commands and services"
-  if [ "$INSTALL_REDIS" = "Y" ] || [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
-    if [ "$START_NOW" = "Y" ]; then
-      prepare_runtime_compose_sidecars
-      print_detail "Podman services are prepared; automatic startup uses the installed runtime lifecycle entry point."
-    else
-      if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
-        mn_prepare_membrane_image
-      fi
-      print_detail "Services are configured and remain stopped (--no-start)."
-    fi
-  fi
-
-  print_step "Configuring shell environment"
-  if [ "$INSTALL_CLI" = "Y" ] || [ "$INSTALL_API" = "Y" ]; then
-    add_shell_profile_exports "Y"
-  else
-    add_shell_profile_exports "N"
-  fi
-
-  if [ "$START_NOW" = "Y" ]; then
-    mn_print_stage "Starting MirrorNeuron services"
-    mn_run_runtime_start_command "$BIN_DIR/mn-runtime" start || return 1
-    print_step "MirrorNeuron services are running."
-  fi
 
   print_detail "SDK ${PYTHON_SDK_INSTALL_VERSION}; CLI ${CLI_INSTALL_VERSION}; API ${API_INSTALL_VERSION}; Web UI ${WEB_UI_INSTALL_VERSION}"
   if [ "$INSTALL_CLI" = "Y" ]; then
@@ -7180,6 +6443,7 @@ EOF
   if [ "$INSTALL_API" = "Y" ]; then
     print_detail "API: mn-api"
   fi
+  mn_finish_runtime_install
   mn_print_install_complete
 }
 

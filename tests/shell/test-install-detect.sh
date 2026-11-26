@@ -39,7 +39,13 @@ chmod +x "$TEST_ROOT/bin/podman"
 
 assert_output '{"installed":false,"install_role":"full","running":false,"runtime_ready":false,"status":"not_installed","version":null,"podman_installed":true,"podman_running":true}'
 
-mkdir -p "$TEST_ROOT/home/bin"
+mkdir -p "$TEST_ROOT/home/bin" "$TEST_ROOT/home/client-releases/fixture/bin"
+printf '#!/usr/bin/env bash\nexit 0\n' >"$TEST_ROOT/home/client-releases/fixture/bin/mn"
+chmod +x "$TEST_ROOT/home/client-releases/fixture/bin/mn"
+ln -s client-releases/fixture "$TEST_ROOT/home/client-current"
+ln -s ../client-current/bin/mn "$TEST_ROOT/home/bin/mn"
+assert_output '{"installed":false,"install_role":"full","running":false,"runtime_ready":false,"status":"not_installed","version":null,"podman_installed":true,"podman_running":true}'
+
 cat >"$TEST_ROOT/home/bin/mn-runtime" <<'EOF'
 #!/usr/bin/env bash
 case "$*" in

@@ -42,22 +42,18 @@ This specification applies only to deployment assets in this repository.
 
 Flags shown by each script's `--help` are the exact command contract.
 
-`install.sh --start-docker` starts an existing Docker installation and exits
-before installation path preparation, downloads, reset, or runtime setup. It is
-idempotent when the selected daemon is accessible. Startup supports Docker
-Desktop on macOS and Windows Bash, and system/user services on Linux. It never
-installs Docker, changes Docker contexts, or enables services at boot. Remote
-endpoints, unsupported service managers, startup failures, and readiness timeouts
-fail with an actionable next step. System-service privilege escalation is
-non-interactive. Detection and installation options cannot be combined with it.
+`install.sh --start-podman` starts the existing Podman machine or Linux API
+socket and exits before installation path preparation. It leaves an already
+reachable connection in place. The legacy `--start-docker` flag invokes the
+same Podman startup. Run installation or detection as a separate command.
 
 `install.sh --detect-only` is a read-only query for integrations. It prints one
-JSON object containing `installed`, `running`, `runtime_ready`, `status`, the
-installed Core `version`, `docker_installed`, and `docker_running`, and exits
+JSON object containing `installed`, `install_role`, `running`, `runtime_ready`,
+`status`, the installed Core `version`, `podman_installed` and `podman_running`, and exits
 without preparing paths, downloading assets, or changing runtime state.
-`runtime_ready` is true only when the installed `mn runtime status` command
-succeeds. If an installation is present but Docker cannot be queried, `status`
-is `docker_not_running` and `running` is JSON `null`.
+`runtime_ready` is true only when the installed `mn-runtime status` command
+succeeds. If an installation is present but Podman cannot be queried, `status`
+is `podman_not_running` and `running` is JSON `null`.
 
 ## Install Modes
 
@@ -79,13 +75,14 @@ path is absent, it clones the Rust `main` branch into the workspace. An
 occupied path must already contain the Rust manifest. During a local reset,
 the installer prepares these prerequisites after confirmation and before cleanup.
 
-Runtime modes check Podman before preparing installed state. Linux uses its
-native API socket. macOS uses the API socket inside the Podman machine.
+Full installations build or download the native client before probing or
+provisioning Podman. Runtime-only installs start with runtime preparation.
+Linux uses its native API socket. macOS uses the API socket inside the Podman machine.
 Before reset cleanup, the installer resolves `PODMAN_HOST_SOCKET` or the
 engine-reported socket to an absolute bind path, accepting a `unix://` prefix.
 The installer installs the Podman CLI and its platform dependencies on the
 host. The Compose provider runs in an image and Core includes the
-checksum-pinned remote CLI. Client-only installations require Python tooling.
+checksum-pinned remote CLI. Client-only installations use the native Rust commands.
 
 All modes use the single `mn runtime start` contract. There is no worker-only
 runtime, and worker-only installer flags are rejected.
@@ -93,7 +90,9 @@ runtime, and worker-only installer flags are rejected.
 All modes leave fresh Blueprint Web UI and automatic port ranges for the
 runtime to select. Reinstall preserves each saved range and its allocation
 policy. Explicit environment values override the saved range and pin it.
-The installer reports a Docker TCP port conflict and retains the startup log
+Fresh installations leave Syncthing port selection to the runtime unless the
+operator sets `MN_SYNCTHING_GUI_PORT` or `MN_SYNCTHING_SYNC_PORT`.
+The installer reports TCP port conflicts and retains the startup log
 when a non-interactive startup fails.
 
 Every runtime install mode enables Wasmtime as the built-in sandbox. The
@@ -271,8 +270,10 @@ code must quote values, handle spaces in paths, and avoid undocumented global
 tools. Non-interactive execution is line-oriented and deterministic; color is
 TTY-only and disabled by `NO_COLOR`.
 
-Installer output presents one resolved plan, numbered stages, and one completion
-message after all requested work succeeds. The primary `Next:` command includes
+Installer output presents one resolved plan, detected host information, and
+numbered stages for the selected installation role. It confirms client
+installation, runtime installation and runtime startup separately. A successful
+installation prints one completion message. The primary `Next:` command includes
 the environment reload when needed. An installation that starts a runtime ends
 with the connect command for its advertised gRPC endpoint. Reinstalling a
 connected client preserves its credential and offers `mn node list` as the next
@@ -281,7 +282,7 @@ step.
 `--help` shows common choices; `--help-all` includes the selected mode's complete
 reference. `--mode MODE --help` retains its mode-specific reference. Help does
 not prepare an installation or acquire its lifecycle lock. `--verbose` exposes
-substeps, Docker output, and local editable Python build diagnostics. Default
+substeps, Podman output, and local editable Python build diagnostics. Default
 failures identify retained logs and keep nonzero exit status.
 TTY progress may animate while waiting for background work; redirected output,
 `NO_COLOR` (including an empty value), and `TERM=dumb` contain no ANSI controls.
