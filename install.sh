@@ -2386,7 +2386,7 @@ print(base)' "$VENV_DIR"
 function mn_require_cargo() {
   local cargo_bin="${CARGO_HOME:-$HOME/.cargo}/bin"
   if command -v cargo >/dev/null; then return 0; fi
-  if [ -x "$cargo_bin/cargo" ]; then
+  if [ -f "$cargo_bin/cargo" ] && [ -x "$cargo_bin/cargo" ]; then
     export PATH="$PATH:$cargo_bin"
     return 0
   fi
