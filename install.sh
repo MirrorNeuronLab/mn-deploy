@@ -92,7 +92,8 @@ MN_DEFAULT_INSTALL_VERSION="${MN_DEFAULT_INSTALL_VERSION:-v1.4.0}"
 # Support snapshots can advance independently when repairing component packages.
 MN_DEFAULT_INSTALL_SUPPORT_VERSION="${MN_DEFAULT_INSTALL_SUPPORT_VERSION:-v2.0.0}"
 MN_INSTALL_VERSION="${MN_INSTALL_VERSION:-}"
-MN_INSTALL_SCRIPT_NAME="$(basename "${MN_INSTALL_STREAM_NAME:-$0}")"
+MN_INSTALL_SCRIPT_NAME="$(basename "$0")"
+if [ -z "${BASH_SOURCE[0]:-}" ] || [ -n "${MN_INSTALL_STREAM_NAME:-}" ]; then MN_INSTALL_SCRIPT_NAME=install.sh; fi
 MN_INSTALL_ARGS=()
 
 # Keep the release entrypoint self-contained for curl | bash.
@@ -280,7 +281,7 @@ OtterDesk Installer
 
 Usage: ./$MN_INSTALL_SCRIPT_NAME [options]
 
-Install the client and a local Podman runtime, or select either part.
+Install the client and a local Podman runtime from released packages, or select either part.
 Component choices use defaults. sudo can prompt in a terminal to install Podman.
 
 Common options:
@@ -318,7 +319,7 @@ Installation controls:
   --start-podman       Start existing Podman only; install nothing.
   --detect-only        Print installation status as JSON; make no changes.
   --reset              Permanently clear existing data; always requires typing YES.
-  --help-all           Show this reference for the selected mode; make no changes.
+  --help-all           Show the full release installer reference.
   MN_HOME=/path        Override the installation home (runtime default: ~/.mn).
 
 Component options follow. Use --interactive to choose components.
@@ -2102,34 +2103,6 @@ function mn_ensure_python_package_index_file() {
   fi
 }
 
-# Component rows are shared by local and GitHub source installs. Binary mode
-# uses the same sdk installer group for versioned wheel requirements.
-function mn_sdk_component_rows() {
-  local PACKAGE_INDEX_FILE="${MN_PACKAGE_INDEX_FILE:-${PACKAGE_INDEX_FILE:-$(mn_script_dir)/package-index/python-packages.toml}}"
-  mn_ensure_python_package_index_file
-  if [ "$#" -eq 0 ]; then set -- sdk; fi
-  "$MN_PYTHON_BIN" - "$PACKAGE_INDEX_FILE" "$@" <<'PYCODE'
-import sys, tomllib
-from pathlib import Path
-packages = tomllib.loads(Path(sys.argv[1]).read_text())["packages"]
-groups = set(sys.argv[2:])
-for package in packages:
-    name = package["name"]
-    if groups.isdisjoint(package.get("installer_groups", [])):
-        continue
-    path = package["path"]
-    # Component names need not share a prefix (for example mn-blueprint-blocks).
-    if path == "mn-python-sdk":
-        continue
-    sdk_component = path.startswith("mn-python-sdk/packages/") and ".." not in Path(path).parts
-    if not sdk_component:
-        raise SystemExit(f"Invalid SDK component source path: {path}")
-    extras = package.get("default_extras") or []
-    suffix = "[" + ",".join(extras) + "]" if extras else ""
-    print(f"{name}\t{path}\t{suffix}")
-PYCODE
-}
-
 # Persist node policy and endpoints. The owner starts a gateway on first use.
 function mn_openshell_plugin_env() {
   local endpoint="${OPENSHELL_GATEWAY_ENDPOINT:-}"
@@ -2314,10 +2287,8 @@ function mn_install_wasm_clients() (
   if [ "${INSTALL_CLI:-Y}" = Y ]; then
     commands+=(mn)
   fi
-  if [ "${INSTALL_API:-Y}" = Y ] || [ "${INSTALL_WEB_UI:-N}" = Y ]; then
-    if [ "${INSTALL_API:-Y}" = Y ]; then commands+=(mn-api); fi
-    if [ "${INSTALL_WEB_UI:-N}" = Y ]; then commands+=(mn-web-ui-server); fi
-  fi
+  if [ "${INSTALL_API:-Y}" = Y ]; then commands+=(mn-api); fi
+  if [ "${INSTALL_WEB_UI:-N}" = Y ]; then commands+=(mn-web-ui-server); fi
   mkdir -p "$INSTALL_DIR/bin" "$INSTALL_DIR/client-releases"
   stage="$(mktemp -d "$INSTALL_DIR/client-releases/.stage.XXXXXXXX")"
   trap 'rm -rf "$stage"' EXIT
@@ -2365,8 +2336,10 @@ function mn_install_client_stage() {
 function mn_install_web_package() {
   [ "${INSTALL_WEB_UI:-N}" = Y ] || return 0
   local source destination="$INSTALL_DIR/webui"
-  for source in "${MN_WEB_UI_DIST_DIR:-}" "$@"; do
-    [ -n "$source" ] && { [ -f "$source/dist/index.html" ] || [ -f "$source/index.html" ]; } || continue
+  for source in "$@"; do
+    if [ -z "$source" ] || { [ ! -f "$source/dist/index.html" ] && [ ! -f "$source/index.html" ]; }; then
+      continue
+    fi
     source="$(cd "$source" && pwd -P)"
     if [ -L "$destination" ] || [ ! -e "$destination" ]; then
       ln -sfn "$source" "$destination"
@@ -2931,13 +2904,6 @@ EOF
   function require_cmd() {
     if ! command -v "$1" >/dev/null 2>&1; then
       print_error "'$1' is required but not installed."
-      exit 1
-    fi
-  }
-
-  function require_file() {
-    if [ ! -f "$1" ]; then
-      print_error "$2 is required but was not found at $1."
       exit 1
     fi
   }
@@ -3845,7 +3811,7 @@ EOF
     print_step "Python component installation disabled by selection."
   fi
 
-  mn_install_web_package
+  mn_install_web_package "${MN_WEB_UI_DIST_DIR:-}"
   mn_configure_installed_runtime
 
   print_detail "SDK ${PYTHON_SDK_INSTALL_VERSION}; CLI ${CLI_INSTALL_VERSION}; API ${API_INSTALL_VERSION}; Web UI ${WEB_UI_INSTALL_VERSION}"
@@ -3908,7 +3874,7 @@ function mn_install_main() {
     --version)
       shift
       if [ "$#" -eq 0 ]; then
-        echo "install.sh: --version requires a release tag such as ${MN_DEFAULT_INSTALL_VERSION}." >&3
+        echo "$MN_INSTALL_SCRIPT_NAME: --version requires a release tag such as ${MN_DEFAULT_INSTALL_VERSION}." >&3
         print_unified_usage
         exit 1
       fi
@@ -3984,7 +3950,7 @@ function mn_install_main() {
       [ "$MN_INSTALL_HELP_REQUESTED" = "Y" ] || [ "$MN_INSTALL_VERBOSE" = "Y" ] ||
       [ "$MN_INSTALL_RESET" = "Y" ] ||
       [ "${#MN_INSTALL_ARGS[@]}" -ne 0 ]; then
-      echo "install.sh: --detect-only cannot be combined with installation options." >&3
+      echo "$MN_INSTALL_SCRIPT_NAME: --detect-only cannot be combined with installation options." >&3
       exit 1
     fi
     mn_detect_runtime

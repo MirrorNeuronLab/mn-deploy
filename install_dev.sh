@@ -353,6 +353,33 @@ function mn_stage_client_commands() {
   done
 }
 
+# Map SDK packages to their Git subdirectories for source installation.
+function mn_sdk_component_rows() {
+  local PACKAGE_INDEX_FILE="${MN_PACKAGE_INDEX_FILE:-${PACKAGE_INDEX_FILE:-$(mn_script_dir)/package-index/python-packages.toml}}"
+  mn_ensure_python_package_index_file
+  if [ "$#" -eq 0 ]; then set -- sdk; fi
+  "$MN_PYTHON_BIN" - "$PACKAGE_INDEX_FILE" "$@" <<'PYCODE'
+import sys, tomllib
+from pathlib import Path
+packages = tomllib.loads(Path(sys.argv[1]).read_text())["packages"]
+groups = set(sys.argv[2:])
+for package in packages:
+    name = package["name"]
+    if groups.isdisjoint(package.get("installer_groups", [])):
+        continue
+    path = package["path"]
+    # Component names need not share a prefix (for example mn-blueprint-blocks).
+    if path == "mn-python-sdk":
+        continue
+    sdk_component = path.startswith("mn-python-sdk/packages/") and ".." not in Path(path).parts
+    if not sdk_component:
+        raise SystemExit(f"Invalid SDK component source path: {path}")
+    extras = package.get("default_extras") or []
+    suffix = "[" + ",".join(extras) + "]" if extras else ""
+    print(f"{name}\t{path}\t{suffix}")
+PYCODE
+}
+
 run_install_github() {
   # Never let git/pip block the installer by asking for GitHub credentials.
   export GIT_TERMINAL_PROMPT="${GIT_TERMINAL_PROMPT:-0}"
@@ -724,9 +751,7 @@ Options:
   --redis / --no-redis          Enable or skip Redis Podman setup.
   --context-engine / --no-context-engine
                                 Enable or skip Membrane context engine setup.
-  --build-membrane              Local mode: build Membrane source instead of pulling GAR.
-                                Ignored in github/binary modes. Source: MN_MEMBRANE_DIR
-                                or the sibling Membrane checkout.
+  --build-membrane              Applies only to --mode local. GitHub installs use the released image.
   --openshell / --no-openshell  Allow or disable on-demand OpenShell workers.
   --syncthing / --no-syncthing  Enable or skip Syncthing shared-storage replication.
   --start / --no-start          Start or skip starting MirrorNeuron after install.
@@ -919,13 +944,6 @@ EOF
     else
       git clone --depth 1 "$url" "$target"
     fi
-  }
-
-  function should_install_python_packages() {
-    [ "$INSTALL_PYTHON_SDK" = "Y" ] ||
-      [ "$INSTALL_CLI" = "Y" ] ||
-      [ "$INSTALL_API" = "Y" ] ||
-      [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]
   }
 
   function validate_selections() {
@@ -1399,6 +1417,7 @@ EOF
     fi
     START_NOW=$(ask "Start the runtime after installation?" "$START_NOW")
   fi
+  INSTALL_PYTHON_SDK=Y
   validate_selections
 
   mn_print_install_summary
@@ -1433,34 +1452,30 @@ EOF
   spinner $! "Cloning and building Core (Podman image mirror-neuron-core)"
   write_runtime_compose_files
 
-  if should_install_python_packages; then
-    print_step "Installing selected Python components from GitHub"
-    (
-      "$MN_PYTHON_BIN" -m venv "$VENV_DIR" >/dev/null 2>&1
-      run_quiet "pip-upgrade" "$VENV_DIR/bin/pip" install --upgrade pip
-      # The Git runtime depends on the worker SDK even when only a surface was
-      # explicitly selected. Use the requested ref in each source repository.
-      local sdk_reference
-      sdk_reference="git+https://github.com/MirrorNeuronLab/mn-python-sdk.git$(github_ref_suffix)"
-      local -a sdk_requirements=("mirrorneuron-python-sdk @ $sdk_reference") sdk_groups=(sdk)
-      local package_name package_path package_extras component_rows
-      component_rows="$(mn_sdk_component_rows "${sdk_groups[@]}")" || return 1
-      while IFS=$'\t' read -r package_name package_path package_extras; do
-        [ -n "$package_name" ] || continue
-        sdk_requirements+=("${package_name}${package_extras} @ ${sdk_reference}#subdirectory=${package_path#mn-python-sdk/}")
-      done <<<"$component_rows"
-      run_quiet "install-mn-python-sdk-github" "$VENV_DIR/bin/pip" install "${sdk_requirements[@]}"
-      run_quiet "install-mn-runtime-github" "$VENV_DIR/bin/pip" install "mirrorneuron-runtime @ git+https://github.com/MirrorNeuronLab/mn-python-sdk.git$(github_ref_suffix)#subdirectory=packages/runtime"
-      if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
-        run_quiet "install-membrane-python-sdk-github" "$VENV_DIR/bin/pip" install "mirrorneuron-membrane-python-sdk @ git+$(context_engine_git_url)$(github_ref_suffix)#subdirectory=mn-context-engine-python-sdk"
-      fi
-    ) &
-    spinner $! "Setting up virtualenv and installing Python packages"
-  else
-    print_step "Python component installation disabled by selection."
-  fi
+  print_step "Installing the runtime and selected Python components from GitHub"
+  (
+    "$MN_PYTHON_BIN" -m venv "$VENV_DIR" >/dev/null 2>&1
+    run_quiet "pip-upgrade" "$VENV_DIR/bin/pip" install --upgrade pip
+    # The Git runtime depends on the worker SDK even when only a surface was
+    # explicitly selected. Use the requested ref in each source repository.
+    local sdk_reference
+    sdk_reference="git+https://github.com/MirrorNeuronLab/mn-python-sdk.git$(github_ref_suffix)"
+    local -a sdk_requirements=("mirrorneuron-python-sdk @ $sdk_reference")
+    local package_name package_path package_extras component_rows
+    component_rows="$(mn_sdk_component_rows sdk)" || return 1
+    while IFS=$'\t' read -r package_name package_path package_extras; do
+      [ -n "$package_name" ] || continue
+      sdk_requirements+=("${package_name}${package_extras} @ ${sdk_reference}#subdirectory=${package_path#mn-python-sdk/}")
+    done <<<"$component_rows"
+    run_quiet "install-mn-python-sdk-github" "$VENV_DIR/bin/pip" install "${sdk_requirements[@]}"
+    run_quiet "install-mn-runtime-github" "$VENV_DIR/bin/pip" install "mirrorneuron-runtime @ git+https://github.com/MirrorNeuronLab/mn-python-sdk.git$(github_ref_suffix)#subdirectory=packages/runtime"
+    if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
+      run_quiet "install-membrane-python-sdk-github" "$VENV_DIR/bin/pip" install "mirrorneuron-membrane-python-sdk @ git+$(context_engine_git_url)$(github_ref_suffix)#subdirectory=mn-context-engine-python-sdk"
+    fi
+  ) &
+  spinner $! "Setting up virtualenv and installing Python packages"
 
-  mn_install_web_package "$INSTALL_DIR/webui"
+  mn_install_web_package "${MN_WEB_UI_DIST_DIR:-}" "$INSTALL_DIR/webui"
   mn_configure_installed_runtime
 
   if [ "$INSTALL_CLI" = "Y" ]; then
@@ -2535,11 +2550,11 @@ EOF
   fi
   trap mn_reset_release_lock EXIT
 
-  mn_install_web_package "$WEB_UI_DIR" "$INSTALL_DIR/webui"
+  mn_install_web_package "${MN_WEB_UI_DIST_DIR:-}" "$WEB_UI_DIR" "$INSTALL_DIR/webui"
   mn_configure_installed_runtime
 
   print_detail "Core image: mirror-neuron-core:latest (${CORE_DIR})"
-  print_detail "CLI/API: native builds from the local workspace"
+  print_detail "CLI/API: Wasm builds from the local workspace"
   print_detail "State: ${INSTALL_DIR}"
   print_detail "Cookie: ${INSTALL_DIR}/erlang.cookie"
   if [ "$INSTALL_WEB_UI" = "Y" ]; then

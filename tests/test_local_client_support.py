@@ -139,6 +139,7 @@ done
 """)
     cargo.chmod(0o755)
     for name, source in {
+        "wasm32-wasip2-clang": "#!/bin/sh\nexit 0\n",
         "wasmtime": """#!/bin/sh
 case "$*" in *--print-launcher) printf '#!/bin/sh\\nexit 0\\n';; *) echo 'wasmtime 51.0.0';; esac
 """,
@@ -180,7 +181,6 @@ exit 1
                 "MN_HOME": str(runtime),
                 "PATH": str(tools),
                 "CARGO_HOME": str(cargo_home),
-                "CC_wasm32_wasip2": str(cargo),
                 "SHELL": "/bin/sh",
                 "TMPDIR": str(tmp_path),
                 "MN_TEST_COMMANDS": str(commands),

@@ -31,7 +31,7 @@ if [[ -z $sdk ]] && compiler=$(command -v wasm32-wasip2-clang); then
   candidate=$(dirname "$(dirname "$compiler")")
   if check_sdk "$candidate"; then sdk=$candidate; fi
 fi
-if [[ -z $sdk && -x /opt/wasi-sdk/bin/clang ]]; then sdk=/opt/wasi-sdk; fi
+if [[ -z $sdk ]] && check_sdk /opt/wasi-sdk; then sdk=/opt/wasi-sdk; fi
 if [[ -z $sdk ]]; then
   host="$(uname -s)/$(uname -m)"
   # SHA-256 digests from the upstream wasi-sdk-34 release assets.

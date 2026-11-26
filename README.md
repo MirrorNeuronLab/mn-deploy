@@ -75,6 +75,10 @@ WASI_SDK_PATH=$(./scripts/preapare_dev.sh) && export WASI_SDK_PATH
 ./scripts/artifacts.sh clients /path/to/dist --wasm-only
 ```
 
+This writes `mn.wasm`, `mn-api.wasm`, `mn-client-support.wasm`, and their
+checksums. Run `./scripts/publish.sh clients --version vX.Y.Z` to preview the GAR
+packages. Add `--apply` to publish and verify them.
+
 The developer `setup.sh` shortcut builds the same clients and exposes them through
 `~/.local/bin`. An offline release install accepts `MN_CLIENT_DIST_DIR=/path/to/dist`
 and `MN_WASMTIME_BIN=/path/to/wasmtime`.
