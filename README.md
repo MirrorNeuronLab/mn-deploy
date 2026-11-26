@@ -18,7 +18,8 @@ command for connecting to that runtime from another machine.
 ./install.sh --verbose                  # Substeps, versions, paths and tool output
 ```
 
-Default runs are non-interactive. Prompts accept `y`/`n`, retry invalid input,
+Component choices use defaults unless you pass `--interactive`.
+Component prompts accept `y`/`n`, retry invalid input,
 and report an error on missing input. `--reset` still requires the exact `YES`
 confirmation even with `--yes`. Terminal progress shows activity and elapsed
 time; redirected output, `TERM=dumb`, and `NO_COLOR` use stable plain lines.
@@ -180,9 +181,11 @@ installer does not run the upstream host package installer.
 
 Runtime installation automatically installs the Podman CLI if it is missing.
 With `--reset`, setup runs after you type `YES` and before cleanup begins.
-If the package manager needs a sudo password, run `sudo -v` first or use
-`--interactive`. On Linux the installer starts the native API socket for the
-invoking user. On macOS it uses a Podman machine for workloads. The Compose
+If the package manager needs administrator access, sudo can prompt for your
+password in the terminal. Unattended runs and explicit `--yes` use non-interactive
+sudo. On Linux the installer starts the native API socket for the invoking user.
+On macOS Homebrew installs the Podman formula without a confirmation prompt,
+and workloads run in a Podman machine. The Compose
 provider runs in a pinned container. Client-only installation requires Python tooling.
 
 Start an existing engine or machine with:
@@ -445,8 +448,8 @@ see [Google's npm package contract](https://docs.cloud.google.com/artifact-regis
   Its local job-UI proxy resolves the authenticated job handle and forwards
   only that job's declared dashboard and companion ports; it never redirects a
   browser to a selected remote node's LAN address.
-- Installs are non-interactive by default and use yes/default selections. Use
-  `--interactive` for the prompt-driven setup flow.
+- Installs use default component selections. Pass `--interactive` to choose
+  components individually.
 - Use `./install.sh` or `./install.sh --mode binary` for release/package installs,
   `./install.sh --mode github` for repository installs, or `./install.sh --mode local`
   from a monorepo checkout for editable local installs.

@@ -2,7 +2,9 @@
 
 import os
 from pathlib import Path
+import shutil
 import subprocess
+import tty
 
 import pytest
 
@@ -20,7 +22,9 @@ case "$name:$*" in
   'podman:machine inspect') test "$TEST_MACHINE" = yes;;
   'podman:machine start') test "$TEST_FAIL" != yes && touch "$TEST_ROOT/started";;
   'podman:machine init') echo "provider=$CONTAINERS_MACHINE_PROVIDER" >> "$TEST_LOG";;
-  'systemctl:'*|'brew:install podman'|'apt-get:update'|'apt-get:install -y --no-install-recommends podman') ;;
+  'brew:install --formula podman') test "$HOMEBREW_NO_ASK" = 1 && test -z "$HOMEBREW_ASK";;
+  'systemctl:'*|'apt-get:update'|'apt-get:install -y --no-install-recommends podman') ;;
+  'ps:'*) echo 'Wed Nov 25 12:00:00 2026';;
   *) exit 95;;
 esac
 """
@@ -38,6 +42,7 @@ def invoke(
     connection="",
     bootstrap=False,
     package=False,
+    stdin=subprocess.DEVNULL,
 ):
     folder = tmp_path / "bin"
     folder.mkdir()
@@ -47,14 +52,19 @@ def invoke(
         "systemctl",
         "brew",
         "apt-get",
+        "ps",
+        "sudo",
         *(["podman"] if installed else []),
     ]:
         path = folder / exe
         path.write_text(FAKE)
         path.chmod(0o755)
+    # Keep a missing Podman and the sudo probe isolated from the host.
+    for exe in ("basename", "cat", "chmod", "dirname", "mkdir", "rm", "rmdir", "touch"):
+        (folder / exe).symlink_to(shutil.which(exe))
     env = {
         **os.environ,
-        "PATH": f"{folder}:/usr/bin:/bin",
+        "PATH": str(folder),
         "HOME": str(tmp_path),
         "MN_HOME": str(tmp_path / "runtime"),
         "TEST_LOG": str(tmp_path / "calls"),
@@ -65,6 +75,8 @@ def invoke(
         "TEST_MACHINE": "yes" if machine else "no",
         "TEST_FAIL": "yes" if fail else "no",
         "CONTAINER_HOST": connection,
+        "HOMEBREW_ASK": "1",
+        "HOMEBREW_NO_ASK": "",
     }
     if bootstrap or package:
         source = SCRIPT.read_text()
@@ -82,7 +94,15 @@ def invoke(
         ]
     else:
         cmd = ["/bin/bash", str(SCRIPT), *args]
-    result = subprocess.run(cmd, env=env, text=True, capture_output=True, timeout=5)
+    result = subprocess.run(
+        cmd,
+        env=env,
+        stdin=stdin,
+        text=True,
+        capture_output=True,
+        timeout=5,
+        start_new_session=True,
+    )
     calls = tmp_path / "calls"
     assert not (tmp_path / "runtime").exists()
     return result, calls.read_text() if calls.exists() else ""
@@ -132,13 +152,13 @@ def test_native_socket_matches_owner(tmp_path, uid, expected):
 def test_start_only_reports_errors_without_installing(tmp_path, options):
     result, calls = invoke(tmp_path, "--start-podman", **options)
     assert result.returncode != 0
-    assert "machine init" not in calls and "install podman" not in calls
+    assert "machine init" not in calls and "brew install" not in calls
 
 
 @pytest.mark.parametrize(
     "host,command",
     [
-        ("Darwin", "brew install podman"),
+        ("Darwin", "brew install --formula podman"),
         ("Linux", "apt-get install -y --no-install-recommends podman"),
     ],
 )
@@ -146,3 +166,24 @@ def test_installs_only_the_podman_package(tmp_path, host, command):
     result, calls = invoke(tmp_path, host=host, uid="0", package=True)
     assert result.returncode == 0, result.stdout + result.stderr
     assert command in calls and "desktop" not in calls and "docker" not in calls
+
+
+@pytest.mark.parametrize(
+    "flags,expected",
+    [([], "sudo apt-get update"), (["--yes"], "sudo -n apt-get update")],
+)
+def test_terminal_reset_uses_selected_sudo_mode(tmp_path, flags, expected):
+    master, slave = os.openpty()
+    try:
+        tty.setraw(slave)
+        os.write(master, b"YES\n")
+        result, calls = invoke(
+            tmp_path, "--reset", *flags, host="Linux", installed=False, stdin=slave
+        )
+    finally:
+        os.close(master)
+        os.close(slave)
+    # Fake sudo records its arguments and fails before any cleanup.
+    assert expected in calls.splitlines(), result.stdout + result.stderr
+    assert result.returncode != 0
+    assert "Reset stopped before host cleanup" in result.stdout

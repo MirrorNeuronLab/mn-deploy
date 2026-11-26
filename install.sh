@@ -245,7 +245,7 @@ MirrorNeuron installer
 Usage: ./$MN_INSTALL_SCRIPT_NAME [--mode github|local|binary] [options]
 
 Install a local runtime with Podman setup, or a client for a remote node.
-Runs without prompts by default. Use --interactive to choose components.
+Component choices use defaults. sudo can prompt in a terminal to install Podman.
 
 Common options:
   --no-runtime       Client mode: CLI/API only. Home: ~/.mn-client.
@@ -253,7 +253,7 @@ Common options:
                      Binary only. Override either home with MN_HOME.
   --mode MODE        binary (default), github, or local source.
   --interactive      Choose components and startup interactively.
-  --yes, -y          Use defaults and flags without prompts (the default).
+  --yes, -y          Use component defaults and require non-interactive sudo.
   --no-start         Prepare selected services without starting them.
   --no-web-ui        Skip the Web UI.
   --version TAG      Select a release (binary or GitHub mode).
@@ -288,7 +288,7 @@ Common controls (available before mode-specific setup):
   --help-all           Show this reference for the selected mode; make no changes.
   MN_HOME=/path        Override the installation home (runtime default: ~/.mn).
 
-Mode-specific options follow. --yes is the default; --interactive enables prompts.
+Mode-specific options follow. Use --interactive to choose components.
 
 EOF
 }
@@ -300,7 +300,7 @@ EOF
 function mn_podman_admin() {
   if [ "$(id -u)" -eq 0 ]; then
     "$@"
-  elif [ "${NON_INTERACTIVE:-Y}" = N ]; then
+  elif [ "${MN_PODMAN_SUDO_NON_INTERACTIVE:-Y}" = N ]; then
     sudo "$@"
   else
     sudo -n "$@"
@@ -312,7 +312,8 @@ function mn_install_podman_cli() {
   case "$(uname -s)" in
   Darwin)
     if command -v brew >/dev/null 2>&1; then
-      brew install podman
+      # Newer Homebrew asks by default; older versions use HOMEBREW_ASK to opt in.
+      HOMEBREW_NO_ASK=1 HOMEBREW_ASK="" brew install --formula podman
       return
     fi
     (
@@ -1285,6 +1286,12 @@ if [ "$MN_INSTALL_DETECT_ONLY" = "Y" ]; then
   exit 0
 fi
 
+# With no explicit prompt flag, keep component defaults but allow terminal sudo.
+# A streamed installer can have redirected stdin and a terminal on stderr.
+MN_PODMAN_SUDO_NON_INTERACTIVE="${NON_INTERACTIVE:-Y}"
+if [ -z "$NON_INTERACTIVE" ] && { [ -t 0 ] || [ -t 2 ]; }; then
+  MN_PODMAN_SUDO_NON_INTERACTIVE=N
+fi
 NON_INTERACTIVE="${NON_INTERACTIVE:-Y}"
 
 case "$MN_INSTALL_MODE" in
@@ -2838,7 +2845,7 @@ Installs MirrorNeuron from GitHub repositories. Use through --mode github.
 
 Options:
   --version TAG                 Install this release tag from each GitHub repo. If omitted, use each repo's default branch.
-  --yes                         Run non-interactively with defaults and flags. This is the default.
+  --yes                         Use component defaults and require non-interactive sudo.
   --interactive                 Ask each install question before proceeding.
   --reset                       Permanently clear runtime data first; requires typing YES.
   -v, --verbose                 Show installation details and command paths.
@@ -4407,7 +4414,7 @@ Installs MirrorNeuron from local sibling folders under:
   ${WORKSPACE_DIR}
 
 Options:
-  --yes                 Run non-interactively with defaults. This is the default.
+  --yes                 Use component defaults and require non-interactive sudo.
   --interactive         Ask each install question before proceeding.
   --reset               Permanently clear runtime data first; requires typing YES.
   -v, --verbose         Show installation details and command paths.
@@ -5831,7 +5838,7 @@ Installs MirrorNeuron from released artifacts and packages. Use through --mode b
 
 Options:
   --version TAG                 Install this release version. Default: ${MN_DEFAULT_INSTALL_VERSION}.
-  --yes                         Run non-interactively with defaults and flags. This is the default.
+  --yes                         Use component defaults and require non-interactive sudo.
   --interactive                 Ask each install question before proceeding.
   --reset                       Permanently clear runtime data first; requires typing YES.
   -v, --verbose                 Show installation details and command paths.
