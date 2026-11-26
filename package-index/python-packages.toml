@@ -605,3 +605,11 @@ version = "1.4.3"
 installer_groups = []
 binary_default = false
 source_hash = "v2:92dee71d0f928334bbfd3cb65df34c965b8b40acfde9520a81253ae3e7c51e14"
+
+[[packages]]
+name = "mirrorneuron-comparison-evidence-skill"
+path = "mn-skills/comparison_evidence_skill"
+publish_group = "skills"
+version = "1.4.1"
+installer_groups = []
+binary_default = false
