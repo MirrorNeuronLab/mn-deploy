@@ -9,7 +9,8 @@ import sys
 
 import pytest
 
-SOURCE = (Path(__file__).resolve().parents[1] / "install.sh").read_text()
+DEPLOY = Path(__file__).resolve().parents[1]
+SOURCE = (DEPLOY / "install.sh").read_text() + (DEPLOY / "install_dev.sh").read_text()
 PUBLIC = "us-central1-docker.pkg.dev/mirrorneuron-public-packages/mirrorneuron-runtime/"
 
 

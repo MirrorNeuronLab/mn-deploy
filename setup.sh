@@ -112,6 +112,7 @@ install_dev_clients() (
   local source_root="${MN_CLIENT_SOURCE_ROOT:-$REPO_ROOT}" work release engine cargo
   local profile="${MN_HOME:-$HOME/.mn}" client
   local cargo_home="${CARGO_HOME:-$HOME/.cargo}" rustup_home="${RUSTUP_HOME:-$HOME/.rustup}"
+  local dev_data_home="${XDG_DATA_HOME:-$HOME/.local/share}"
   cargo=$(command -v cargo || printf '%s' "$cargo_home/bin/cargo")
   mkdir -p "$BIN_DIR" "$builds" "$target"
   work=$(mktemp -d "$builds/.setup.XXXXXXXX")
@@ -128,9 +129,9 @@ install_dev_clients() (
   elif [ -d "$profile" ] && [ ! -L "$profile" ] && [ -z "$(find "$profile" -mindepth 1 -maxdepth 1 -print -quit)" ]; then
     client=$profile
   fi
-  HOME="$work/home" MN_HOME="$client" MN_ENV=dev MN_WASMTIME_BIN="$engine" \
+  HOME="$work/home" XDG_DATA_HOME="$dev_data_home" MN_HOME="$client" MN_ENV=dev MN_WASMTIME_BIN="$engine" \
     CARGO_HOME="$cargo_home" RUSTUP_HOME="$rustup_home" CARGO_TARGET_DIR="$target" \
-    MN_CLIENT_SOURCE_ROOT="$source_root" "$DIR/install.sh" --mode local --no-runtime --yes
+    MN_CLIENT_SOURCE_ROOT="$source_root" "$DIR/install_dev.sh" --no-runtime --yes
   "$cargo" build --locked --release --bin mn-web-ui-server --manifest-path "$source_root/mn-api/Cargo.toml" --target-dir "$target"
   release=$(mktemp -d "$builds/local.XXXXXXXX")
   if [ "$client" = "$work/client" ]; then

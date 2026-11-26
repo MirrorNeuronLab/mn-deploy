@@ -95,7 +95,7 @@ MN_INSTALL_VERSION="${MN_INSTALL_VERSION:-}"
 MN_INSTALL_SCRIPT_NAME="$(basename "${MN_INSTALL_STREAM_NAME:-$0}")"
 MN_INSTALL_ARGS=()
 
-# Presentation is shared by every mode and stays self-contained for curl | bash.
+# Keep the release entrypoint self-contained for curl | bash.
 # Only stage boundaries and actionable messages appear in the default output.
 BOLD="" DIM="" RED="" GREEN="" YELLOW="" CYAN="" RESET=""
 if [ -t 3 ] && [ -z "${NO_COLOR+x}" ] && [ "${TERM:-dumb}" != "dumb" ]; then
@@ -2364,6 +2364,20 @@ function mn_install_client_stage() {
 
 function mn_install_web_package() {
   [ "${INSTALL_WEB_UI:-N}" = Y ] || return 0
+  local source destination="$INSTALL_DIR/webui"
+  for source in "${MN_WEB_UI_DIST_DIR:-}" "$@"; do
+    [ -n "$source" ] && { [ -f "$source/dist/index.html" ] || [ -f "$source/index.html" ]; } || continue
+    source="$(cd "$source" && pwd -P)"
+    if [ -L "$destination" ] || [ ! -e "$destination" ]; then
+      ln -sfn "$source" "$destination"
+      return
+    fi
+    if [ -f "$destination/dist/index.html" ] || [ -f "$destination/index.html" ]; then return; fi
+    if [ ! -e "$INSTALL_DIR/web-ui-source" ] || [ -L "$INSTALL_DIR/web-ui-source" ]; then
+      ln -sfn "$source" "$INSTALL_DIR/web-ui-source"
+      return
+    fi
+  done
   local registry="${MN_WEB_UI_NPM_REGISTRY:-https://${MN_GAR_LOCATION:-$MN_DEFAULT_PYTHON_GAR_LOCATION}-npm.pkg.dev/${MN_GAR_PROJECT:-$MN_DEFAULT_CORE_GAR_PROJECT}/${MN_GAR_NPM_REPOSITORY:-$MN_DEFAULT_WEB_UI_GAR_NPM_REPOSITORY}/}"
   local version="${MN_WEB_UI_PACKAGE_VERSION:-${MN_DEFAULT_WEB_UI_VERSION#v}}"
   print_step "Installing the Web UI assets for the native server"
@@ -2524,7 +2538,6 @@ run_install_binary() {
   CORE_GAR_IMAGE_NAME="${MN_CORE_GAR_DOCKER_IMAGE_NAME:-$MN_DEFAULT_CORE_GAR_DOCKER_IMAGE_NAME}"
   MN_PACKAGE_VERSION=""
   MN_PYTHON_SDK_PACKAGE_VERSION=""
-  MEMBRANE_DIR="${MN_MEMBRANE_DIR:-${INSTALL_DIR}/Membrane}"
   MN_AGENTS_ROOT="${MN_AGENTS_ROOT:-}"
   PACKAGE_INDEX_FILE="${MN_PACKAGE_INDEX_FILE:-}"
   PACKAGE_INDEX_VERSION="${MN_PACKAGE_INDEX_VERSION:-}"
@@ -3856,11 +3869,15 @@ function mn_configure_install_mode() {
   local arg
   for arg in ${MN_INSTALL_ARGS[@]+"${MN_INSTALL_ARGS[@]}"}; do
     case "$arg" in
-      --build-*) print_error "$arg is a source-build option. Use install_dev.sh."; return 1 ;;
+    --build-*)
+      print_error "$arg is a source-build option. Use install_dev.sh."
+      return 1
+      ;;
     esac
   done
 }
 
+# Source installations supply their own preflight before destructive reset work.
 function mn_preflight_reset() { :; }
 
 function mn_install_runtime() {

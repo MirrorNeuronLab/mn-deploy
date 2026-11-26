@@ -33,7 +33,9 @@ This specification applies only to deployment assets in this repository.
 
 ## Public Entry Points
 
-- `install.sh`: install or update the selected component set.
+- `install.sh` installs or updates released packages.
+- `install_dev.sh` builds from local checkouts or GitHub sources.
+- `scripts/preapare_dev.sh` prepares the source-build WASI toolchain and prints its SDK directory.
 - `uninstall.sh`: remove installed MirrorNeuron components and selected state.
 - `server.sh`: start, stop, and inspect installed services.
 - `prepare_cluster.sh`: prepare cluster-facing deployment configuration.
@@ -65,13 +67,15 @@ The installer supports:
   and
 - `local`: use sibling workspace checkouts for editable/source development.
 
-An omitted mode follows the documented release/package default. Mode selection
+`install.sh` uses released packages even when `MN_ENV=dev`.
+`install_dev.sh` defaults to local checkouts. Mode selection
 must not silently cross into another source type. Explicit component-version
 overrides take precedence over the shared release version only for their named
 component.
 
-Local mode builds the Rust clients for `wasm32-wasip2` with Cargo and the WASI SDK from `PATH` or the configured
-Cargo home, which defaults to `~/.cargo`. If the sibling `mn-client-support`
+The developer installer finds Cargo on `PATH` or under `${CARGO_HOME:-$HOME/.cargo}/bin`.
+It uses the WASI SDK to build SQLite for the API. Developer setup verifies and caches
+the pinned host SDK for Linux and macOS when the API needs a compiler. If the sibling `mn-client-support`
 path is absent, it clones the Rust `main` branch into the workspace. An
 occupied path must already contain the Rust manifest. During a local reset,
 the installer prepares these prerequisites after confirmation and before cleanup.
@@ -373,7 +377,7 @@ Core and Membrane source builds on small local macOS Podman machines can use
 temporary guest swap to reach 6 GiB of combined build memory. Each build owns
 and releases its allocation. Remote connections use their configured resources.
 
-Use `./install.sh --mode local --build-membrane` to build the Membrane runtime
+Use `./install_dev.sh --build-membrane` to build the Membrane runtime
 image from the sibling `Membrane` checkout. `MN_MEMBRANE_DIR` may select another
 local checkout. Binary and GitHub modes ignore this flag and use GAR images.
 The flag selects `mirror-neuron-memory-engine:local`, records source mode, and

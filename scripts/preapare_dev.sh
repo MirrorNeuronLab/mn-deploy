@@ -27,26 +27,35 @@ check_sdk() {
 }
 
 sdk=${WASI_SDK_PATH:-}
+if [[ -z $sdk ]] && compiler=$(command -v wasm32-wasip2-clang); then
+  candidate=$(dirname "$(dirname "$compiler")")
+  if check_sdk "$candidate"; then sdk=$candidate; fi
+fi
 if [[ -z $sdk && -x /opt/wasi-sdk/bin/clang ]]; then sdk=/opt/wasi-sdk; fi
 if [[ -z $sdk ]]; then
   host="$(uname -s)/$(uname -m)"
   # SHA-256 digests from the upstream wasi-sdk-34 release assets.
   case "$host" in
-    Linux/aarch64|Linux/arm64)
-      platform=arm64-linux
-      digest=f7e243dff54d60bcc576e94d6166b69f410f2500ae4a9ceef34315be10e77971 ;;
-    Linux/x86_64)
-      platform=x86_64-linux
-      digest=b761e3a0721dbae9c09a0059e5fdb2bf917d1b4a8a7b430fb3b5aafb0984b2c4 ;;
-    Darwin/arm64)
-      platform=arm64-macos
-      digest=9c59398106b417f8f14913380fdf0097a8cc0ff4af9eb3ce0065a859e88d49e9 ;;
-    Darwin/x86_64)
-      platform=x86_64-macos
-      digest=87d27fa8adc68dee59bfbf2e22a6d34ef717c34d6bf1d8af2a56fc929d9ce0eb ;;
-    *)
-      echo "error: No pinned WASI SDK for $host. Set WASI_SDK_PATH to an extracted SDK." >&2
-      exit 1 ;;
+  Linux/aarch64 | Linux/arm64)
+    platform=arm64-linux
+    digest=f7e243dff54d60bcc576e94d6166b69f410f2500ae4a9ceef34315be10e77971
+    ;;
+  Linux/x86_64)
+    platform=x86_64-linux
+    digest=b761e3a0721dbae9c09a0059e5fdb2bf917d1b4a8a7b430fb3b5aafb0984b2c4
+    ;;
+  Darwin/arm64)
+    platform=arm64-macos
+    digest=9c59398106b417f8f14913380fdf0097a8cc0ff4af9eb3ce0065a859e88d49e9
+    ;;
+  Darwin/x86_64)
+    platform=x86_64-macos
+    digest=87d27fa8adc68dee59bfbf2e22a6d34ef717c34d6bf1d8af2a56fc929d9ce0eb
+    ;;
+  *)
+    echo "error: No pinned WASI SDK for $host. Set WASI_SDK_PATH to an extracted SDK." >&2
+    exit 1
+    ;;
   esac
   name=wasi-sdk-34.0-$platform
   root=${XDG_DATA_HOME:-$HOME/.local/share}/mirrorneuron/dev
@@ -59,14 +68,18 @@ if [[ -z $sdk ]]; then
     echo "==> Downloading $name" >&2
     curl --proto '=https' --proto-redir '=https' -fsSL --retry 2 -o "$stage/sdk.tar.gz" \
       "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-34/$name.tar.gz"
-    if command -v sha256sum >/dev/null; then actual=$(sha256sum <"$stage/sdk.tar.gz")
+    if command -v sha256sum >/dev/null; then
+      actual=$(sha256sum <"$stage/sdk.tar.gz")
     else actual=$(shasum -a 256 <"$stage/sdk.tar.gz"); fi
     if [[ ${actual%% *} != "$digest" ]]; then
       echo "error: SHA-256 checksum failed for $name. Rerun developer setup to retry." >&2
       exit 1
     fi
     tar -xzf "$stage/sdk.tar.gz" -C "$stage"
-    check_sdk "$stage/$name" || { echo "error: Cannot run the downloaded $name toolchain." >&2; exit 1; }
+    check_sdk "$stage/$name" || {
+      echo "error: Cannot run the downloaded $name toolchain." >&2
+      exit 1
+    }
     # Publish the complete directory. A concurrent run can publish it first.
     mv -n "$stage/$name" "$root/" || [[ -d $sdk ]]
   fi

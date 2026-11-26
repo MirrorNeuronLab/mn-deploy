@@ -16,7 +16,7 @@ Full and runtime installs place the Bytecode Alliance WAC executable in
 to their declared skill components during preparation. Reinstalls verify the
 managed binary against the pinned release digest and download it when needed.
 
-The role flags are mutually exclusive. All modes support client-only installation. The runtime-only role is available in binary mode. Client-only installation installs three WASI components, stock Wasmtime and user-owned state under `MN_HOME`. Build from the three sibling checkouts in local mode, their Git refs in GitHub mode or versioned Wasm assets from the public GAR generic repository in binary mode.
+The role flags are mutually exclusive. All modes support client-only installation. The runtime-only role is available in binary mode. Client-only installation installs three WASI components, stock Wasmtime and user-owned state under `MN_HOME`. `install.sh` downloads versioned Wasm assets from GAR. `install_dev.sh` builds from the three sibling checkouts by default or from their Git refs with `--mode github`.
 
 Full and runtime installations start their selected services by default. Use
 `--no-start` to prepare an installation without starting services. A full startup

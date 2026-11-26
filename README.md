@@ -16,7 +16,6 @@ command for connecting to that runtime from another machine.
 ```bash
 ./install.sh --help                     # Common choices and examples
 ./install.sh --help-all                 # Full binary-install reference
-./install.sh --mode local --help-all    # Full local-source reference
 ./install.sh --interactive              # Choose components; Enter keeps defaults
 ./install.sh --verbose                  # Substeps, versions, paths and tool output
 ```
@@ -38,17 +37,7 @@ commands identify their diagnostic logs in the default output. Use
 | `./install.sh --no-runtime`   | WASI CLI, API and client support                       | `~/.mn`         |
 | `./install.sh --runtime-only` | Core, native runtime, Redis and execution dependencies | `~/.mn-runtime` |
 
-A production `./install.sh --no-runtime` downloads three versioned Wasm components from the public GAR generic repository `mirrorneuron-binaries`. The installer verifies their SHA-256 checksums and starts each with Wasmtime before switching the active generation under `~/.mn`. It uses an available Wasmtime installation or downloads the pinned engine for the host. Set `MN_HOME` for a separate client installation. Specify `--mode local` or `--mode github` to build from source.
-
-For development, `MN_ENV=dev ./install.sh --no-runtime` builds all three Wasm components from the sibling Rust checkouts. An explicit `--mode local` also selects that path. Set `MN_CLIENT_SOURCE_ROOT` to use checkouts in another workspace.
-The developer `setup.sh` shortcut uses the same local Wasm build and exposes it through `~/.local/bin`.
-
-On macOS and Ubuntu, `--mode local` clones `mn-client-support` from `main`
-when its sibling path is absent. The installer uses Cargo from `PATH` or
-`${CARGO_HOME:-$HOME/.cargo}/bin`. If preparing the Rust client sources fails
-during `--reset`, the installer stops before deleting runtime data.
-
-For a source build, install the Rust `wasm32-wasip2` target and set `WASI_SDK_PATH` to the WASI SDK for SQLite. Run `scripts/artifacts.sh clients /path/to/dist --wasm-only` to build `mn.wasm`, `mn-api.wasm`, and `mn-client-support.wasm` with their checksums. Use `scripts/publish.sh clients --version vX.Y.Z` to preview the GAR packages, then add `--apply` to publish and verify them. An offline binary install accepts `MN_CLIENT_DIST_DIR=/path/to/dist` and `MN_WASMTIME_BIN=/path/to/wasmtime`.
+A production `./install.sh --no-runtime` downloads three versioned Wasm components from the public GAR generic repository `mirrorneuron-binaries`. The installer verifies their SHA-256 checksums and starts each with Wasmtime before switching the active generation under `~/.mn`. It uses an available Wasmtime installation or downloads the pinned engine for the host. Set `MN_HOME` for a separate client installation.
 
 ```bash
 ./install.sh --no-runtime
@@ -62,6 +51,33 @@ Use `mn node add local --runtime-home ~/.mn-runtime` for separately installed
 local parts. Runtime-only hosts use `~/.mn-runtime/bin/mn-runtime` or `server.sh`
 for lifecycle management. Runtime nodes share a cluster; surfaces never become
 compute nodes. See the [complete role, connection, lifecycle and release contract](docs/installation-roles.md).
+
+### Developer installs
+
+From the `mn-deploy` checkout, run `./install_dev.sh` for a full source install or
+`./install_dev.sh --no-runtime` for the Wasm clients. The default uses the sibling
+checkouts. Set `MN_CLIENT_SOURCE_ROOT` to select a different client workspace.
+A missing `mn-client-support` sibling is cloned from `main`. Use
+`./install_dev.sh --mode github` for GitHub sources and `--help-all` for options.
+
+Install Rust with rustup. The developer installer prepares the Rust
+`wasm32-wasip2` target and uses the WASI C toolchain to compile SQLite for
+`mn-api`. To prepare it separately, run `./scripts/preapare_dev.sh`.
+On Linux (including ARM64 Spark) and macOS, it downloads the host's pinned
+WASI SDK, verifies its SHA-256 checksum, and caches it under
+`${XDG_DATA_HOME:-$HOME/.local/share}/mirrorneuron/dev`. Subsequent builds
+reuse it. An existing `WASI_SDK_PATH` or target compiler takes precedence.
+
+For a standalone artifact build, use the SDK directory printed by the script.
+
+```bash
+WASI_SDK_PATH=$(./scripts/preapare_dev.sh) && export WASI_SDK_PATH
+./scripts/artifacts.sh clients /path/to/dist --wasm-only
+```
+
+The developer `setup.sh` shortcut builds the same clients and exposes them through
+`~/.local/bin`. An offline release install accepts `MN_CLIENT_DIST_DIR=/path/to/dist`
+and `MN_WASMTIME_BIN=/path/to/wasmtime`.
 
 ## Current contracts
 
@@ -87,8 +103,8 @@ skills required by Mac security investigator. These new inventory entries use
 the skills checkout's next final version, `1.3.61`; publishing and a new support
 snapshot remain part of the coordinated release. Existing snapshots are immutable.
 
-`mn-deploy` contains the unified installer and local service scripts for MirrorNeuron.
-By default, `install.sh` installs released artifacts and Python packages.
+`mn-deploy` contains the release and developer installers and local service scripts for MirrorNeuron.
+`install.sh` installs released artifacts and Python packages.
 
 The current Compose template defaults LLM completion and embedding concurrency
 to five calls per model group (`MN_LITELLM_MAX_CONCURRENT_REQUESTS=5` and
@@ -296,7 +312,7 @@ are preserved.
 Install from GitHub repositories:
 
 ```bash
-./install.sh --mode github
+./install_dev.sh --mode github
 ```
 
 Check or control installed services:
@@ -487,7 +503,7 @@ see [Google's npm package contract](https://docs.cloud.google.com/artifact-regis
 - Installs use default component selections. Pass `--interactive` to choose
   components individually.
 - Use `./install.sh` or `./install.sh --mode binary` for release/package installs,
-  `./install.sh --mode github` for repository installs, or `./install.sh --mode local`
+  `./install_dev.sh --mode github` for repository installs, or `./install_dev.sh`
   from a monorepo checkout for editable local installs.
 - Local mode resolves the SDK, every SDK component under
   `mn-python-sdk/packages/`, the CLI, API, local agent packages, and selected skill projects together
@@ -720,10 +736,9 @@ commit `f857d47725e50e1c3aa3d149694ca5e6c75f389f`, and resolves to manifest dige
 The installer `--version` does not change this independent engine version. Use
 `MN_MEMBRANE_ENGINE_IMAGE_TAG` to select an explicit engine release.
 
-Use `./install.sh --mode local --build-membrane` to build the Membrane runtime
+Use `./install_dev.sh --build-membrane` to build the Membrane runtime
 image from the sibling `Membrane` checkout instead. Set `MN_MEMBRANE_DIR` to use a
-specific local checkout. Binary and GitHub install modes ignore this flag and
-continue using GAR images. The flag selects `mirror-neuron-memory-engine:local`,
+specific local checkout. The release installer pulls its pinned image. GitHub mode also uses GAR. The flag selects `mirror-neuron-memory-engine:local`,
 records source mode, and builds the Dockerfile `runtime` target once per installer
 invocation using the Podman build cache. Subsequent runtime/blueprint startup
 does not build images. Missing source and `--build-membrane --no-context-engine`

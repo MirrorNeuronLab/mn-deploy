@@ -6,7 +6,7 @@ import subprocess
 
 import pytest
 
-INSTALLER = Path(__file__).resolve().parents[1] / "install.sh"
+INSTALLER = Path(__file__).resolve().parents[1] / "install_dev.sh"
 
 
 def test_development_setup_uses_local_wasm_without_replacing_the_runtime_profile(
@@ -34,8 +34,8 @@ while [ "$1" != --target-dir ]; do shift; done
 mkdir -p "$2/release"
 printf '#!/bin/sh\\nexit 0\\n' > "$2/release/mn-web-ui-server"
 chmod +x "$2/release/mn-web-ui-server"''',
-        deploy / "install.sh": """test "$MN_ENV" = dev
-test "$*" = "--mode local --no-runtime --yes"
+        deploy / "install_dev.sh": """test "$MN_ENV" = dev
+test "$*" = "--no-runtime --yes"
 test "$MN_CLIENT_SOURCE_ROOT" = "$EXPECTED_ROOT"
 test "$HOME" != "$REAL_HOME"
 test "$CARGO_HOME" = "$REAL_HOME/.cargo"
@@ -95,9 +95,10 @@ done""",
 @pytest.fixture
 def local_install(tmp_path):
     workspace = tmp_path / "source workspace"
-    installer = workspace / "mn-deploy/install.sh"
+    installer = workspace / "mn-deploy/install_dev.sh"
     installer.parent.mkdir(parents=True)
     shutil.copyfile(INSTALLER, installer)
+    shutil.copyfile(INSTALLER.with_name("install.sh"), installer.with_name("install.sh"))
     for name in (
         "MirrorNeuron/Dockerfile",
         "mn-cli/Cargo.toml",
@@ -177,6 +178,7 @@ exit 1
                 "MN_HOME": str(runtime),
                 "PATH": str(tools),
                 "CARGO_HOME": str(cargo_home),
+                "CC_wasm32_wasip2": str(cargo),
                 "SHELL": "/bin/sh",
                 "TMPDIR": str(tmp_path),
                 "MN_TEST_COMMANDS": str(commands),

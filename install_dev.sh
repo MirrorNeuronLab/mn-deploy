@@ -26,11 +26,31 @@ Run scripts/preapare_dev.sh to prepare the WASI SDK ahead of the first API build
 EOF
 }
 
+function print_extended_usage() {
+  print_unified_usage
+  cat >&3 <<EOF
+
+  --start-podman     Start an existing Podman installation and exit.
+  --detect-only      Print installation status as JSON.
+  --reset            Clear existing data after confirming with YES.
+
+EOF
+}
+
 function mn_configure_install_mode() {
   case "$MN_INSTALL_MODE" in
-    local) MN_INSTALL_SOURCE_LABEL="local source"; export MN_USE_LOCAL_SKILLS="${MN_USE_LOCAL_SKILLS:-1}" ;;
-    github) MN_INSTALL_SOURCE_LABEL="GitHub source"; export MN_USE_LOCAL_SKILLS="${MN_USE_LOCAL_SKILLS:-0}" ;;
-    *) print_error "Unknown developer source '$MN_INSTALL_MODE'. Select --mode local or --mode github."; return 1 ;;
+  local)
+    MN_INSTALL_SOURCE_LABEL="local source"
+    export MN_USE_LOCAL_SKILLS="${MN_USE_LOCAL_SKILLS:-1}"
+    ;;
+  github)
+    MN_INSTALL_SOURCE_LABEL="GitHub source"
+    export MN_USE_LOCAL_SKILLS="${MN_USE_LOCAL_SKILLS:-0}"
+    ;;
+  *)
+    print_error "Unknown developer source '$MN_INSTALL_MODE'. Select --mode local or --mode github."
+    return 1
+    ;;
   esac
   if [ "$MN_RUNTIME_ONLY" = Y ]; then
     printf 'notice: --runtime-only is ignored in %s source mode; both parts are installed.\n' "$MN_INSTALL_MODE" >&3
@@ -331,25 +351,6 @@ function mn_stage_client_commands() {
       cp "$target_dir/wasm32-wasip2/release/$command.wasm" "$stage/bin/" || return 1
     fi
   done
-}
-
-function mn_prepare_native_web_assets() {
-  local source="${MN_WEB_UI_DIST_DIR:-${1:-}}" destination="$INSTALL_DIR/webui"
-  [ "${INSTALL_WEB_UI:-N}" = Y ] || return 0
-  if [ -n "$source" ] && { [ -f "$source/dist/index.html" ] || [ -f "$source/index.html" ]; }; then
-    source="$(cd "$source" && pwd -P)"
-    if [ -L "$destination" ] || [ ! -e "$destination" ]; then
-      ln -sfn "$source" "$destination"
-      return
-    fi
-    if [ -f "$destination/dist/index.html" ] || [ -f "$destination/index.html" ]; then return; fi
-    if [ ! -e "$INSTALL_DIR/web-ui-source" ] || [ -L "$INSTALL_DIR/web-ui-source" ]; then
-      ln -sfn "$source" "$INSTALL_DIR/web-ui-source"
-      return
-    fi
-  fi
-  if [ -f "$destination/dist/index.html" ] || [ -f "$destination/index.html" ]; then return 0; fi
-  mn_install_web_package
 }
 
 run_install_github() {
@@ -1459,7 +1460,7 @@ EOF
     print_step "Python component installation disabled by selection."
   fi
 
-  mn_prepare_native_web_assets
+  mn_install_web_package "$INSTALL_DIR/webui"
   mn_configure_installed_runtime
 
   if [ "$INSTALL_CLI" = "Y" ]; then
@@ -2534,7 +2535,7 @@ EOF
   fi
   trap mn_reset_release_lock EXIT
 
-  mn_prepare_native_web_assets "$WEB_UI_DIR"
+  mn_install_web_package "$WEB_UI_DIR" "$INSTALL_DIR/webui"
   mn_configure_installed_runtime
 
   print_detail "Core image: mirror-neuron-core:latest (${CORE_DIR})"
@@ -2555,9 +2556,11 @@ EOF
 
 function mn_install_runtime() {
   case "$MN_INSTALL_MODE" in
-    local) run_install_local "$@" ;;
-    github) run_install_github "$@" ;;
+  local) run_install_local "$@" ;;
+  github) run_install_github "$@" ;;
   esac
 }
 
-mn_install_main "$@"
+if [[ "${BASH_SOURCE[0]}" = "$0" ]]; then
+  mn_install_main "$@"
+fi

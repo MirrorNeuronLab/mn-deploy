@@ -12,7 +12,9 @@ installation or cleanup.
 
 ## Repository Map
 
-- `install.sh`: unified installer for binary, GitHub, and local-source modes.
+- `install.sh`: standalone end-user installer for released artifacts.
+- `install_dev.sh`: local and GitHub source installations.
+- `scripts/preapare_dev.sh`: developer WASI toolchain setup.
 - `uninstall.sh`: runtime and installed-component removal.
 - `server.sh`: installed local service lifecycle.
 - `setup.sh`, `prepare_cluster.sh`: local/cluster preparation.

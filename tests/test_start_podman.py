@@ -33,6 +33,7 @@ esac
 def invoke(
     tmp_path,
     *args,
+    script=SCRIPT,
     host="Darwin",
     installed=True,
     ready=False,
@@ -104,7 +105,7 @@ def invoke(
             ),
         ]
     else:
-        cmd = ["/bin/bash", str(SCRIPT), *args]
+        cmd = ["/bin/bash", str(script), *args]
     result = subprocess.run(
         cmd,
         env=env,
@@ -181,6 +182,7 @@ def test_reset_preserves_data_when_machine_reports_an_invalid_socket(tmp_path):
             "--reset",
             "--build-membrane",
             ready=True,
+            script=SCRIPT.with_name("install_dev.sh"),
             reported_socket="unix://other-host/run/podman.sock",
             stdin=stdin,
         )
