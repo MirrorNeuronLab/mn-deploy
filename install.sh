@@ -2626,16 +2626,34 @@ function mn_client_engine() {
     return
   fi
   case "$(uname -s)/$(uname -m)" in
-    Darwin/arm64) platform=aarch64-macos; digest=61dd882b44bcf854b301518781f407b9f6db4c6bd157a55f8f44b1f1357f93dc ;;
-    Darwin/x86_64) platform=x86_64-macos; digest=51767ef35ea3c2653205c09892f174b75e507cf8ffccfcba00ed557832f0e72d ;;
-    Linux/aarch64|Linux/arm64) platform=aarch64-linux; digest=a263f34aefad1b24ba4d9ca635ddfea415f4acfe3f3f1bb6d4525c34fc6a7397 ;;
-    Linux/x86_64) platform=x86_64-linux; digest=a18020674fac4107f329bc9ed720ea9c88e4b30a61e8a527787bcce051123d32 ;;
-    *) print_error "Install Wasmtime for this host and rerun."; return 1 ;;
+  Darwin/arm64)
+    platform=aarch64-macos
+    digest=61dd882b44bcf854b301518781f407b9f6db4c6bd157a55f8f44b1f1357f93dc
+    ;;
+  Darwin/x86_64)
+    platform=x86_64-macos
+    digest=51767ef35ea3c2653205c09892f174b75e507cf8ffccfcba00ed557832f0e72d
+    ;;
+  Linux/aarch64 | Linux/arm64)
+    platform=aarch64-linux
+    digest=a263f34aefad1b24ba4d9ca635ddfea415f4acfe3f3f1bb6d4525c34fc6a7397
+    ;;
+  Linux/x86_64)
+    platform=x86_64-linux
+    digest=a18020674fac4107f329bc9ed720ea9c88e4b30a61e8a527787bcce051123d32
+    ;;
+  *)
+    print_error "Install Wasmtime for this host and rerun."
+    return 1
+    ;;
   esac
   archive="wasmtime-v$version-$platform"
-  curl --proto '=https' --proto-redir '=https' -fsSL --retry 2     "https://github.com/bytecodealliance/wasmtime/releases/download/v$version/$archive.tar.xz" -o "$stage/engine.tar.xz" || return 1
+  curl --proto '=https' --proto-redir '=https' -fsSL --retry 2 "https://github.com/bytecodealliance/wasmtime/releases/download/v$version/$archive.tar.xz" -o "$stage/engine.tar.xz" || return 1
   if command -v shasum >/dev/null; then actual=$(shasum -a 256 "$stage/engine.tar.xz"); else actual=$(sha256sum "$stage/engine.tar.xz"); fi
-  if [ "${actual%% *}" != "$digest" ]; then print_error "Wasmtime archive failed checksum verification."; return 1; fi
+  if [ "${actual%% *}" != "$digest" ]; then
+    print_error "Wasmtime archive failed checksum verification."
+    return 1
+  fi
   tar -xJf "$stage/engine.tar.xz" -C "$stage" "$archive/wasmtime" && mv "$stage/$archive/wasmtime" "$stage/bin/wasmtime"
 }
 
@@ -2645,16 +2663,26 @@ function mn_client_wasm_asset() {
   local repo="${MN_CLIENT_GAR_REPOSITORY:-mirrorneuron-binaries}"
   mn_validate_version_tag_or_exit "$version"
   for file in "$name.wasm" "$name.wasm.sha256"; do
-    if [ -n "${MN_CLIENT_DIST_DIR:-}" ]; then cp "$MN_CLIENT_DIST_DIR/$file" "$dest/$file" || return 1
+    if [ -n "${MN_CLIENT_DIST_DIR:-}" ]; then
+      cp "$MN_CLIENT_DIST_DIR/$file" "$dest/$file" || return 1
     else
       url="https://artifactregistry.googleapis.com/download/v1/projects/$project/locations/$region/repositories/$repo/files/$package%3A$version%3A$file:download?alt=media"
-      curl --proto '=https' --proto-redir '=https' -fsSL --retry 2 "$url" -o "$dest/$file" || { print_error "Cannot download $package $version ($file) from GAR."; return 1; }
+      curl --proto '=https' --proto-redir '=https' -fsSL --retry 2 "$url" -o "$dest/$file" || {
+        print_error "Cannot download $package $version ($file) from GAR."
+        return 1
+      }
     fi
   done
   expected=$(awk 'NR == 1 {print $1}' "$dest/$name.wasm.sha256")
   if command -v shasum >/dev/null; then actual=$(shasum -a 256 "$dest/$name.wasm"); else actual=$(sha256sum "$dest/$name.wasm"); fi
-  if ! [[ "$expected" =~ ^[a-fA-F0-9]{64}$ ]] || [ "${actual%% *}" != "$expected" ]; then print_error "Invalid checksum for $name.wasm."; return 1; fi
-  if [ "$(od -An -tx1 -N8 "$dest/$name.wasm" | tr -d ' \n')" != 0061736d0d000100 ]; then print_error "$name.wasm is not a WebAssembly component."; return 1; fi
+  if ! [[ "$expected" =~ ^[a-fA-F0-9]{64}$ ]] || [ "${actual%% *}" != "$expected" ]; then
+    print_error "Invalid checksum for $name.wasm."
+    return 1
+  fi
+  if [ "$(od -An -tx1 -N8 "$dest/$name.wasm" | tr -d ' \n')" != 0061736d0d000100 ]; then
+    print_error "$name.wasm is not a WebAssembly component."
+    return 1
+  fi
 }
 
 function mn_local_client_root() {
@@ -2731,7 +2759,7 @@ function mn_install_wasm_clients() (
     fi
     target_dir="${CARGO_TARGET_DIR:-$INSTALL_DIR/cache/rust-client}"
     for command in "${commands[@]}"; do
-      case "$command" in mn) repo=mn-cli ;; mn-web-ui-server|mn-api) repo=mn-api ;; *) repo=mn-client-support ;; esac
+      case "$command" in mn) repo=mn-cli ;; mn-web-ui-server | mn-api) repo=mn-api ;; *) repo=mn-client-support ;; esac
       if [ "$command" = mn-web-ui-server ]; then
         cargo build --quiet --locked --release --bin "$command" --manifest-path "$root/$repo/Cargo.toml" --target-dir "$target_dir" || return 1
         cp "$target_dir/release/$command" "$stage/bin/$command" || return 1
