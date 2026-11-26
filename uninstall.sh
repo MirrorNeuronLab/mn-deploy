@@ -44,7 +44,7 @@ Usage: ./uninstall.sh [options]
 Options:
   --yes, -y   Run non-interactively and answer yes to prompts.
   --runtime-only Remove the runtime install (default ~/.mn-runtime).
-  --no-runtime Remove the client install (default ~/.mn-client), without runtime cleanup.
+  --no-runtime Remove the client install (default ~/.mn), without runtime cleanup.
   MN_HOME=/path Override the runtime state directory. Defaults to ${HOME}/.mn.
   -h, --help  Show this help.
 EOF
@@ -121,7 +121,7 @@ fi
 
 INSTALL_DIR="${MN_HOME:-${HOME}/.mn}"
 if [ "$CLIENT_ONLY" = "Y" ]; then
-  INSTALL_DIR="${MN_HOME:-${HOME}/.mn-client}"
+  INSTALL_DIR="${MN_HOME:-${HOME}/.mn}"
 elif [ "$RUNTIME_ONLY" = "Y" ]; then
   INSTALL_DIR="${MN_HOME:-${HOME}/.mn-runtime}"
   if [ ! -f "$INSTALL_DIR/install_metadata.json" ] || ! grep -Eq '"install_role"[[:space:]]*:[[:space:]]*"runtime"' "$INSTALL_DIR/install_metadata.json"; then
@@ -143,6 +143,8 @@ if [ "$CLIENT_ONLY" = "Y" ] || { [ -f "$INSTALL_DIR/install_metadata.json" ] && 
   fi
   print_step "Removing client packages, connection and downloaded results"
   rm -rf "$INSTALL_DIR/venv" "$INSTALL_DIR/python" "$INSTALL_DIR/uv" "$INSTALL_DIR/tmp" "$INSTALL_DIR/cache" "$INSTALL_DIR/logs" "$INSTALL_DIR/outputs"
+  rm -rf "$INSTALL_DIR/client-releases"
+  rm -f "$INSTALL_DIR/client-current" "$INSTALL_DIR/mn" "$INSTALL_DIR/bin/mn-client-support" "$INSTALL_DIR/bin/mn-web-ui-server"
   rm -f "$INSTALL_DIR/bin/mn" "$INSTALL_DIR/bin/mn-api" "$INSTALL_DIR/client.json" "$INSTALL_DIR/.client.lock" "$INSTALL_DIR/api.token" "$INSTALL_DIR/install_metadata.json" "$INSTALL_DIR/env" "$INSTALL_DIR/env.fish"
   rmdir "$INSTALL_DIR/bin" 2>/dev/null || true
   rmdir "$INSTALL_DIR" 2>/dev/null || true

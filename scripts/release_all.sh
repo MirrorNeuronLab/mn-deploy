@@ -26,7 +26,7 @@ REPOSITORIES=(
   mn-web-ui
   mn-deploy
   mn-python-sdk
-  mn-surface
+  mn-client-support
   mn-docs
   mn-agents
   mn-skills
@@ -423,8 +423,7 @@ update_installer_pins() {
   package_versions="$(
     "$PUBLISH_PYTHON" - "${DEPLOY_DIR}/package-index/python-packages.toml" <<'PYTHON'
 import sys, tomllib
-settings = {"mirrorneuron-python-sdk": "MN_DEFAULT_PYTHON_SDK_VERSION",
-            "mirrorneuron-cli": "MN_DEFAULT_CLI_VERSION", "mirrorneuron-api": "MN_DEFAULT_API_VERSION"}
+settings = {"mirrorneuron-python-sdk": "MN_DEFAULT_PYTHON_SDK_VERSION"}
 for package in tomllib.loads(open(sys.argv[1]).read())["packages"]:
     if package["name"] in settings:
         print(settings[package["name"]], package["version"])
@@ -444,7 +443,7 @@ update_post_release_pins() {
 
 - GAR npm: mirrorneuron-web-ui@${VERSION} in ${NPM_REPOSITORY}.
 - GAR Python: all packages in package-index/python-packages.toml, including
-  mirrorneuron-api, mirrorneuron-cli, and mirrorneuron-python-sdk.
+  mirrorneuron-runtime and mirrorneuron-python-sdk.
 - GAR generic: signed, notarized mirrorneuron-pc-use for macOS arm64 and x86_64;
   immutable native-source versions in mirrorneuron-binaries/mn-computer-use.
 - GAR Docker: mirror-neuron-core and membrane-context-engine each published

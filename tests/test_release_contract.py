@@ -38,6 +38,8 @@ def test_release_preparation_reads_package_index_with_bash_32(tmp_path):
 
     index = tmp_path / "package-index" / "python-packages.toml"
     index.parent.mkdir()
+    # A historical index can still contain Python CLI/API packages. Only the
+    # Python SDK takes its installer version from this index.
     index.write_text("""\
 [[packages]]
 name = "mirrorneuron-python-sdk"
@@ -104,8 +106,6 @@ prepare_release_metadata
         "PIN:MN_DEFAULT_INSTALL_VERSION=v1.3.55",
         "PIN:MN_DEFAULT_INSTALL_SUPPORT_VERSION=v1.3.55",
         "PIN:MN_DEFAULT_PYTHON_SDK_VERSION=v1.3.51",
-        "PIN:MN_DEFAULT_CLI_VERSION=v1.3.52",
-        "PIN:MN_DEFAULT_API_VERSION=v1.3.51",
         "COMMIT:mn-deploy <install.sh> <package-index/python-packages.toml> "
         "<docker-compose.yml> <install_support/v1.3.55>",
         "COMMIT:mn-api <pyproject.toml> <component with spaces/pyproject.toml>",

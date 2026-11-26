@@ -209,4 +209,46 @@ test "$(git -C "$TARGET" rev-parse HEAD)" = "$LOCAL_COMMIT"
 test "$(git --git-dir="$REMOTE" rev-parse main)" = "$REMOTE_COMMIT"
 test -z "$(git -C "$TARGET" status --porcelain)"
 
+# Exercise an archive whose old main still points to the Python tip.
+CLIENTS="$TEST_ROOT/clients"
+HELPER="$CLIENTS/mn-deploy/git_commit_push_all.sh"
+NATIVE="$CLIENTS/mn-client-support"
+ARCHIVE="$CLIENTS/mn-surface_old"
+mkdir -p "$CLIENTS/mn-deploy"
+cp "$REPO_DIR/git_commit_push_all.sh" "$HELPER"
+git -C "$SEED" push origin HEAD:refs/heads/python-legacy >/dev/null
+git clone "$SEED" "$ARCHIVE" >/dev/null
+git -C "$ARCHIVE" remote set-url origin "$REMOTE"
+git clone "$REMOTE" "$NATIVE" >/dev/null
+git -C "$NATIVE" remote remove origin
+for client in "$NATIVE" "$ARCHIVE"; do
+  git -C "$client" config user.name "mn-deploy test"
+  git -C "$client" config user.email "mn-deploy-test@example.invalid"
+done
+printf '[package]\nname = "mn-client-support"\n' >"$NATIVE/Cargo.toml"
+printf 'legacy\n' >"$ARCHIVE/client.py"
+"$HELPER" -m "test client migration" >"$OUTPUT" 2>&1
+test "$(git -C "$NATIVE" remote get-url origin)" = "$REMOTE"
+test "$(git -C "$ARCHIVE" branch --show-current)" = python-legacy
+test "$(git -C "$ARCHIVE" rev-parse --abbrev-ref '@{u}')" = origin/python-legacy
+test "$(git -C "$NATIVE" rev-parse HEAD)" = "$(git --git-dir="$REMOTE" rev-parse main)"
+test "$(git -C "$ARCHIVE" rev-parse HEAD)" = "$(git --git-dir="$REMOTE" rev-parse python-legacy)"
+git --git-dir="$REMOTE" cat-file -e main:Cargo.toml
+git --git-dir="$REMOTE" cat-file -e python-legacy:client.py
+if git --git-dir="$REMOTE" cat-file -e main:client.py 2>/dev/null ||
+  git --git-dir="$REMOTE" cat-file -e python-legacy:Cargo.toml 2>/dev/null; then
+  echo "client source was published to the wrong branch" >&2
+  exit 1
+fi
+
+git -C "$ARCHIVE" switch main >/dev/null
+printf 'unpublished\n' >"$ARCHIVE/unique.py"
+if "$HELPER" >"$OUTPUT" 2>&1; then
+  echo "expected an ambiguous archived checkout to stop" >&2
+  exit 1
+fi
+grep -q 'Reconcile the archived checkout with origin/python-legacy' "$OUTPUT"
+test -f "$ARCHIVE/unique.py"
+test "$(git -C "$NATIVE" rev-parse HEAD)" = "$(git --git-dir="$REMOTE" rev-parse main)"
+
 echo "git_commit_push_all synchronization tests passed"

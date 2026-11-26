@@ -1,4 +1,4 @@
-"""Exercise the actual Compose proxy without Docker or a live runtime."""
+"""Keep historical snapshots executable and the current runtime free of client containers."""
 
 import os
 import shutil
@@ -10,11 +10,16 @@ import pytest
 import yaml
 
 
-def test_compose_proxy_readiness_authentication_lifecycle_and_ports(tmp_path):
+def test_historical_compose_proxy_readiness_authentication_lifecycle_and_ports(
+    tmp_path,
+):
     node = shutil.which("node")
     if node is None:
         pytest.skip("Node is required to exercise the Compose Web UI proxy")
-    source = (Path(__file__).resolve().parents[1] / "docker-compose.yml").read_text()
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "install_support/v1.4.31/docker-compose.yml"
+    ).read_text()
     command = yaml.safe_load(source)["services"]["web-ui"]["command"][-1]
     script = command.split("<<'NODE'\n", 1)[1].split("\nNODE\n", 1)[0]
     script = textwrap.dedent(script).replace("$$", "$")
@@ -141,3 +146,10 @@ assert.equal(remote.destroyed, true);
         env={"PATH": os.environ.get("PATH", ""), "MN_API_TOKEN": "test-token"},
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_current_compose_omits_native_web_ui():
+    current = Path(__file__).resolve().parents[1] / "docker-compose.yml"
+    document = yaml.safe_load(current.read_text())
+    assert "web-ui" not in document["services"]
+    assert "web-ui-npm-cache" not in document["volumes"]

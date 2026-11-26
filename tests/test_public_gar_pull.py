@@ -22,6 +22,66 @@ def function(name):
     return [match.group() for match in re.finditer(pattern, SOURCE, re.M | re.S)]
 
 
+@pytest.mark.parametrize(
+    ("connection", "memory", "setup_status", "build_status", "uses_swap"),
+    [
+        ("", "2048", 0, 0, True),
+        ("small-root", "2048", 0, 17, True),
+        ("small", "2048", 1, 0, True),
+        ("small", "8192", 0, 0, False),
+        ("remote", "2048", 0, 0, False),
+    ],
+)
+def test_local_image_build_memory(
+    tmp_path, connection, memory, setup_status, build_status, uses_swap
+):
+    script = r"""
+uname() { echo Darwin; }
+podman() {
+  case "$1 $2" in
+    'system connection')
+      echo 'true true small ssh://core@127.0.0.1:1000/socket'
+      echo 'false true small-root ssh://root@127.0.0.1:1000/socket'
+      echo 'false false remote ssh://root@somewhere/socket';;
+    'machine inspect') [ "${!#}" = small ] && echo "$TEST_MEMORY";;
+    'machine ssh')
+      [ "$3 $4 $5" = '--username root small' ] || return 2
+      echo setup >&2
+      [ "$TEST_SETUP" = 0 ] || return "$TEST_SETUP"
+      echo ready
+      cat >/dev/null
+      echo released >&2;;
+    *) return 2;;
+  esac
+}
+mn_build_with_registry_auth() {
+  echo "build <$1>"
+  return "$TEST_BUILD"
+}
+mn_build_runtime_image 'source path'
+"""
+    result = subprocess.run(
+        ["bash", "-eu", "-c", function("mn_build_runtime_image")[0] + "\n" + script],
+        env={
+            **os.environ,
+            "TMPDIR": str(tmp_path),
+            "CONTAINER_HOST": "",
+            "CONTAINER_CONNECTION": connection,
+            "TEST_MEMORY": memory,
+            "TEST_SETUP": str(setup_status),
+            "TEST_BUILD": str(build_status),
+        },
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    assert result.returncode == (setup_status or build_status), result.stderr
+    assert ("build <source path>" in result.stdout) == (setup_status == 0)
+    assert ("setup" in result.stderr) == uses_swap
+    assert ("released" in result.stderr) == (uses_swap and setup_status == 0)
+    assert list(tmp_path.iterdir()) == []
+
+
 def run_pull(tmp_path, *, target="core", host="", connection="", status=0, image=None):
     authfile = tmp_path / "caller auth.json"
     original = '{"credHelpers":{"us-central1-docker.pkg.dev":"gcloud"}}'

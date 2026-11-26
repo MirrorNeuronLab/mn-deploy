@@ -73,14 +73,6 @@ installer_groups = ["sdk"]
 binary_default = true
 
 [[packages]]
-name = "mirrorneuron-surface"
-path = "mn-surface"
-publish_group = "runtime"
-version = "1.4.23"
-installer_groups = ["surface"]
-binary_default = true
-
-[[packages]]
 name = "mirrorneuron-python-sdk"
 path = "mn-python-sdk"
 publish_group = "runtime"
@@ -97,24 +89,6 @@ version = "1.4.23"
 installer_groups = ["runtime-node"]
 binary_default = true
 source_hash = "v2:965c50909bb8bac91109c003a468be8ed19a6e208bef346b76d9eb170742cf45"
-
-[[packages]]
-name = "mirrorneuron-cli"
-path = "mn-cli"
-publish_group = "runtime"
-version = "1.4.13"
-installer_groups = ["cli"]
-binary_default = true
-source_hash = "v2:152467b1a8759b52a67f6660b1af2d943f41e274b8c0befdd2250d31a349268d"
-
-[[packages]]
-name = "mirrorneuron-api"
-path = "mn-api"
-publish_group = "runtime"
-version = "1.4.15"
-installer_groups = ["api"]
-binary_default = true
-source_hash = "v2:346ecc03c3007bb27044350d1d37738a40ffd6957bd313bfc227174658a29c76"
 
 [[packages]]
 name = "mirrorneuron-membrane-python-sdk"

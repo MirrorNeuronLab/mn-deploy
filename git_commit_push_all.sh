@@ -68,6 +68,62 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TARGET_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 echo "Operating on repositories in: $TARGET_DIR"
 
+prepare_checkout() {
+  local name="$1" branch="$2" paired="" archive fetch_url push_url
+  local legacy_ref="refs/remotes/origin/python-legacy"
+  case "$name" in
+  mn-api | mn-cli) paired="$name" ;;
+  mn-client-support) paired="mn-surface" ;;
+  esac
+
+  if ! git remote get-url origin >/dev/null 2>&1; then
+    if [ -n "$paired" ] && [ -f Cargo.toml ]; then
+      for archive in "$TARGET_DIR/$paired-old" "$TARGET_DIR/${paired}_old"; do
+        [ -e "$archive/.git" ] || continue
+        fetch_url=$(git -C "$archive" remote get-url origin) || return 1
+        push_url=$(git -C "$archive" remote get-url --push origin) || return 1
+        git remote add origin "$fetch_url"
+        if [ "$push_url" != "$fetch_url" ]; then
+          git remote set-url --push origin "$push_url"
+        fi
+        echo "Configured origin from the paired ${archive##*/} checkout."
+        break
+      done
+    fi
+    if ! git remote get-url origin >/dev/null 2>&1; then
+      echo "error: $name has no origin. Configure its Git remote and rerun." >&2
+      return 1
+    fi
+  fi
+
+  case "$name" in
+  mn-api-old | mn-api_old | mn-cli-old | mn-cli_old | mn-surface-old | mn-surface_old)
+    if [ "$branch" = python-legacy ]; then
+      return
+    fi
+    # A pre-migration archive can still have main checked out at the Python tip.
+    # Changing only its branch name preserves any pending edits to that tree.
+    if [ "$branch" = main ] &&
+      git fetch --no-tags origin "refs/heads/python-legacy:$legacy_ref" &&
+      [ "$(git rev-parse HEAD)" = "$(git rev-parse "$legacy_ref")" ]; then
+      if ! git show-ref --verify --quiet refs/heads/python-legacy; then
+        git switch --track -c python-legacy origin/python-legacy
+        return
+      elif [ "$(git rev-parse python-legacy)" = "$(git rev-parse HEAD)" ]; then
+        git switch python-legacy
+        return
+      fi
+    fi
+    echo "error: $name is on $branch. Reconcile the archived checkout with origin/python-legacy and switch to python-legacy." >&2
+    return 1
+    ;;
+  esac
+  if [ -n "$paired" ] && [ "$branch" = python-legacy ]; then
+    echo "error: $name is the Rust checkout. Switch to its Rust development branch before publishing." >&2
+    return 1
+  fi
+}
+
 validate_repo_before_commit() {
   if git ls-files --error-unmatch mix.exs >/dev/null 2>&1; then
     if [ ! -s mix.exs ]; then
@@ -145,10 +201,14 @@ for dir in "$TARGET_DIR"/*/; do
     echo "Processing repo: $dir"
     cd "$dir"
 
+    prepare_checkout "$(basename "$dir")" "$(git branch --show-current)"
     validate_repo_before_commit
 
     # Get current branch and pull latest changes
-    BRANCH=$(git rev-parse --abbrev-ref HEAD)
+    BRANCH=$(git symbolic-ref --quiet --short HEAD) || {
+      echo "error: detached HEAD in $dir. Switch to the branch you intend to publish." >&2
+      exit 1
+    }
     sync_branch_before_commit "$BRANCH"
 
     if ((${#FORMAT_HOOKS[@]})); then

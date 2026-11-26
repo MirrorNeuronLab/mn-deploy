@@ -35,13 +35,12 @@ startup policy and historical support snapshots unchanged.
 | Install                       | Components                                             | Home            |
 | ----------------------------- | ------------------------------------------------------ | --------------- |
 | `./install.sh`                | CLI/API and runtime, attached automatically            | `~/.mn`         |
-| `./install.sh --no-runtime`   | CLI/API and Python libraries                           | `~/.mn-client`  |
+| `./install.sh --no-runtime`   | Native Rust CLI, API and client support                | `~/.mn`         |
 | `./install.sh --runtime-only` | Core, native runtime, Redis and execution dependencies | `~/.mn-runtime` |
 
-Honor `MN_HOME` to choose a directory. The two role flags cannot be combined;
-source modes visibly ignore them and install both parts. Roles persist across
-reinstall and cannot be converted implicitly. Full/runtime services start by
-default; `--no-start` prepares them without starting. Client mode starts nothing.
+The client uses the same `~/.mn` default as a full installation. Set `MN_HOME` to choose a separate home when both roles share a computer. An unpinned checkout install builds the three sibling Rust packages with Cargo. A standalone binary install downloads checksummed native executables. All three modes honor `--no-runtime`. Client-only installation runs under the current user and starts no services.
+
+To prepare binary assets on a release platform, run `scripts/package-rust-client.sh /path/to/dist`. The CLI release owns `mn-<target>`, the API release owns `mn-api-<target>` and `mn-web-ui-server-<target>`, and the support release owns `mn-client-support-<target>`. Each asset has a matching `.sha256` file. To install from a local artifact directory, run `MN_CLIENT_DIST_DIR=/path/to/dist ./install.sh --mode binary --no-runtime`.
 
 ```bash
 ./install.sh --no-runtime
@@ -119,6 +118,11 @@ and Compose provider with anonymous registry credentials. Custom gateway and
 Core images use the caller's registry credentials. Source builds also use the
 caller's credentials for private base images. If a credential helper fails
 before Podman submits the build, the installer retries it anonymously.
+
+When a Core or Membrane source build runs on a locally managed macOS Podman
+machine with less than 6 GiB of RAM, the installer uses free guest disk space
+to bring RAM plus swap to 6 GiB for the build. The guest releases temporary
+swap when the build exits, including on failure.
 
 ## Installer compatibility fix (unreleased)
 
@@ -318,6 +322,11 @@ settings. The pending files include untracked files and changes in unpublished
 local commits. A formatting error stops that repository before commit or push.
 The usual validation hooks run at push time.
 
+The Rust client checkouts publish from `mn-api`, `mn-cli`, and `mn-client-support`.
+Their Python archives in `mn-api-old`, `mn-cli-old`, and `mn-surface-old` track
+the `python-legacy` branch of each corresponding repository. A Rust checkout
+with a missing `origin` inherits the remote from its paired archive.
+
 The bulk helper fetches the current branch and all remote tags before updating.
 It commits uncommitted changes and pushes unpublished commits, including when
 the working tree is already clean. Pushes use fast-forward history; divergent
@@ -497,7 +506,7 @@ ensure-context-engine` performs the same package preparation for an existing
   `package-index/python-packages.toml`.
   The inventory includes the optional `mirrorneuron-computer-use-skill`; it is
   not a binary installer default and requires separate native OS grants to run.
-- Binary mode uses one GAR project as its artifact authority. Python packages
+- Binary mode downloads the native clients from tagged GitHub releases. Runtime Python packages
   come from
   `https://us-central1-python.pkg.dev/mirrorneuron-public-packages/agent-skills/simple/`, with public dependencies resolved directly from PyPI; the Web UI comes from `https://us-central1-npm.pkg.dev/mirrorneuron-public-packages/mirrorneuron-npm/`, while its public build dependencies come directly from npmjs;
   and runtime images come from the `mirrorneuron-runtime` Docker repository.

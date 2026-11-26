@@ -148,7 +148,7 @@ ensure-context-engine` prepare the configured image before it is needed. A
 blueprint that requires context memory may start that prepared image but must
 not build or clone Membrane source.
 
-The local Web UI Compose service may proxy an external job UI only after it
+The native Web UI server may proxy an external job UI only after it
 loads that job's authenticated durable UI handle from the local API. Its target
 host is fixed by that handle and its ports are limited to the handle's declared
 allowlist; it is never a general LAN proxy or browser redirect to a remote
@@ -179,13 +179,12 @@ are separate settings; historical support snapshots retain their released defaul
   publishing/install flows.
 - Computer Use is indexed as the optional `mirrorneuron-computer-use-skill`
   distribution; declaring it does not enable native desktop control at install.
-- The configured GAR project is the sole binary artifact authority. Its Python,
-  npm, and Docker artifacts use format-specific repositories.
+- The native clients ship as platform archives in tagged GitHub releases.
+  The configured GAR project supplies Python packages, Web UI assets and
+  runtime images through its Python, npm and Docker repositories.
 - Version changes across scripts, snapshots, package metadata, and artifacts
   must remain coherent.
-- Snapshot creation rejects a Docker Compose template whose default Web UI npm
-  version does not match the requested release version or whose GAR npm
-  registry is missing.
+- The release snapshot contains the runtime Compose template and its Python inventory. Client-only mode installs the native Rust binaries in a single generation under `MN_HOME`. Both public facades call the support component over WIT and Core uses its versioned gRPC contract.
 - Historical snapshots are not rewritten to adopt current defaults.
 
 ## Safety and Security
@@ -247,6 +246,10 @@ Preview never prepares an environment or installs dependencies.
 - The bulk commit/push helper publishes existing local commits even when the
   working tree is clean. Remote updates are fast-forwarded before local work
   is committed; pushes never force-update remote history.
+- Rust clients use `main` for published implementations. The paired Python
+  archive directories publish only to `python-legacy`. A legacy checkout on
+  `main` switches automatically when its commit matches the published Python
+  tip. A Rust checkout can inherit a missing `origin` from its paired archive.
 - After synchronization, `--markdown-prettier` applies Prettier to Markdown
   and `--ruff-format` applies Ruff to Python files and type stubs. Each
   flag is optional and the two may be combined.
@@ -355,6 +358,10 @@ install-support snapshots remain immutable.
 The engine version is independent of the aggregate installer `--version`;
 `MN_MEMBRANE_ENGINE_IMAGE_TAG` remains the explicit engine-tag override.
 
+Core and Membrane source builds on small local macOS Podman machines can use
+temporary guest swap to reach 6 GiB of combined build memory. Each build owns
+and releases its allocation. Remote connections use their configured resources.
+
 Use `./install.sh --mode local --build-membrane` to build the Membrane runtime
 image from the sibling `Membrane` checkout. `MN_MEMBRANE_DIR` may select another
 local checkout. Binary and GitHub modes ignore this flag and use GAR images.
@@ -449,15 +456,14 @@ Legacy model and worker identifiers remain accepted by the SDK and Core.
 
 ## Federated live Web UI routing
 
-The Compose Web UI proxy consumes the API's `mn.web_ui.transport.v1` owner route
+The native Web UI proxy consumes the API's `mn.web_ui.transport.v1` owner route
 for HTTP assets, streams and WebSockets. It forwards the current execution and
 one relay hop using server-side API credentials, and strips those credentials
 from direct worker requests. Same-origin API calls use the installed surface
 credential when the request has no Authorization header. Browser-facing job
 pages receive their local proxy path for companion connections. Private Docker
 addresses are resolved on their hosting computer. Client disconnects close
-upstream connections. Established WebSockets stay open after the handshake. Keep this
-contract aligned with the Python Web UI server.
+upstream connections. Established WebSockets stay open after the handshake.
 
 ## Native computer-use app releases
 

@@ -30,14 +30,15 @@ exec 3>&1
 # MirrorNeuron releases by installation source.
 # Core is a GAR Podman image.
 MN_DEFAULT_CORE_VERSION="${MN_DEFAULT_CORE_VERSION:-v1.4.1}"
-# SDK, CLI, and API are pip packages.
+# The SDK uses pip. The native client has its own release line.
+MN_DEFAULT_CLIENT_VERSION="${MN_DEFAULT_CLIENT_VERSION:-v2.0.0}"
 MN_DEFAULT_PYTHON_SDK_VERSION="${MN_DEFAULT_PYTHON_SDK_VERSION:-v1.4.23}"
-MN_DEFAULT_CLI_VERSION="${MN_DEFAULT_CLI_VERSION:-v1.4.13}"
-MN_DEFAULT_API_VERSION="${MN_DEFAULT_API_VERSION:-v1.4.15}"
+MN_DEFAULT_CLI_VERSION="${MN_DEFAULT_CLI_VERSION:-v2.0.0}"
+MN_DEFAULT_API_VERSION="${MN_DEFAULT_API_VERSION:-v2.0.0}"
 # Web UI is a GAR npm package (the installer strips the leading `v`).
 MN_DEFAULT_WEB_UI_VERSION="${MN_DEFAULT_WEB_UI_VERSION:-v1.4.3}"
 # Additional pip packages are selected from the versioned package index.
-MN_DEFAULT_AGENT_PACKAGE_INDEX_VERSION="${MN_DEFAULT_AGENT_PACKAGE_INDEX_VERSION:-v1.4.31}"
+MN_DEFAULT_AGENT_PACKAGE_INDEX_VERSION="${MN_DEFAULT_AGENT_PACKAGE_INDEX_VERSION:-v2.0.0}"
 # Membrane v2 context engine is a GAR Podman image.
 MN_DEFAULT_MEMBRANE_CONTEXT_ENGINE_VERSION="${MN_DEFAULT_MEMBRANE_CONTEXT_ENGINE_VERSION:-v1.4.0}"
 
@@ -55,7 +56,6 @@ MN_DEFAULT_WEB_UI_NPM_REGISTRY="${MN_DEFAULT_WEB_UI_NPM_REGISTRY:-https://us-cen
 
 # Podman images started directly by the installer or generated Compose config.
 MN_DEFAULT_REDIS_IMAGE="${MN_DEFAULT_REDIS_IMAGE:-docker.io/library/redis:8}"
-MN_DEFAULT_WEB_UI_IMAGE="${MN_DEFAULT_WEB_UI_IMAGE:-docker.io/library/node:22-alpine}"
 # These upstream images intentionally retain their existing mutable `latest`
 # policy. Replace `latest` with a release tag or digest here to pin them.
 MN_DEFAULT_SYNCTHING_IMAGE="${MN_DEFAULT_SYNCTHING_IMAGE:-docker.io/syncthing/syncthing:latest}"
@@ -74,8 +74,9 @@ MN_DEFAULT_UV_VERSION="${MN_DEFAULT_UV_VERSION:-}"
 # Model artifacts referenced by generated Compose configuration.
 MN_DEFAULT_LLM_MODEL_RUNNER_MODEL="${MN_DEFAULT_LLM_MODEL_RUNNER_MODEL:-nemotron-3.5-bolt-e4b:q4_k_m}"
 
+MN_INSTALL_MODE_EXPLICIT=N
+if [ -n "${MN_INSTALL_MODE:-}" ]; then MN_INSTALL_MODE_EXPLICIT=Y; fi
 MN_INSTALL_MODE="${MN_INSTALL_MODE:-binary}"
-MN_INSTALL_MODE_EXPLICIT="N"
 MN_INSTALL_HELP_REQUESTED="N"
 MN_INSTALL_HELP_ALL="N"
 MN_INSTALL_VERBOSE="${MN_INSTALL_VERBOSE:-N}"
@@ -92,7 +93,7 @@ MN_MEMBRANE_BUILD_PREPARED="N"
 # snapshot while the component pins above select each published artifact.
 MN_DEFAULT_INSTALL_VERSION="${MN_DEFAULT_INSTALL_VERSION:-v1.4.0}"
 # Support snapshots can advance independently when repairing component packages.
-MN_DEFAULT_INSTALL_SUPPORT_VERSION="${MN_DEFAULT_INSTALL_SUPPORT_VERSION:-v1.4.31}"
+MN_DEFAULT_INSTALL_SUPPORT_VERSION="${MN_DEFAULT_INSTALL_SUPPORT_VERSION:-v2.0.0}"
 MN_INSTALL_VERSION="${MN_INSTALL_VERSION:-}"
 MN_INSTALL_SCRIPT_NAME="$(basename "${MN_INSTALL_STREAM_NAME:-$0}")"
 MN_INSTALL_ARGS=()
@@ -245,7 +246,7 @@ Install a local runtime with Podman setup, or a client for a remote node.
 Component choices use defaults. sudo can prompt in a terminal to install Podman.
 
 Common options:
-  --no-runtime       Client mode: CLI/API only. Home: ~/.mn-client.
+  --no-runtime       Client mode: CLI/API only. Home: ~/.mn.
   --runtime-only     Runtime mode: execution services only. Home: ~/.mn-runtime.
                      Binary only. Override either home with MN_HOME.
   --mode MODE        binary (default), github, or local source.
@@ -278,7 +279,7 @@ Common controls (available before mode-specific setup):
   --mode MODE          binary (released packages, default), github, or local.
   --no-runtime         Client mode: install CLI/API for remote execution only.
   --runtime-only       Runtime mode: execution services without CLI/API or Web UI.
-                       Default home: ~/.mn-client. Ignored in source modes.
+                       Default home: ~/.mn.
   --start-podman       Start existing Podman only; install nothing.
   --detect-only        Print installation status as JSON; make no changes.
   --reset              Permanently clear existing data; always requires typing YES.
@@ -691,9 +692,73 @@ function mn_report_podman_failure() {
   fi
 }
 
+# Hold temporary swap only while compiling on a small, locally managed Mac VM.
+# The SSH session owns the file so a disconnected installer also releases it.
+function mn_build_runtime_image() (
+  local machine="" memory reply guest
+  if [ "$(uname -s)" = Darwin ] && [ -z "${CONTAINER_HOST:-}" ]; then
+    machine="$(podman system connection list --format '{{.Default}} {{.IsMachine}} {{.Name}} {{.URI}}' 2>/dev/null |
+      awk -v selected="${CONTAINER_CONNECTION:-}" '
+        $2 == "true" && (selected == "" ? $1 == "true" : $3 == selected) {
+          if ($4 ~ /^ssh:\/\/root@/) sub(/-root$/, "", $3)
+          print $3; exit
+        }')" || machine=""
+  fi
+  memory=""
+  if [ -n "$machine" ]; then
+    memory="$(podman machine inspect --format '{{.Resources.Memory}}' "$machine" 2>/dev/null)" || memory=""
+  fi
+  if ! [[ "$memory" =~ ^[0-9]+$ ]] || [ "$memory" -ge 6144 ]; then
+    mn_build_with_registry_auth "$@"
+    return
+  fi
+
+  guest="$(
+    cat <<'GUEST'
+set -eu
+umask 077
+ram=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)
+# Other builds release their own swap as soon as they finish.
+swap=$(awk 'NR > 1 && $1 !~ /^\/var\/tmp\/mn-build-swap\./ {sum += $3} END {print sum+0}' /proc/swaps)
+needed=$(( (6144 * 1024 - ram - swap + 1023) / 1024 ))
+if [ "$needed" -gt 0 ]; then
+  file=$(mktemp /var/tmp/mn-build-swap.XXXXXXXX)
+  active=0
+  cleanup() {
+    if [ "$active" = 1 ]; then swapoff "$file" || return 1; fi
+    rm -f -- "$file"
+  }
+  trap 'cleanup || exit 1' EXIT
+  trap 'exit 1' HUP INT TERM
+  echo "Reserving ${needed} MiB of temporary Podman guest swap for the image build." >&2
+  fallocate -l "${needed}M" "$file"
+  mkswap "$file" >/dev/null
+  swapon "$file"
+  active=1
+fi
+echo ready
+cat >/dev/null
+GUEST
+  )" || return 1
+  mn_build_ready_dir="$(mktemp -d "${TMPDIR:-/tmp}/mn-build-ready.XXXXXXXX")" || return 1
+  trap 'rm -f "$mn_build_ready_dir/ready"; rmdir "$mn_build_ready_dir"' EXIT
+  mkfifo "$mn_build_ready_dir/ready" || return 1
+  set -o pipefail
+  exec 4>&1
+  # The guest writes its readiness acknowledgement to the FIFO read by the build.
+  # shellcheck disable=SC2094
+  {
+    if ! IFS= read -r reply <"$mn_build_ready_dir/ready" || [ "$reply" != ready ]; then
+      printf 'Could not prepare build memory in Podman machine %s. Check free space in its /var/tmp or increase its memory to 6144 MiB.\n' "$machine" >&2
+      return 1
+    fi
+    mn_build_with_registry_auth "$@" >&4
+  } | podman machine ssh --username root "$machine" "$guest" >"$mn_build_ready_dir/ready" 4>&-
+)
+
 function mn_run_podman_build() {
   local status
-  if mn_run_logged "Podman image build" mn_build_with_registry_auth "$@"; then
+  if mn_run_logged "Core image build" mn_build_runtime_image "$@"; then
     return 0
   else
     status=$?
@@ -919,7 +984,7 @@ function mn_print_install_summary() {
   MN_INSTALL_STAGES=3
   if [ "$MN_NO_RUNTIME" = "Y" ]; then
     mode="Client"
-    components="CLI, API"
+    components="CLI, API, client support"
     services=""
   elif [ "$MN_RUNTIME_ONLY" = "Y" ]; then
     mode="Runtime"
@@ -1260,19 +1325,15 @@ if [ "$MN_NO_RUNTIME" = "Y" ] && [ "$MN_RUNTIME_ONLY" = "Y" ]; then
   printf 'error: --no-runtime and --runtime-only cannot be combined.\n' >&3
   exit 1
 fi
-if [ "$MN_INSTALL_MODE" != binary ]; then
-  if [ "$MN_NO_RUNTIME" = "Y" ] || [ "$MN_RUNTIME_ONLY" = "Y" ]; then
-    if [ "$MN_NO_RUNTIME" = "Y" ]; then role_flag="--no-runtime"; else role_flag="--runtime-only"; fi
-    printf 'notice: %s is ignored in %s source mode; both the surface and runtime are installed.\n' "$role_flag" "$MN_INSTALL_MODE" >&3
-    MN_NO_RUNTIME="N"
-    MN_RUNTIME_ONLY="N"
-  fi
-elif [ "$MN_NO_RUNTIME" = "Y" ]; then
-  MN_INSTALL_ROLE="client"
-  export MN_HOME="${MN_HOME:-${HOME}/.mn-client}"
-elif [ "$MN_RUNTIME_ONLY" = "Y" ]; then
-  MN_INSTALL_ROLE="runtime"
+if [ "$MN_NO_RUNTIME" = Y ]; then
+  MN_INSTALL_ROLE=client
+  export MN_HOME="${MN_HOME:-${HOME}/.mn}"
+elif [ "$MN_RUNTIME_ONLY" = Y ] && [ "$MN_INSTALL_MODE" = binary ]; then
+  MN_INSTALL_ROLE=runtime
   export MN_HOME="${MN_HOME:-${HOME}/.mn-runtime}"
+elif [ "$MN_RUNTIME_ONLY" = Y ]; then
+  printf 'notice: --runtime-only is ignored in %s source mode; both parts are installed.\n' "$MN_INSTALL_MODE" >&3
+  MN_RUNTIME_ONLY=N
 fi
 export MN_INSTALL_ROLE
 
@@ -1446,7 +1507,7 @@ function mn_prepare_membrane_image() {
   # Recheck before Podman is invoked; no fallback to an older image on failure.
   mn_validate_membrane_build || return 1
   print_step "Building Membrane Podman image from local source"
-  if ! mn_run_logged "Membrane image build" mn_build_with_registry_auth --target runtime \
+  if ! mn_run_logged "Membrane image build" mn_build_runtime_image --target runtime \
     --file "$MN_BUILD_MEMBRANE_DIR/Dockerfile" \
     --tag "$(mn_selected_membrane_image '')" "$MN_BUILD_MEMBRANE_DIR"; then
     print_error "Membrane image build failed. The GAR image was not used as a fallback."
@@ -1760,7 +1821,8 @@ function mn_reset_acquire_lock_directory() {
       ;;
     esac
     current_started="$(LC_ALL=C ps -p "$owner_pid" -o lstart= 2>/dev/null || true)"
-    if [ -n "$current_started" ] && [ "$current_started" = "$owner_started" ]; then
+    if { [ -n "$current_started" ] && [ "$current_started" = "$owner_started" ]; } ||
+      { [ -z "$current_started" ] && kill -0 "$owner_pid" 2>/dev/null; }; then
       mn_reset_error "Another runtime start, install, or reset is in progress."
       exit 1
     fi
@@ -1769,7 +1831,7 @@ function mn_reset_acquire_lock_directory() {
     mkdir "$lock_directory" || exit 1
   fi
   chmod 700 "$lock_directory"
-  printf '%s|%s\n' "$$" "$(LC_ALL=C ps -p "$$" -o lstart=)" >"$lock_directory/owner"
+  printf '%s|%s\n' "$$" "$(LC_ALL=C ps -p "$$" -o lstart= 2>/dev/null || true)" >"$lock_directory/owner"
 }
 
 function mn_reset_acquire_lock() {
@@ -2269,7 +2331,7 @@ for package in packages:
     if path == "mn-python-sdk":
         continue
     sdk_component = path.startswith("mn-python-sdk/packages/") and ".." not in Path(path).parts
-    if not (sdk_component or (name == "mirrorneuron-surface" and path == "mn-surface")):
+    if not sdk_component:
         raise SystemExit(f"Invalid SDK component source path: {path}")
     extras = package.get("default_extras") or []
     suffix = "[" + ",".join(extras) + "]" if extras else ""
@@ -2314,121 +2376,290 @@ if not os.path.isabs(base) or not os.access(base, os.X_OK) or os.path.commonpath
 print(base)' "$VENV_DIR"
 }
 
-# Uses binary mode's Python resolver and release-index installer only. No runtime
-# discovery, Compose generation, cleanup, or service startup is reachable here.
+# Native Rust packages. Source installs require Cargo only at build time.
+# Release assets are named <command>-<rust-target>, with a matching .sha256.
+function mn_client_target() {
+  case "$(uname -s)/$(uname -m)" in
+  Darwin/arm64) echo aarch64-apple-darwin ;;
+  Darwin/x86_64) echo x86_64-apple-darwin ;;
+  Linux/aarch64 | Linux/arm64) echo aarch64-unknown-linux-gnu ;;
+  Linux/x86_64) echo x86_64-unknown-linux-gnu ;;
+  *)
+    print_error "No native client release for this platform. Use --mode local to build it."
+    return 1
+    ;;
+  esac
+}
+
+function mn_client_asset() {
+  local command="$1" repo="$2" tag="$3" dest="$4" target="$5" asset="$1-$5" url checksum actual
+  mn_validate_version_tag_or_exit "$tag"
+  if [ -n "${MN_CLIENT_DIST_DIR:-}" ]; then
+    cp "$MN_CLIENT_DIST_DIR/$asset" "$dest" && cp "$MN_CLIENT_DIST_DIR/$asset.sha256" "$dest.sha256" || return 1
+  else
+    url="https://github.com/MirrorNeuronLab/$repo/releases/download/$tag/$asset"
+    if ! curl --proto '=https' --proto-redir '=https' -fsSL --retry 2 "$url" -o "$dest" ||
+      ! curl --proto '=https' --proto-redir '=https' -fsSL --retry 2 "$url.sha256" -o "$dest.sha256"; then
+      print_error "Cannot download $command $tag for $target. Use a matching native release or --mode local."
+      return 1
+    fi
+  fi
+  checksum="$(awk 'NR == 1 {print $1}' "$dest.sha256")"
+  if command -v shasum >/dev/null; then actual="$(shasum -a 256 "$dest")"; else actual="$(sha256sum "$dest")"; fi
+  if ! [[ "$checksum" =~ ^[a-fA-F0-9]{64}$ ]] || [ "${actual%% *}" != "$checksum" ]; then
+    print_error "Invalid checksum for $asset."
+    return 1
+  fi
+  rm -f "$dest.sha256"
+  chmod 755 "$dest"
+}
+
+function mn_install_native_clients() (
+  set -e
+  local mode="$MN_INSTALL_MODE" root tag cli_tag api_tag repo ref command target target_dir stage gen item component_tag
+  local -a repos=(mn-client-support) commands=(mn-client-support)
+  if [ "${INSTALL_CLI:-Y}" != Y ] && [ "${INSTALL_API:-Y}" != Y ] && [ "${INSTALL_WEB_UI:-N}" != Y ]; then return 0; fi
+  root="$(cd "$(mn_script_dir)/.." && pwd)"
+  tag="${MN_CLIENT_VERSION:-$MN_DEFAULT_CLIENT_VERSION}"
+  if [ "$MN_INSTALL_ROLE" = client ]; then tag="${MN_CLIENT_VERSION:-${MN_INSTALL_VERSION:-$tag}}"; fi
+  component_tag="${MN_CLIENT_VERSION:-}"
+  if [ "$MN_INSTALL_ROLE" = client ]; then component_tag="${component_tag:-${MN_INSTALL_VERSION:-}}"; fi
+  cli_tag="${MN_CLI_VERSION_OVERRIDE:-${MN_CLI_VERSION:-${component_tag:-$MN_DEFAULT_CLI_VERSION}}}"
+  api_tag="${MN_API_VERSION_OVERRIDE:-${MN_API_VERSION:-${component_tag:-$MN_DEFAULT_API_VERSION}}}"
+  tag="v${tag#v}"
+  cli_tag="v${cli_tag#v}"
+  api_tag="v${api_tag#v}"
+  if [ "${INSTALL_CLI:-Y}" = Y ]; then
+    repos+=(mn-cli)
+    commands+=(mn)
+  fi
+  if [ "${INSTALL_API:-Y}" = Y ] || [ "${INSTALL_WEB_UI:-N}" = Y ]; then
+    repos+=(mn-api)
+    if [ "${INSTALL_API:-Y}" = Y ]; then commands+=(mn-api); fi
+    commands+=(mn-web-ui-server)
+  fi
+  mkdir -p "$INSTALL_DIR/bin" "$INSTALL_DIR/client-releases"
+  stage="$(mktemp -d "$INSTALL_DIR/client-releases/.stage.XXXXXXXX")"
+  trap 'rm -rf "$stage"' EXIT
+  mkdir "$stage/bin"
+  case "$mode" in
+  local | github)
+    command -v cargo >/dev/null || {
+      print_error "Cargo is required to build the Rust client. Install Rust in your user account or use a binary release."
+      return 1
+    }
+    if [ "$mode" = github ]; then
+      root="$stage/src"
+      mkdir "$root"
+      for repo in "${repos[@]}"; do
+        ref="${MN_CLIENT_VERSION:-${MN_INSTALL_VERSION:-}}"
+        case "$repo" in mn-cli) ref="${MN_CLI_VERSION_OVERRIDE:-${MN_CLI_VERSION:-$ref}}" ;; mn-api) ref="${MN_API_VERSION_OVERRIDE:-${MN_API_VERSION:-$ref}}" ;; esac
+        if [ -n "$ref" ]; then
+          GIT_TERMINAL_PROMPT=0 git clone --depth 1 --branch "$ref" "https://github.com/MirrorNeuronLab/$repo.git" "$root/$repo"
+        else GIT_TERMINAL_PROMPT=0 git clone --depth 1 "https://github.com/MirrorNeuronLab/$repo.git" "$root/$repo"; fi
+      done
+    fi
+    target_dir="${CARGO_TARGET_DIR:-$INSTALL_DIR/cache/rust-client}"
+    for repo in "${repos[@]}"; do
+      [ -f "$root/$repo/Cargo.toml" ] || {
+        print_error "Missing Rust checkout at $root/$repo."
+        return 1
+      }
+      cargo build --quiet --locked --release --bins --manifest-path "$root/$repo/Cargo.toml" --target-dir "$target_dir"
+    done
+    for command in "${commands[@]}"; do
+      cp "$target_dir/release/$command" "$stage/bin/$command"
+      chmod 755 "$stage/bin/$command"
+    done
+    ;;
+  binary)
+    target="$(mn_client_target)" || return 1
+    for command in "${commands[@]}"; do
+      case "$command" in mn)
+        repo=mn-cli
+        ref="$cli_tag"
+        ;;
+      mn-api | mn-web-ui-server)
+        repo=mn-api
+        ref="$api_tag"
+        ;;
+      *)
+        repo=mn-client-support
+        ref="$tag"
+        ;;
+      esac
+      mn_client_asset "$command" "$repo" "$ref" "$stage/bin/$command" "$target" || return 1
+    done
+    ;;
+  esac
+  for command in "${commands[@]}"; do "$stage/bin/$command" --version >/dev/null; done
+  # Keep running API processes paired with their original support executable.
+  # The shared link changes only after every binary is present and executable.
+  gen="$(mktemp -d "$INSTALL_DIR/client-releases/rust.XXXXXXXX")"
+  mv "$stage/bin" "$gen/bin"
+  ln -s "client-releases/${gen##*/}" "$stage/active"
+  # GNU and BSD mv expose different flags for replacing a directory symlink.
+  mv -fT "$stage/active" "$INSTALL_DIR/client-current" 2>/dev/null ||
+    mv -fh "$stage/active" "$INSTALL_DIR/client-current"
+  for command in "${commands[@]}"; do
+    ln -s "../client-current/bin/$command" "$stage/$command"
+    mv -f "$stage/$command" "$INSTALL_DIR/bin/$command"
+  done
+  print_detail "Command links: $INSTALL_DIR/bin"
+  # Runtime lifecycle discovers these names in its own executable directory.
+  if [ "$MN_INSTALL_ROLE" != client ] && [ -d "${VENV_DIR:-}/bin" ]; then
+    for item in "${commands[@]}"; do ln -sfn "$INSTALL_DIR/bin/$item" "$VENV_DIR/bin/$item"; done
+  fi
+)
+
+# Full installations serve these static assets with mn-web-ui-server. Local
+# checkouts can supply a built dist. Binary installs use the published web app.
+function mn_prepare_native_web_assets() {
+  local source="${MN_WEB_UI_DIST_DIR:-${1:-}}" destination="$INSTALL_DIR/webui"
+  [ "${INSTALL_WEB_UI:-N}" = Y ] || return 0
+  if [ -n "$source" ] && { [ -f "$source/dist/index.html" ] || [ -f "$source/index.html" ]; }; then
+    source="$(cd "$source" && pwd -P)"
+    if [ -L "$destination" ] || [ ! -e "$destination" ]; then
+      ln -sfn "$source" "$destination"
+      return
+    fi
+    if [ -f "$destination/dist/index.html" ] || [ -f "$destination/index.html" ]; then return; fi
+    if [ ! -e "$INSTALL_DIR/web-ui-source" ] || [ -L "$INSTALL_DIR/web-ui-source" ]; then
+      ln -sfn "$source" "$INSTALL_DIR/web-ui-source"
+      return
+    fi
+  fi
+  if [ "${MN_INSTALL_MODE:-}" != binary ] && { [ -f "$destination/dist/index.html" ] || [ -f "$destination/index.html" ]; }; then return 0; fi
+  local registry="${MN_WEB_UI_NPM_REGISTRY:-https://${MN_GAR_LOCATION:-$MN_DEFAULT_PYTHON_GAR_LOCATION}-npm.pkg.dev/${MN_GAR_PROJECT:-$MN_DEFAULT_CORE_GAR_PROJECT}/${MN_GAR_NPM_REPOSITORY:-$MN_DEFAULT_WEB_UI_GAR_NPM_REPOSITORY}/}"
+  local version="${MN_WEB_UI_PACKAGE_VERSION:-${MN_DEFAULT_WEB_UI_VERSION#v}}"
+  print_step "Installing the Web UI assets for the native server"
+  "${VENV_DIR}/bin/python" - "$INSTALL_DIR" "$registry" "$version" <<'PY_WEB_DIST'
+import base64, hashlib, json, os, shutil, sys, tarfile, tempfile, urllib.request
+from pathlib import Path, PurePosixPath
+from urllib.parse import quote, urlsplit
+
+home, registry, version = Path(sys.argv[1]), sys.argv[2].rstrip("/"), sys.argv[3]
+target = home / "web-ui-assets" / version
+if not (target / "dist/index.html").is_file():
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=target.parent) as tmp:
+        tmp = Path(tmp)
+        if urlsplit(registry).scheme != "https":
+            raise SystemExit("The Web UI package registry must use HTTPS.")
+        with urllib.request.urlopen(f"{registry}/mirrorneuron-web-ui/{quote(version, safe='')}", timeout=30) as response:
+            artifact = json.load(response)["dist"]
+        if urlsplit(artifact["tarball"]).scheme != "https":
+            raise SystemExit("The Web UI download must use HTTPS.")
+        with urllib.request.urlopen(artifact["tarball"], timeout=60) as response, (tmp / "package.tgz").open("wb") as out:
+            shutil.copyfileobj(response, out)
+        with (tmp / "package.tgz").open("rb") as source:
+            digest = base64.b64encode(hashlib.file_digest(source, "sha512").digest()).decode()
+        if "sha512-" + digest not in artifact["integrity"].split():
+            raise SystemExit("Invalid Web UI package checksum.")
+        with tarfile.open(tmp / "package.tgz") as archive:
+            for item in archive:
+                name = PurePosixPath(item.name)
+                if name.parts[:2] != ("package", "dist") or not item.isfile():
+                    continue
+                if ".." in name.parts:
+                    raise SystemExit("Invalid Web UI asset path.")
+                out = tmp.joinpath("site", *name.parts[1:])
+                out.parent.mkdir(parents=True, exist_ok=True)
+                with archive.extractfile(item) as source, out.open("xb") as destination:
+                    shutil.copyfileobj(source, destination)
+        if not (tmp / "site/dist/index.html").is_file():
+            raise SystemExit("Web UI package is missing dist/index.html.")
+        os.rename(tmp / "site", target)
+for name in ("webui", "web-ui-source"):
+    link = home / name
+    if link.is_symlink() or not link.exists():
+        with tempfile.TemporaryDirectory(dir=home) as tmp:
+            stage = Path(tmp) / "active"
+            stage.symlink_to(target)
+            os.replace(stage, link)
+        break
+else:
+    raise SystemExit("Existing Web UI directories occupy both managed asset locations.")
+PY_WEB_DIST
+}
+
 function mn_install_client() {
-  local arg confirmation=""
-  for arg in ${MN_INSTALL_ARGS[@]+"${MN_INSTALL_ARGS[@]}"}; do
+  local arg confirmation="" reinstall=Y
+  while [ "$#" -gt 0 ]; do
+    arg="$1"
+    shift
     case "$arg" in
-    --web-ui | --redis | --context-engine | --openshell | --syncthing | --start | --agents | --no-cli | --no-api | --no-python-sdk | --python-components | --python-components=*)
-      print_error "${arg} conflicts with --no-runtime. Client mode installs CLI/API and their Python dependencies only."
+    --no-reinstall) reinstall=N ;;
+    --no-start | --no-web-ui | --no-redis | --no-agents | --no-context-engine | --no-openshell | --cli | --api) ;;
+    --gar-project | --gar-location | --gar-repository)
+      [ "$#" -gt 0 ] || {
+        print_error "Missing value after $arg."
+        return 1
+      }
+      shift
+      ;;
+    --cli-version | --api-version)
+      [ "$#" -gt 0 ] || {
+        print_error "Missing version after $arg."
+        return 1
+      }
+      mn_validate_version_tag_or_exit "$1"
+      if [ "$arg" = --cli-version ]; then MN_CLI_VERSION="$1"; else MN_API_VERSION="$1"; fi
+      shift
+      ;;
+    *)
+      print_error "$arg conflicts with --no-runtime. Client mode installs the Rust CLI, API and client support."
       return 1
       ;;
     esac
   done
+  if [ "$MN_BUILD_MEMBRANE" = Y ]; then
+    print_error "--build-membrane conflicts with --no-runtime."
+    return 1
+  fi
   mn_reset_resolve_home_or_exit
   INSTALL_DIR="$MN_RESET_HOME"
   export MN_HOME="$INSTALL_DIR"
-  VENV_DIR="$INSTALL_DIR/venv"
   BIN_DIR="$INSTALL_DIR/bin"
-  INSTALL_METADATA_FILE="$INSTALL_DIR/install_metadata.json"
-  if [ -f "$INSTALL_DIR/docker-compose.yml" ] || [ -f "$INSTALL_DIR/docker-compose.env" ] ||
-    [ -L "$INSTALL_DIR/bin" ] ||
+  local root
+  root="$(cd "$(mn_script_dir)/.." && pwd)"
+  # The unpinned workspace invocation tests the sibling checkouts. Explicit
+  # binary mode, streamed installs and version pins always select release assets.
+  if [ "$MN_INSTALL_MODE" = binary ] && [ "$MN_INSTALL_MODE_EXPLICIT" = N ] && [ -z "${MN_INSTALL_STREAM_NAME:-}${MN_INSTALL_VERSION:-}${MN_CLIENT_VERSION:-}${MN_CLIENT_DIST_DIR:-}${MN_CLI_VERSION:-}${MN_API_VERSION:-}${MN_CLI_VERSION_OVERRIDE:-}${MN_API_VERSION_OVERRIDE:-}" ] &&
+    [ -f "$root/mn-client-support/Cargo.toml" ] && [ -f "$root/mn-cli/Cargo.toml" ] && [ -f "$root/mn-api/Cargo.toml" ]; then MN_INSTALL_MODE=local; fi
+  print_header
+  mn_print_install_summary
+  mn_print_stage "Checking requirements"
+  if [ -L "$BIN_DIR" ] || [ -L "$INSTALL_DIR/client-releases" ] || [ -e "$INSTALL_DIR/docker-compose.yml" ] || [ -e "$INSTALL_DIR/docker-compose.env" ] ||
     { [ -d "$INSTALL_DIR" ] && [ -n "$(find "$INSTALL_DIR" -mindepth 1 -maxdepth 1 -print -quit)" ] && ! mn_is_client_home "$INSTALL_DIR"; }; then
-    print_error "MN_HOME contains an existing installation or other files. Choose an empty directory for client mode."
+    print_error "Choose an empty directory or an existing client installation for MN_HOME."
     return 1
   fi
-  if [ "$REINSTALL" = "N" ] && mn_is_client_home "$INSTALL_DIR" && [ "$MN_INSTALL_RESET" != "Y" ] &&
-    [ -x "$BIN_DIR/mn" ] && [ -x "$BIN_DIR/mn-api" ] && [ -x "$VENV_DIR/bin/mn" ] && [ -x "$VENV_DIR/bin/mn-api" ]; then
-    print_success "Keeping the existing client installation."
-    return 0
-  fi
-  if [ "$MN_INSTALL_RESET" = "Y" ]; then
-    printf 'warning: Reset permanently removes this client connection, credentials, logs and downloaded results.\nType YES to reset this client installation: ' >&3
-    if [ -t 0 ]; then
-      IFS= read -r confirmation || confirmation=""
-    elif { exec 4</dev/tty; } 2>/dev/null; then
-      IFS= read -r confirmation <&4 || confirmation=""
-      exec 4<&-
-    else
-      IFS= read -r confirmation || confirmation=""
-    fi
-    if [ "$confirmation" != "YES" ]; then
-      print_warning "Reset cancelled; no client data was changed."
+  if [ "$MN_INSTALL_RESET" = Y ]; then
+    printf 'Reset removes this client connection, credentials, logs and downloads. Type YES to continue: ' >&3
+    IFS= read -r confirmation || confirmation=""
+    if [ "$confirmation" != YES ]; then
+      print_warning "Reset cancelled."
       return 0
     fi
     rm -f "$INSTALL_DIR/client.json" "$INSTALL_DIR/api.token"
     rm -rf "$INSTALL_DIR/outputs" "$INSTALL_DIR/logs"
+  elif [ "$reinstall" = N ] && [ -x "$BIN_DIR/mn" ] && [ -x "$BIN_DIR/mn-api" ] && [ -x "$BIN_DIR/mn-client-support" ]; then
+    print_success "Keeping the existing Rust client."
+    return 0
   fi
   umask 077
   mkdir -p "$INSTALL_DIR"
-  # Mark partial installs too, so retry cannot mistake them for runtime homes.
-  if [ ! -f "$INSTALL_METADATA_FILE" ]; then
-    printf '{"install_role":"client","install_type":"binary"}\n' >"$INSTALL_METADATA_FILE"
+  if [ ! -f "$INSTALL_DIR/install_metadata.json" ]; then
+    printf '{"install_role":"client","install_type":"%s"}\n' "$MN_INSTALL_MODE" >"$INSTALL_DIR/install_metadata.json"
   fi
-  mn_prepare_installer_paths
-  INSTALL_CLI="Y"
-  INSTALL_API="Y"
-  INSTALL_PYTHON_SDK="N"
-  INSTALL_AGENTS="N"
-  INSTALL_CONTEXT_ENGINE="N"
-  INSTALL_WEB_UI="N"
-  INSTALL_REDIS="N"
-  START_NOW="N"
-  print_header
-  mn_print_install_summary
-  mn_print_stage "Checking requirements"
-  mn_ensure_python_package_index_file
-  resolve_python_runtime
-  ensure_pip
-  mn_print_stage "Installing CLI and API"
-  "$MN_PYTHON_BIN" - "$INSTALL_DIR" <<'PY'
-import os, secrets, sys
-from pathlib import Path
-home = Path(sys.argv[1])
-token = home / "api.token"
-if not token.exists():
-    fd = os.open(token, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(fd, "w") as output:
-        output.write(secrets.token_urlsafe(32) + "\n")
-PY
-  (
-    client_backup="${VENV_DIR}.client-backup.$$"
-    client_success="N"
-    trap 'if [ "$client_success" != "Y" ]; then rm -rf "$VENV_DIR"; if [ -d "$client_backup" ]; then mv "$client_backup" "$VENV_DIR"; fi; fi' EXIT
-    if [ -e "$VENV_DIR" ]; then mv "$VENV_DIR" "$client_backup"; fi
-    install_python_packages
-    # Fail an incompatible old package selection before replacing command links.
-    local client_imports
-    if [ -n "$(indexed_requirements_for_group surface)" ]; then
-      client_imports='from mn_surface import RuntimeControlClient; from mn_sdk_shared.runtime.connection import installation_role'
-    else
-      client_imports='from mn_sdk.runtime_connection import installation_role; from mn_sdk.runtime_control import RuntimeControlClient'
-    fi
-    run_quiet "client-package-check" "$VENV_DIR/bin/python" -c "$client_imports; from mn_cli.main import app; from mn_api.app import create_app; assert installation_role() == 'client'; create_app()"
-    client_success="Y"
-    rm -rf "$client_backup"
-  )
-  mn_print_stage "Configuring commands"
-  "$MN_PYTHON_BIN" - "$INSTALL_DIR" "$INSTALL_VERSION" "$CLI_INSTALL_VERSION" <<'PY'
-import json, shlex, sys
-from pathlib import Path
-home = Path(sys.argv[1])
-(home / "bin").mkdir(exist_ok=True)
-for command in ("mn", "mn-api"):
-    target = home / "bin" / command
-    # Bind commands to this installation even in a shell with a different MN_HOME.
-    content = "#!/usr/bin/env bash\nset -euo pipefail\nexport MN_HOME=" + shlex.quote(str(home))
-    content += '\nexport MN_ENV="${MN_ENV:-prod}"\nexec ' + shlex.quote(str(home / "venv/bin" / command)) + ' "$@"\n'
-    temporary = target.with_suffix(".new")
-    temporary.write_text(content)
-    temporary.chmod(0o755)
-    temporary.replace(target)
-metadata = {"install_role": "client", "install_type": "binary", "install_version": sys.argv[2], "cli_version": sys.argv[3]}
-temporary = home / "install_metadata.json.new"
-temporary.write_text(json.dumps(metadata, indent=2) + "\n")
-temporary.replace(home / "install_metadata.json")
-PY
+  INSTALL_CLI=Y
+  INSTALL_API=Y
+  mn_print_stage "Installing components"
+  print_step "Installing native Rust CLI, API and client support in $INSTALL_DIR"
+  mn_install_native_clients
+  mn_print_stage "Configuring commands and services"
+  "$BIN_DIR/mn-client-support" init-client
   mn_write_shell_environment
   mn_print_install_complete
 }
@@ -2473,7 +2704,7 @@ run_install_github() {
       [ -n "$candidate" ] || continue
       if [ -d "$candidate/mn-python-sdk" ] &&
         [ -d "$candidate/mn-python-sdk/packages/common" ] &&
-        [ -d "$candidate/mn-surface" ] &&
+        [ -d "$candidate/mn-client-support" ] &&
         [ -d "$candidate/mn-cli" ] &&
         [ -d "$candidate/mn-api" ]; then
         (cd "$candidate" && pwd)
@@ -2841,7 +3072,7 @@ Options:
   --reset                       Permanently clear runtime data first; requires typing YES.
   -v, --verbose                 Show installation details and command paths.
   --no-reinstall                Keep an existing install instead of overwriting it.
-  --web-ui / --no-web-ui        Enable or skip GitHub Web UI install/build.
+  --web-ui / --no-web-ui        Enable or skip the native Web UI.
   --redis / --no-redis          Enable or skip Redis Podman setup.
   --context-engine / --no-context-engine
                                 Enable or skip Membrane context engine setup.
@@ -3222,7 +3453,6 @@ EOF
 
   function compose_profiles() {
     local profiles=()
-    [ "$INSTALL_WEB_UI" = "Y" ] && profiles+=("web-ui")
     [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] && profiles+=("context")
     case "$(printf '%s' "$MN_SYNCTHING_ENABLED" | tr '[:upper:]' '[:lower:]')" in
     '' | 0 | false | no | n | off | disabled) ;;
@@ -3514,14 +3744,7 @@ EOF
     grpc_admin_token="$(resolve_secret_file "${MN_GRPC_ADMIN_TOKEN:-}" "${INSTALL_DIR}/grpc_admin.token" "MN_GRPC_ADMIN_TOKEN")"
     context_auth_token="$(resolve_secret_file "${MN_CONTEXT_AUTH_TOKEN:-}" "${INSTALL_DIR}/context_auth.token" "MN_CONTEXT_AUTH_TOKEN")"
     profiles="$(compose_profiles)"
-    api_host="${MN_API_HOST:-}"
-    if [ -z "$api_host" ]; then
-      if [ "$INSTALL_WEB_UI" = "Y" ]; then
-        api_host="0.0.0.0"
-      else
-        api_host="localhost"
-      fi
-    fi
+    api_host="${MN_API_HOST:-localhost}"
     litellm_gateway_bind_host="${MN_LITELLM_GATEWAY_BIND_HOST:-0.0.0.0}"
     network_name="${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
     network_external="$(resolve_docker_network_external "$network_name")"
@@ -3607,12 +3830,10 @@ MN_DIST_PORT=${MN_DIST_PORT:-54370}
 MN_WEB_UI_HOST=${MN_WEB_UI_HOST:-localhost}
 MN_WEB_UI_PORT=${MN_WEB_UI_PORT:-55173}
 MN_WEB_UI_BIND_HOST=${MN_WEB_UI_BIND_HOST:-127.0.0.1}
-MN_WEB_UI_IMAGE=${MN_WEB_UI_IMAGE:-$MN_DEFAULT_WEB_UI_IMAGE}
 MN_WEB_UI_NPM_REGISTRY=${MN_WEB_UI_NPM_REGISTRY:-https://${MN_GAR_LOCATION:-$MN_DEFAULT_PYTHON_GAR_LOCATION}-npm.pkg.dev/${MN_GAR_PROJECT:-$MN_DEFAULT_CORE_GAR_PROJECT}/${MN_GAR_NPM_REPOSITORY:-$MN_DEFAULT_WEB_UI_GAR_NPM_REPOSITORY}/}
 MN_WEB_UI_SOURCE_MODE=${MN_WEB_UI_SOURCE_MODE}
 MN_WEB_UI_SOURCE_MOUNT=${MN_WEB_UI_SOURCE_MOUNT}
 MN_WEB_UI_PACKAGE_VERSION=${MN_WEB_UI_PACKAGE_VERSION}
-MN_WEB_UI_API_HOST=${MN_WEB_UI_API_HOST:-host.containers.internal}
 MN_BLUEPRINT_WEB_UI_BIND_HOST=${MN_BLUEPRINT_WEB_UI_BIND_HOST:-0.0.0.0}
 MN_BLUEPRINT_WEB_UI_PUBLIC_HOST=${MN_BLUEPRINT_WEB_UI_PUBLIC_HOST:-localhost}
 ${runtime_port_settings}
@@ -3713,7 +3934,6 @@ EOF
   function prepare_runtime_compose_sidecars() {
     RUNTIME_COMPOSE_SIDECARS=()
     [ "$INSTALL_REDIS" = "Y" ] && RUNTIME_COMPOSE_SIDECARS+=("redis")
-    [ "$INSTALL_WEB_UI" = "Y" ] && RUNTIME_COMPOSE_SIDECARS+=("web-ui")
     grep -q '^  mn-native-sdk-grpc:' "$RUNTIME_COMPOSE_FILE" 2>/dev/null && RUNTIME_COMPOSE_SIDECARS+=("mn-native-sdk-grpc")
     grep -q '^  mn-litellm-proxy:' "$RUNTIME_COMPOSE_FILE" 2>/dev/null && RUNTIME_COMPOSE_SIDECARS+=("mn-litellm-proxy")
     if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
@@ -3813,26 +4033,13 @@ EOF
       sdk_reference="git+https://github.com/MirrorNeuronLab/mn-python-sdk.git$(github_ref_suffix)"
       local -a sdk_requirements=("mirrorneuron-python-sdk @ $sdk_reference") sdk_groups=(sdk)
       local package_name package_path package_extras component_rows
-      if [ "$INSTALL_CLI" = "Y" ] || [ "$INSTALL_API" = "Y" ]; then
-        sdk_groups+=(surface)
-      fi
       component_rows="$(mn_sdk_component_rows "${sdk_groups[@]}")" || return 1
       while IFS=$'\t' read -r package_name package_path package_extras; do
         [ -n "$package_name" ] || continue
-        if [ "$package_path" = "mn-surface" ]; then
-          sdk_requirements+=("${package_name}${package_extras} @ git+https://github.com/MirrorNeuronLab/mn-surface.git$(github_ref_suffix)")
-        else
-          sdk_requirements+=("${package_name}${package_extras} @ ${sdk_reference}#subdirectory=${package_path#mn-python-sdk/}")
-        fi
+        sdk_requirements+=("${package_name}${package_extras} @ ${sdk_reference}#subdirectory=${package_path#mn-python-sdk/}")
       done <<<"$component_rows"
       run_quiet "install-mn-python-sdk-github" "$VENV_DIR/bin/pip" install "${sdk_requirements[@]}"
-      if [ "$INSTALL_CLI" = "Y" ]; then
-        run_quiet "install-mn-cli-github" "$VENV_DIR/bin/pip" install "git+https://github.com/MirrorNeuronLab/mn-cli.git$(github_ref_suffix)"
-      fi
       run_quiet "install-mn-runtime-github" "$VENV_DIR/bin/pip" install "mirrorneuron-runtime @ git+https://github.com/MirrorNeuronLab/mn-python-sdk.git$(github_ref_suffix)#subdirectory=packages/runtime"
-      if [ "$INSTALL_API" = "Y" ]; then
-        run_quiet "install-mn-api-github" "$VENV_DIR/bin/pip" install "git+https://github.com/MirrorNeuronLab/mn-api.git$(github_ref_suffix)"
-      fi
       if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
         run_quiet "install-membrane-python-sdk-github" "$VENV_DIR/bin/pip" install "mirrorneuron-membrane-python-sdk @ git+$(context_engine_git_url)$(github_ref_suffix)#subdirectory=mn-context-engine-python-sdk"
       fi
@@ -3842,45 +4049,11 @@ EOF
     print_step "Python component installation disabled by selection."
   fi
 
-  function require_github_command_targets() {
-    local missing="N"
-    if [ "$INSTALL_CLI" = "Y" ] && [ ! -x "$VENV_DIR/bin/mn" ]; then
-      print_error "Expected executable mn CLI target was not created: $VENV_DIR/bin/mn"
-      missing="Y"
-    fi
-    if [ "$INSTALL_API" = "Y" ] && [ ! -x "$VENV_DIR/bin/mn-api" ]; then
-      print_error "Expected executable mn-api target was not created: $VENV_DIR/bin/mn-api"
-      missing="Y"
-    fi
-    if [ "$missing" = "Y" ]; then
-      print_error "GitHub Python install did not produce the required command targets; command symlinks were not created."
-      exit 1
-    fi
-  }
-
-  if [ "$INSTALL_WEB_UI" = "Y" ]; then
-    print_step "Preparing Web UI source for Compose"
-    if [ -z "${INSTALL_VERSION:-}" ] && [ -n "$SOURCE_WORKSPACE" ] && [ -d "$SOURCE_WORKSPACE/mn-web-ui" ]; then
-      print_detail "Using local Web UI source: $SOURCE_WORKSPACE/mn-web-ui"
-    fi
-    (
-      UI_DIR="${INSTALL_DIR}/webui"
-      if [ -z "${INSTALL_VERSION:-}" ] && [ -n "$SOURCE_WORKSPACE" ] && [ -d "$SOURCE_WORKSPACE/mn-web-ui" ]; then
-        rm -rf "$UI_DIR"
-        ln -s "$SOURCE_WORKSPACE/mn-web-ui" "$UI_DIR"
-      elif [ -d "$UI_DIR" ]; then
-        cd "$UI_DIR"
-        github_checkout_existing
-      else
-        run_quiet "web-ui-git-clone" github_clone https://github.com/MirrorNeuronLab/mn-web-ui.git "$UI_DIR"
-      fi
-    ) &
-    spinner $! "Preparing Web UI source"
-  fi
-
+  mn_prepare_native_web_assets "${SOURCE_WORKSPACE:+$SOURCE_WORKSPACE/mn-web-ui}"
+  mn_install_native_clients
   mn_configure_installed_runtime
   mn_print_stage "Configuring commands and services"
-  if [ "$INSTALL_REDIS" = "Y" ] || [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] || [ "$INSTALL_WEB_UI" = "Y" ]; then
+  if [ "$INSTALL_REDIS" = "Y" ] || [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
     if [ "$START_NOW" = "Y" ]; then
       prepare_runtime_compose_sidecars
       print_detail "Podman services are prepared; automatic startup uses the installed runtime lifecycle entry point."
@@ -3890,24 +4063,6 @@ EOF
       fi
       print_detail "Services are configured and remain stopped (--no-start)."
     fi
-  fi
-
-  if [ "$INSTALL_CLI" = "Y" ] || [ "$INSTALL_API" = "Y" ]; then
-    print_step "Creating command symlinks"
-    require_github_command_targets
-    mkdir -p "$BIN_DIR" "$INSTALL_DIR"
-    if [ "$INSTALL_CLI" = "Y" ]; then
-      rm -f "$BIN_DIR/mn" "$INSTALL_DIR/mn"
-      ln -s "$VENV_DIR/bin/mn" "$BIN_DIR/mn"
-      ln -s "$VENV_DIR/bin/mn" "$INSTALL_DIR/mn"
-    fi
-    if [ "$INSTALL_API" = "Y" ]; then
-      rm -f "$BIN_DIR/mn-api"
-      ln -s "$VENV_DIR/bin/mn-api" "$BIN_DIR/mn-api"
-    fi
-    print_detail "Command links: ${BIN_DIR}"
-  else
-    print_step "Command links disabled because CLI/API are not selected."
   fi
 
   if [ "$INSTALL_CLI" = "Y" ]; then
@@ -3953,7 +4108,6 @@ run_install_local() {
   INSTALL_DIR="${MN_HOME:-${HOME}/.mn}"
   BIN_DIR="${INSTALL_DIR}/bin"
   VENV_DIR="${INSTALL_DIR}/venv"
-  UI_LINK_DIR="${INSTALL_DIR}/webui"
   RUNTIME_COMPOSE_TEMPLATE="${SCRIPT_DIR}/docker-compose.yml"
   RUNTIME_COMPOSE_FILE="${INSTALL_DIR}/docker-compose.yml"
   RUNTIME_COMPOSE_ENV="${INSTALL_DIR}/docker-compose.env"
@@ -3962,7 +4116,7 @@ run_install_local() {
   CLI_DIR="${WORKSPACE_DIR}/mn-cli"
   API_DIR="${WORKSPACE_DIR}/mn-api"
   PY_SDK_DIR="${WORKSPACE_DIR}/mn-python-sdk"
-  SURFACE_DIR="${WORKSPACE_DIR}/mn-surface"
+  SURFACE_DIR="${WORKSPACE_DIR}/mn-client-support"
   WEB_UI_DIR="${WORKSPACE_DIR}/mn-web-ui"
   MN_WEB_UI_SOURCE_MODE="${MN_WEB_UI_SOURCE_MODE:-source}"
   MN_WEB_UI_SOURCE_MOUNT="${MN_WEB_UI_SOURCE_MOUNT:-${WEB_UI_DIR}}"
@@ -4248,8 +4402,8 @@ Options:
   --interactive         Ask each install question before proceeding.
   --reset               Permanently clear runtime data first; requires typing YES.
   -v, --verbose         Show installation details and command paths.
-  --web-ui              Enable the local-source Web UI Compose service.
-  --no-web-ui           Skip the local-source Web UI Compose service.
+  --web-ui              Enable the native Web UI.
+  --no-web-ui           Skip the native Web UI.
   --redis               Enable Redis Podman setup.
   --no-redis            Skip Redis Podman setup.
   --context-engine      Install/start Membrane context engine.
@@ -4872,7 +5026,6 @@ finally:
 
   function compose_profiles() {
     local profiles=()
-    [ "$INSTALL_WEB_UI" = "Y" ] && profiles+=("web-ui")
     [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] && profiles+=("context")
     case "$(printf '%s' "$MN_SYNCTHING_ENABLED" | tr '[:upper:]' '[:lower:]')" in
     '' | 0 | false | no | n | off | disabled) ;;
@@ -4951,14 +5104,7 @@ finally:
     grpc_admin_token="$(resolve_secret_file "${MN_GRPC_ADMIN_TOKEN:-}" "${INSTALL_DIR}/grpc_admin.token" "MN_GRPC_ADMIN_TOKEN")"
     context_auth_token="$(resolve_secret_file "${MN_CONTEXT_AUTH_TOKEN:-}" "${INSTALL_DIR}/context_auth.token" "MN_CONTEXT_AUTH_TOKEN")"
     profiles="$(compose_profiles)"
-    api_host="${MN_API_HOST:-}"
-    if [ -z "$api_host" ]; then
-      if [ "$INSTALL_WEB_UI" = "Y" ]; then
-        api_host="0.0.0.0"
-      else
-        api_host="localhost"
-      fi
-    fi
+    api_host="${MN_API_HOST:-localhost}"
     litellm_gateway_bind_host="${MN_LITELLM_GATEWAY_BIND_HOST:-0.0.0.0}"
     network_name="${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
     network_external="$(resolve_docker_network_external "$network_name")"
@@ -5044,12 +5190,10 @@ MN_DIST_PORT=${MN_DIST_PORT:-54370}
 MN_WEB_UI_HOST=${MN_WEB_UI_HOST:-localhost}
 MN_WEB_UI_PORT=${MN_WEB_UI_PORT:-55173}
 MN_WEB_UI_BIND_HOST=${MN_WEB_UI_BIND_HOST:-127.0.0.1}
-MN_WEB_UI_IMAGE=${MN_WEB_UI_IMAGE:-$MN_DEFAULT_WEB_UI_IMAGE}
 MN_WEB_UI_NPM_REGISTRY=${MN_WEB_UI_NPM_REGISTRY:-https://${MN_GAR_LOCATION:-$MN_DEFAULT_PYTHON_GAR_LOCATION}-npm.pkg.dev/${MN_GAR_PROJECT:-$MN_DEFAULT_CORE_GAR_PROJECT}/${MN_GAR_NPM_REPOSITORY:-$MN_DEFAULT_WEB_UI_GAR_NPM_REPOSITORY}/}
 MN_WEB_UI_SOURCE_MODE=${MN_WEB_UI_SOURCE_MODE}
 MN_WEB_UI_SOURCE_MOUNT=${MN_WEB_UI_SOURCE_MOUNT}
 MN_WEB_UI_PACKAGE_VERSION=${MN_WEB_UI_PACKAGE_VERSION}
-MN_WEB_UI_API_HOST=${MN_WEB_UI_API_HOST:-host.containers.internal}
 MN_BLUEPRINT_WEB_UI_BIND_HOST=${MN_BLUEPRINT_WEB_UI_BIND_HOST:-0.0.0.0}
 MN_BLUEPRINT_WEB_UI_PUBLIC_HOST=${MN_BLUEPRINT_WEB_UI_PUBLIC_HOST:-localhost}
 ${runtime_port_settings}
@@ -5150,7 +5294,6 @@ EOF
   function prepare_runtime_compose_sidecars() {
     RUNTIME_COMPOSE_SIDECARS=()
     [ "$INSTALL_REDIS" = "Y" ] && RUNTIME_COMPOSE_SIDECARS+=("redis")
-    [ "$INSTALL_WEB_UI" = "Y" ] && RUNTIME_COMPOSE_SIDECARS+=("web-ui")
     grep -q '^  mn-native-sdk-grpc:' "$RUNTIME_COMPOSE_FILE" 2>/dev/null && RUNTIME_COMPOSE_SIDECARS+=("mn-native-sdk-grpc")
     grep -q '^  mn-litellm-proxy:' "$RUNTIME_COMPOSE_FILE" 2>/dev/null && RUNTIME_COMPOSE_SIDECARS+=("mn-litellm-proxy")
     if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
@@ -5186,7 +5329,7 @@ EOF
   require_dir "$CLI_DIR" "mn-cli"
   require_dir "$API_DIR" "mn-api"
   require_dir "$PY_SDK_DIR" "mn-python-sdk"
-  require_file "$SURFACE_DIR/pyproject.toml" "mn-surface Python project"
+  require_file "$SURFACE_DIR/Cargo.toml" "Rust client support"
   for component_project in "$PY_SDK_DIR"/packages/*/pyproject.toml; do
     require_file "$component_project" "SDK component project"
   done
@@ -5253,42 +5396,6 @@ EOF
   )
   print_detail "Built local core image: mirror-neuron-core:latest"
 
-  function require_local_cli_target_executables() {
-    local missing="N"
-    if [ ! -x "$VENV_DIR/bin/mn" ]; then
-      print_error "Expected executable mn CLI target was not created: $VENV_DIR/bin/mn"
-      missing="Y"
-    fi
-    if [ ! -x "$VENV_DIR/bin/mn-api" ]; then
-      print_error "Expected executable mn-api target was not created: $VENV_DIR/bin/mn-api"
-      missing="Y"
-    fi
-    if [ "$missing" = "Y" ]; then
-      print_error "Local Python install did not produce the required command targets; leaving command symlinks unchanged."
-      exit 1
-    fi
-  }
-
-  function validate_local_python_component_imports() {
-    local log_dir="${TMPDIR:-/tmp}/mirror_neuron_install"
-    local log_file="${log_dir}/validate-local-python-imports.$$.log"
-    mkdir -p "$log_dir"
-
-    if "$VENV_DIR/bin/python" -c \
-      'import mn_sdk; import mn_cli.main; import mn_api.main' \
-      >"$log_file" 2>&1; then
-      return 0
-    fi
-
-    print_error "Local SDK, CLI, and API source checkouts are not import-compatible."
-    print_error "Update all sibling repositories to matching revisions, then rerun install.sh."
-    print_error "Details: $log_file"
-    if [ "$MN_INSTALL_VERBOSE" = "Y" ]; then
-      tail -n 20 "$log_file" >&3 2>/dev/null || true
-    fi
-    return 1
-  }
-
   function install_local_editable_python_packages() {
     local -a editable_requirements=(-e "${PY_SDK_DIR}")
     local component_pyproject skill_pyproject agent_pyproject
@@ -5300,7 +5407,6 @@ EOF
       [ -f "$component_pyproject" ] || continue
       editable_requirements+=(-e "$(dirname "$component_pyproject")")
     done
-    editable_requirements+=(-e "$SURFACE_DIR" -e "$CLI_DIR" -e "$API_DIR")
     if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
       editable_requirements+=(-e "$MEMBRANE_DIR/mn-context-engine-python-sdk")
     fi
@@ -5351,26 +5457,21 @@ EOF
     mn_run_logged "local editable Python packages" install_local_editable_python_packages
   ) &
   spinner $! "Installing local editable Python packages"
-  require_local_cli_target_executables
-  validate_local_python_component_imports
+  "$VENV_DIR/bin/python" -c 'import mn_sdk, mn_runtime' || {
+    print_error "Local SDK and runtime source checkouts are not import-compatible."
+    exit 1
+  }
   VENV_INSTALL_OK="Y"
   if [ -n "$VENV_BACKUP_DIR" ]; then
     rm -rf "$VENV_BACKUP_DIR"
   fi
   trap mn_reset_release_lock EXIT
 
-  if [ "$INSTALL_WEB_UI" = "Y" ]; then
-    print_step "Preparing local Web UI source for Compose"
-    if [ -e "$UI_LINK_DIR" ] || [ -L "$UI_LINK_DIR" ]; then
-      rm -rf "$UI_LINK_DIR"
-    fi
-    replace_symlink "$WEB_UI_DIR" "$UI_LINK_DIR"
-    replace_symlink "$WEB_UI_DIR" "$INSTALL_DIR/web-ui-source"
-  fi
-
+  mn_prepare_native_web_assets "$WEB_UI_DIR"
+  mn_install_native_clients
   mn_configure_installed_runtime
   mn_print_stage "Configuring commands and services"
-  if [ "$INSTALL_REDIS" = "Y" ] || [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] || [ "$INSTALL_WEB_UI" = "Y" ]; then
+  if [ "$INSTALL_REDIS" = "Y" ] || [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
     if [ "$START_NOW" = "Y" ]; then
       prepare_runtime_compose_sidecars
       print_detail "Podman services are prepared; automatic startup uses the installed runtime lifecycle entry point."
@@ -5382,19 +5483,11 @@ EOF
     fi
   fi
 
-  print_step "Creating command symlinks"
-  require_local_cli_target_executables
-  rm -f "$BIN_DIR/mn" "$BIN_DIR/mn-api" "$INSTALL_DIR/mn"
-  replace_symlink "$VENV_DIR/bin/mn" "$BIN_DIR/mn"
-  replace_symlink "$VENV_DIR/bin/mn-api" "$BIN_DIR/mn-api"
-  replace_symlink "$VENV_DIR/bin/mn" "$INSTALL_DIR/mn"
-  print_detail "Command links: ${BIN_DIR}"
-
   ensure_shell_profile_exports
 
   if [ "$START_NOW" = "Y" ]; then
     mn_print_stage "Starting MirrorNeuron services"
-    "$VENV_DIR/bin/mn" runtime stop >/dev/null 2>&1 || true
+    "$BIN_DIR/mn-runtime" stop >/dev/null 2>&1 || true
     mn_run_runtime_start_command "$BIN_DIR/mn-runtime" start || return 1
     print_step "MirrorNeuron services are running."
   fi
@@ -5509,7 +5602,7 @@ Options:
   --reset                       Permanently clear runtime data first; requires typing YES.
   -v, --verbose                 Show installation details and command paths.
   --no-reinstall                Keep an existing install instead of overwriting it.
-  --web-ui / --no-web-ui        Enable or skip the Web UI Compose service.
+  --web-ui / --no-web-ui        Enable or skip the native Web UI.
   --redis / --no-redis          Enable or skip Redis Podman setup.
   --context-engine / --no-context-engine
                                 Enable or skip Membrane context engine setup.
@@ -5532,8 +5625,8 @@ Release/source options:
   --version TAG                 Set the common default release for all components.
   --core-version TAG            Pin MirrorNeuron core. Env: MN_CORE_VERSION.
   --python-sdk-version TAG      Pin mirrorneuron-python-sdk. Env: MN_PYTHON_SDK_VERSION.
-  --cli-version TAG             Pin mirrorneuron-cli. Env: MN_CLI_VERSION.
-  --api-version TAG             Pin mirrorneuron-api. Env: MN_API_VERSION.
+  --cli-version TAG             Pin the native mn CLI. Env: MN_CLI_VERSION.
+  --api-version TAG             Pin the native mn-api server. Env: MN_API_VERSION.
   --web-ui-version TAG          Pin mirrorneuron-web-ui. Env: MN_WEB_UI_VERSION.
   --gar-project PROJECT         Same as MN_GAR_PROJECT. Overrides the default public package index.
   --gar-location LOCATION       Same as MN_GAR_LOCATION. Default: us-central1.
@@ -6296,8 +6389,6 @@ PY
       package_version=""
       case "$package_name" in
       mirrorneuron-python-sdk) package_version="$MN_PYTHON_SDK_VERSION_OVERRIDE" ;;
-      mirrorneuron-cli) package_version="$MN_CLI_VERSION_OVERRIDE" ;;
-      mirrorneuron-api) package_version="$MN_API_VERSION_OVERRIDE" ;;
       esac
       if [ -n "$package_version" ]; then
         pinned_requirement="${requirement%%[<>=!~]*}==${package_version}"
@@ -6353,9 +6444,9 @@ PY
     run_quiet "pip-upgrade" "$VENV_DIR/bin/pip" install --upgrade pip
     prepare_pip_index_args
     "$MN_PYTHON_BIN" - "$PACKAGE_INDEX_FILE" "$MN_PYTHON_SDK_VERSION_OVERRIDE" \
-      "$MN_CLI_VERSION_OVERRIDE" "$MN_API_VERSION_OVERRIDE" >"$VENV_DIR/mn-release-constraints.txt" <<'PYTHON'
+      >"$VENV_DIR/mn-release-constraints.txt" <<'PYTHON'
 import sys, tomllib
-names = ("mirrorneuron-python-sdk", "mirrorneuron-cli", "mirrorneuron-api")
+names = ("mirrorneuron-python-sdk",)
 overrides = dict(zip(names, sys.argv[2:]))
 for package in tomllib.loads(open(sys.argv[1]).read())["packages"]:
     version = overrides.get(package["name"]) or package["version"]
@@ -6366,16 +6457,6 @@ PYTHON
     fi
     if [ "$MN_INSTALL_ROLE" != "client" ]; then
       install_indexed_group runtime-node
-    fi
-    if { [ "$INSTALL_CLI" = "Y" ] || [ "$INSTALL_API" = "Y" ]; } &&
-      [ -n "$(indexed_requirements_for_group surface)" ]; then
-      install_indexed_group surface
-    fi
-    if [ "$INSTALL_CLI" = "Y" ]; then
-      install_indexed_group cli
-    fi
-    if [ "$INSTALL_API" = "Y" ]; then
-      install_indexed_group api
     fi
     if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
       install_indexed_group membrane-runtime
@@ -6416,7 +6497,6 @@ PYTHON
 
   function compose_profiles() {
     local profiles=()
-    [ "$INSTALL_WEB_UI" = "Y" ] && profiles+=("web-ui")
     [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] && profiles+=("context")
     case "$(printf '%s' "$MN_SYNCTHING_ENABLED" | tr '[:upper:]' '[:lower:]')" in
     '' | 0 | false | no | n | off | disabled) ;;
@@ -6708,14 +6788,7 @@ PYTHON
     grpc_admin_token="$(resolve_secret_file "${MN_GRPC_ADMIN_TOKEN:-}" "${INSTALL_DIR}/grpc_admin.token" "MN_GRPC_ADMIN_TOKEN")"
     context_auth_token="$(resolve_secret_file "${MN_CONTEXT_AUTH_TOKEN:-}" "${INSTALL_DIR}/context_auth.token" "MN_CONTEXT_AUTH_TOKEN")"
     profiles="$(compose_profiles)"
-    api_host="${MN_API_HOST:-}"
-    if [ -z "$api_host" ]; then
-      if [ "$INSTALL_WEB_UI" = "Y" ]; then
-        api_host="0.0.0.0"
-      else
-        api_host="localhost"
-      fi
-    fi
+    api_host="${MN_API_HOST:-localhost}"
     litellm_gateway_bind_host="${MN_LITELLM_GATEWAY_BIND_HOST:-0.0.0.0}"
     network_name="${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
     network_external="$(resolve_docker_network_external "$network_name")"
@@ -6801,12 +6874,10 @@ MN_DIST_PORT=${MN_DIST_PORT:-54370}
 MN_WEB_UI_HOST=${MN_WEB_UI_HOST:-localhost}
 MN_WEB_UI_PORT=${MN_WEB_UI_PORT:-55173}
 MN_WEB_UI_BIND_HOST=${MN_WEB_UI_BIND_HOST:-127.0.0.1}
-MN_WEB_UI_IMAGE=${MN_WEB_UI_IMAGE:-$MN_DEFAULT_WEB_UI_IMAGE}
 MN_WEB_UI_NPM_REGISTRY=${MN_WEB_UI_NPM_REGISTRY:-https://${MN_GAR_LOCATION:-$MN_DEFAULT_PYTHON_GAR_LOCATION}-npm.pkg.dev/${MN_GAR_PROJECT:-$MN_DEFAULT_CORE_GAR_PROJECT}/${MN_GAR_NPM_REPOSITORY:-$MN_DEFAULT_WEB_UI_GAR_NPM_REPOSITORY}/}
 MN_WEB_UI_SOURCE_MODE=${MN_WEB_UI_SOURCE_MODE}
 MN_WEB_UI_SOURCE_MOUNT=${MN_WEB_UI_SOURCE_MOUNT}
 MN_WEB_UI_PACKAGE_VERSION=${MN_WEB_UI_PACKAGE_VERSION}
-MN_WEB_UI_API_HOST=${MN_WEB_UI_API_HOST:-host.containers.internal}
 MN_BLUEPRINT_WEB_UI_BIND_HOST=${MN_BLUEPRINT_WEB_UI_BIND_HOST:-0.0.0.0}
 MN_BLUEPRINT_WEB_UI_PUBLIC_HOST=${MN_BLUEPRINT_WEB_UI_PUBLIC_HOST:-localhost}
 ${runtime_port_settings}
@@ -6907,7 +6978,6 @@ EOF
   function prepare_runtime_compose_sidecars() {
     RUNTIME_COMPOSE_SIDECARS=()
     [ "$INSTALL_REDIS" = "Y" ] && RUNTIME_COMPOSE_SIDECARS+=("redis")
-    [ "$INSTALL_WEB_UI" = "Y" ] && RUNTIME_COMPOSE_SIDECARS+=("web-ui")
     grep -q '^  mn-native-sdk-grpc:' "$RUNTIME_COMPOSE_FILE" 2>/dev/null && RUNTIME_COMPOSE_SIDECARS+=("mn-native-sdk-grpc")
     grep -q '^  mn-litellm-proxy:' "$RUNTIME_COMPOSE_FILE" 2>/dev/null && RUNTIME_COMPOSE_SIDECARS+=("mn-litellm-proxy")
     if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
@@ -6936,11 +7006,6 @@ EOF
   function add_shell_profile_exports() {
     mn_write_shell_environment
   }
-
-  if [ "$MN_NO_RUNTIME" = "Y" ]; then
-    mn_install_client
-    return
-  fi
 
   if [ "$MN_RUNTIME_ONLY" = "Y" ]; then
     for arg in "${MN_INSTALL_ARGS[@]:-}"; do
@@ -7019,14 +7084,11 @@ EOF
     print_step "Python component installation disabled by selection."
   fi
 
-  if [ "$INSTALL_WEB_UI" = "Y" ]; then
-    print_step "Preparing Web UI package for Compose"
-    mkdir -p "$MN_WEB_UI_SOURCE_MOUNT"
-  fi
-
+  mn_prepare_native_web_assets
+  mn_install_native_clients
   mn_configure_installed_runtime
   mn_print_stage "Configuring commands and services"
-  if [ "$INSTALL_REDIS" = "Y" ] || [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] || [ "$INSTALL_WEB_UI" = "Y" ]; then
+  if [ "$INSTALL_REDIS" = "Y" ] || [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
     if [ "$START_NOW" = "Y" ]; then
       prepare_runtime_compose_sidecars
       print_detail "Podman services are prepared; automatic startup uses the installed runtime lifecycle entry point."
@@ -7038,16 +7100,7 @@ EOF
     fi
   fi
 
-  print_step "Creating command links and shell environment"
-  mkdir -p "$BIN_DIR" "$INSTALL_DIR"
-  rm -f "$BIN_DIR/mn" "$BIN_DIR/mn-api" "$INSTALL_DIR/mn"
-  if [ "$INSTALL_CLI" = "Y" ]; then
-    ln -s "$VENV_DIR/bin/mn" "$BIN_DIR/mn"
-  fi
-  if [ "$INSTALL_API" = "Y" ]; then
-    ln -s "$VENV_DIR/bin/mn-api" "$BIN_DIR/mn-api"
-  fi
-  print_detail "Command links: ${BIN_DIR}"
+  print_step "Configuring shell environment"
   if [ "$INSTALL_CLI" = "Y" ] || [ "$INSTALL_API" = "Y" ]; then
     add_shell_profile_exports "Y"
   else
@@ -7080,6 +7133,11 @@ if [ "$MN_INSTALL_HELP_REQUESTED" != "Y" ] && { [ "$MN_INSTALL_RESET" != "Y" ] |
   MN_INSTALL_OWNER_PID="$$"
   export MN_INSTALL_OWNER_PID
   trap mn_reset_release_lock EXIT
+fi
+
+if [ "$MN_NO_RUNTIME" = Y ] && [ "$MN_INSTALL_HELP_REQUESTED" != Y ]; then
+  mn_install_client ${MN_INSTALL_ARGS[@]+"${MN_INSTALL_ARGS[@]}"}
+  exit
 fi
 
 if [ "$MN_INSTALL_HELP_REQUESTED" != "Y" ]; then

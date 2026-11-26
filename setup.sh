@@ -98,26 +98,23 @@ if [ ! -d "$VENV_DIR" ]; then
   "$PYTHON_BIN" -m venv "$VENV_DIR"
 fi
 
-echo "=> Installing Python packages (SDK, CLI, API)..."
+echo "=> Updating Python package tools..."
 "$VENV_DIR/bin/pip" install --upgrade pip
 
-echo "=> Installing the SDK and Surface from local folders..."
+echo "=> Installing the SDK from local folders..."
 "$VENV_DIR/bin/pip" install -e ../mn-python-sdk/packages/common \
   -e ../mn-python-sdk/packages/contracts -e ../mn-python-sdk/packages/web-ui \
-  -e ../mn-python-sdk -e ../mn-surface
+  -e ../mn-python-sdk
 
-echo "=> Installing mn-cli from local folder..."
-"$VENV_DIR/bin/pip" install -e ../mn-cli
-
-echo "=> Installing mn-api from local folder..."
-"$VENV_DIR/bin/pip" install -e ../mn-api
-
-echo "=> Setting up mn CLI in $BIN_DIR..."
-mkdir -p "$BIN_DIR"
-rm -f "$BIN_DIR/mn" "$BIN_DIR/mn-api"
-
-if [ -f "$VENV_DIR/bin/mn" ]; then ln -s "$VENV_DIR/bin/mn" "$BIN_DIR/mn"; fi
-if [ -f "$VENV_DIR/bin/mn-api" ]; then ln -s "$VENV_DIR/bin/mn-api" "$BIN_DIR/mn-api"; fi
+echo "=> Installing the native Rust client commands in $BIN_DIR..."
+build_dir="${CARGO_TARGET_DIR:-$VENV_DIR/rust-client-build}"
+mkdir -p "$BIN_DIR" "$build_dir"
+for repository in mn-client-support mn-cli mn-api; do
+  cargo build --locked --release --bins --manifest-path "$REPO_ROOT/$repository/Cargo.toml" --target-dir "$build_dir"
+done
+for command in mn mn-api mn-client-support mn-web-ui-server; do
+  ln -sfn "$build_dir/release/$command" "$BIN_DIR/$command"
+done
 
 SHELL_RC="$(detect_shell_rc)"
 

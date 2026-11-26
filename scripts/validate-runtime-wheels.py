@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build clean surface/runtime wheels and validate their coordinated package pins."""
+"""Build clean runtime wheels and validate their coordinated package pins."""
 
 import importlib.util
 import os
@@ -19,17 +19,14 @@ def validate(workspace: Path) -> None:
     selected = (
         "mn-python-sdk",
         "mn-python-sdk/packages/contracts",
-        "mn-surface",
         "mn-python-sdk/packages/runtime",
-        "mn-cli",
-        "mn-api",
     )
     with tempfile.TemporaryDirectory(prefix="mn-wheel-contract-") as directory:
         root = Path(directory)
         wheels = root / "wheels"
         wheels.mkdir()
         # Never consume a stale build/lib tree or modify the source checkout.
-        for repository in ("mn-python-sdk", "mn-surface", "mn-cli", "mn-api"):
+        for repository in ("mn-python-sdk",):
             source = workspace / repository
             names = (
                 subprocess.check_output(
