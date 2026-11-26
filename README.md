@@ -35,7 +35,7 @@ commands identify their diagnostic logs in the default output. Use
 | Install                       | Components                                             | Home            |
 | ----------------------------- | ------------------------------------------------------ | --------------- |
 | `./install.sh`                | CLI/API and runtime, attached automatically            | `~/.mn`         |
-| `./install.sh --no-runtime`   | WASI CLI, API and client support                | `~/.mn`         |
+| `./install.sh --no-runtime`   | WASI CLI, API and client support                       | `~/.mn`         |
 | `./install.sh --runtime-only` | Core, native runtime, Redis and execution dependencies | `~/.mn-runtime` |
 
 A production `./install.sh --no-runtime` downloads three versioned Wasm components from the public GAR generic repository `mirrorneuron-binaries`. The installer verifies their SHA-256 checksums and starts each with Wasmtime before switching the active generation under `~/.mn`. It uses an available Wasmtime installation or downloads the pinned engine for the host. Set `MN_HOME` for a separate client installation. Specify `--mode local` or `--mode github` to build from source.

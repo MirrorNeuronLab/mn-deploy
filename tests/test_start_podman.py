@@ -136,7 +136,9 @@ def test_fresh_arm_mac_uses_default_workload_machine(tmp_path):
     result, calls = invoke(tmp_path, bootstrap=True, machine=False)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "provider=libkrun" not in calls
-    assert "podman machine init --memory 8192" in calls and "podman machine start" in calls
+    assert (
+        "podman machine init --memory 8192" in calls and "podman machine start" in calls
+    )
 
 
 @pytest.mark.parametrize(

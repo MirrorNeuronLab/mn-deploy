@@ -11,7 +11,6 @@ npm packages, Docker images, and generic release archives require separate
 format-specific repositories inside that project; GAR cannot mix those formats
 in one repository.
 
-
 ## Client WebAssembly components
 
 The generic repository `mirrorneuron-binaries` contains `mn-cli` (`mn.wasm`), `mn-api` (`mn-api.wasm`), and `mn-client-support` (`mn-client-support.wasm`). Each immutable `vMAJOR.MINOR.PATCH` version also carries a SHA-256 file. `scripts/publish-wasm-clients.sh --version vX.Y.Z --apply` verifies the component identities before upload and reads the published files back. `install.sh --no-runtime` consumes these releases directly.
