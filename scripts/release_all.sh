@@ -46,7 +46,7 @@ Create a complete multi-repository release:
   1. verify all release worktrees are clean and synchronized with main;
   2. update package versions and installer defaults, then snapshot support;
   3. create local annotated release tags, then build, publish, and verify all
-     notarized mirrorneuron-pc-use, Python, Web UI, Core, and Membrane artifacts in Google Artifact Registry;
+     Wasm clients, notarized mirrorneuron-pc-use, Python, Web UI, Core, and Membrane artifacts in Google Artifact Registry;
   4. push the prepared tags only after GAR verification succeeds, without
      consuming or waiting for GitHub release workflow artifacts;
   5. update named blueprint pins and record the completed release.
