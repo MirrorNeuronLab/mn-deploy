@@ -69,20 +69,20 @@ must not silently cross into another source type. Explicit component-version
 overrides take precedence over the shared release version only for their named
 component.
 
-Local mode builds the Rust clients with Cargo from `PATH` or the configured
+Local mode builds the Rust clients for `wasm32-wasip2` with Cargo and the WASI SDK from `PATH` or the configured
 Cargo home, which defaults to `~/.cargo`. If the sibling `mn-client-support`
 path is absent, it clones the Rust `main` branch into the workspace. An
 occupied path must already contain the Rust manifest. During a local reset,
 the installer prepares these prerequisites after confirmation and before cleanup.
 
-Full installations build or download the native client before probing or
+Full installations build or download the WASI client before probing or
 provisioning Podman. Runtime-only installs start with runtime preparation.
 Linux uses its native API socket. macOS uses the API socket inside the Podman machine.
 Before reset cleanup, the installer resolves `PODMAN_HOST_SOCKET` or the
 engine-reported socket to an absolute bind path, accepting a `unix://` prefix.
 The installer installs the Podman CLI and its platform dependencies on the
 host. The Compose provider runs in an image and Core includes the
-checksum-pinned remote CLI. Client-only installations use the native Rust commands.
+checksum-pinned remote CLI. Client-only installations launch the three Wasm components on host Wasmtime.
 
 All modes use the single `mn runtime start` contract. There is no worker-only
 runtime, and worker-only installer flags are rejected.
@@ -115,7 +115,7 @@ existing virtual environment. A base interpreter inside the replacement
 directory is rejected before replacement.
 
 Local-mode Python resolution presents the SDK, every sibling SDK component,
-the CLI, the API, and all other selected sibling projects to pip in one
+and the other selected Python projects to pip in one
 editable install transaction. Dependencies between MirrorNeuron packages must
 resolve from those workspace checkouts, including packages that have not yet
 been published. Local agent packages participate even with `--no-skills`, so
@@ -126,7 +126,7 @@ retains skills imported by installed runtime services, including the Job
 response engine and its local dependency closure. Package-index resolution
 remains a binary-mode concern.
 Before accepting the replacement virtual environment or starting services,
-the local installer imports the SDK, CLI, and API entry modules together. An
+the local installer imports the SDK and runtime entry modules together. An
 import incompatibility between sibling source revisions fails installation and
 restores the previous virtual environment.
 
@@ -184,12 +184,12 @@ are separate settings; historical support snapshots retain their released defaul
   publishing/install flows.
 - Computer Use is indexed as the optional `mirrorneuron-computer-use-skill`
   distribution; declaring it does not enable native desktop control at install.
-- The native clients ship as platform archives in tagged GitHub releases.
+- GAR generic packages `mn-client-support`, `mn-cli` and `mn-api` each contain one portable WASI component and its checksum at an immutable version tag.
   The configured GAR project supplies Python packages, Web UI assets and
   runtime images through its Python, npm and Docker repositories.
 - Version changes across scripts, snapshots, package metadata, and artifacts
   must remain coherent.
-- The release snapshot contains the runtime Compose template and its Python inventory. Client-only mode installs the native Rust binaries in a single generation under `MN_HOME`. Both public facades call the support component over WIT and Core uses its versioned gRPC contract.
+- The release snapshot contains the runtime Compose template and its Python inventory. Client-only mode installs stock Wasmtime and the three Wasm components in a single generation under `MN_HOME`. Both public facades call the support component over WIT and Core uses its versioned gRPC contract.
 - Historical snapshots are not rewritten to adopt current defaults.
 
 ## Safety and Security
@@ -315,7 +315,7 @@ install-support snapshot; historical snapshots retain their original defaults.
 
 The Python package index includes independently built SDK component projects
 under `mn-python-sdk/packages/`. Local source installation resolves every SDK
-component plus the SDK, CLI, and API projects in one editable transaction, so
+component and the runtime in one editable transaction, so
 no internal SDK dependency falls back to GAR. GitHub source installation uses
 the SDK installer group, and binary installation selects versioned wheels from
 the same inventory and preserves extras when using a bundled wheelhouse.
@@ -339,8 +339,9 @@ use temporary archives of clean committed repositories, preserving shared build
 configuration and keeping backend-generated files out of source checkouts. An
 incompatible frozen set requires a new aggregate version and snapshot. The SDK
 and its component wheels share one version group because blueprint capability
-defaults derive from SDK identity. CLI, API, skills, agents, and Membrane Python
-projects advance independently. Missing SDK index entries fail preparation;
+defaults derive from SDK identity. Skills, agents, and Membrane Python
+projects advance independently. The CLI, API, and support Wasm releases share
+a version so each client can use its matching support component. Missing SDK index entries fail preparation;
 historical snapshots remain immutable. The aggregate release builds the indexed Python inventory and a
 self-contained Web UI npm package from local sibling worktrees, publishes and
 verifies them in the single configured GAR project, and only then pushes the

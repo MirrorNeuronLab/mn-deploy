@@ -82,6 +82,14 @@ def component_changed(repo, tag, recorded):
     return tree != baseline, tree
 
 
+CLIENT_REPOS = ("mn-client-support", "mn-cli", "mn-api")
+CLIENT_SETTINGS = (
+    "MN_DEFAULT_CLIENT_VERSION",
+    "MN_DEFAULT_CLI_VERSION",
+    "MN_DEFAULT_API_VERSION",
+)
+
+
 def plan(workspace, only):
     deploy = workspace / "mn-deploy"
     source = (deploy / "install.sh").read_text()
@@ -133,9 +141,61 @@ def plan(workspace, only):
                 dict(kind=kind, repo=name, version=target, previous=tag, tree=tree)
             )
             manifest[f"{kind}:{target}"] = {"tree": tree}
+    client_repos = set()
+    if "clients" in only:
+        client_repos.update(CLIENT_REPOS)
+        trees = {
+            repo: git(workspace / repo, "rev-parse", "HEAD^{tree}")
+            for repo in CLIENT_REPOS
+        }
+        previous_tag = default(source, CLIENT_SETTINGS[0])
+        previous_source = manifest.get(f"clients:{previous_tag}")
+        if previous_source is None:
+            # Aggregate releases tag each source repository. Older tags predate
+            # the Wasm artifacts and cannot serve as their baseline.
+            tagged_builder = subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    workspace / "mn-client-support",
+                    "cat-file",
+                    "-e",
+                    f"refs/tags/{previous_tag}:scripts/build-wasm.sh",
+                ],
+                stderr=subprocess.DEVNULL,
+            )
+            if tagged_builder.returncode == 0:
+                previous_source = {
+                    repo: git(
+                        workspace / repo,
+                        "rev-parse",
+                        "--verify",
+                        f"refs/tags/{previous_tag}^{{tree}}",
+                    )
+                    for repo in CLIENT_REPOS
+                }
+        if previous_source != trees:
+            # The first Wasm release uses the published installer pin. Subsequent
+            # changes to the shared WIT implementation rebuild all three consumers.
+            target = (
+                ("v" + inventory.patch_version(previous_tag[1:]))
+                if previous_source
+                else previous_tag
+            )
+            components.append(
+                dict(
+                    kind="clients",
+                    repo=CLIENT_REPOS[0],
+                    version=target,
+                    previous=previous_tag,
+                    trees=trees,
+                )
+            )
+            manifest[f"clients:{target}"] = trees
     repos = sorted(
         ({Path(p["path"]).parts[0] for p in packages} if "python" in only else set())
         | {name for kind, name, _ in definitions if kind in only}
+        | client_repos
     )
     heads = {name: git(workspace / name, "rev-parse", "HEAD") for name in repos}
     dirty = [name for name in repos if git(workspace / name, "status", "--porcelain")]
@@ -159,8 +219,6 @@ def plan(workspace, only):
             metadata[str(relative / "pyproject.toml")] = updated
     settings = {
         "mirrorneuron-python-sdk": "MN_DEFAULT_PYTHON_SDK_VERSION",
-        "mirrorneuron-cli": "MN_DEFAULT_CLI_VERSION",
-        "mirrorneuron-api": "MN_DEFAULT_API_VERSION",
     }
     installer = source
     for package in selected:
@@ -171,6 +229,9 @@ def plan(workspace, only):
     compose_source = (deploy / "docker-compose.yml").read_text()
     compose = compose_source
     for component in components:
+        if component["kind"] == "clients":
+            for setting in CLIENT_SETTINGS:
+                installer = pin(installer, setting, component["version"])
         if component["kind"] == "web-ui":
             installer = pin(
                 installer, "MN_DEFAULT_WEB_UI_VERSION", component["version"]
@@ -610,6 +671,29 @@ def docker_tags(args, component):
 def publish_component(args, workspace, component, directory):
     kind = component["kind"]
     with tempfile.TemporaryDirectory(prefix=f"mn-{kind}-repair-") as staging:
+        if kind == "clients":
+            for repo in CLIENT_REPOS:
+                stage_repository(workspace / repo, Path(staging) / repo)
+            run(
+                "bash",
+                SCRIPTS / "publish-wasm-clients.sh",
+                "--version",
+                component["version"],
+                "--project",
+                args.project,
+                "--location",
+                args.location,
+                "--repository",
+                args.client_repository,
+                "--apply",
+                env={
+                    **os.environ,
+                    "MN_GCLOUD_BIN": args.gcloud,
+                    "MN_CLIENT_SOURCE_ROOT": staging,
+                    "MN_WASM_ARTIFACT_CACHE": str(directory / "wasm-client-artifacts"),
+                },
+            )
+            return
         target = Path(staging) / "source"
         stage_repository(workspace / component["repo"], target)
         if kind == "web-ui":
@@ -832,31 +916,87 @@ def website_scripts():
     return paths
 
 
+def website_snapshot(planned):
+    paths = website_scripts()
+    entry = WEBSITE / paths[0]
+    if (
+        not planned["packages"]
+        and [c["kind"] for c in planned["components"]] == ["clients"]
+        and re.search(rb"^mn_public_client_version=", entry.read_bytes(), re.M)
+    ):
+        version = planned["components"][0]["version"]
+        if not version.startswith("v") or not VERSION.fullmatch(version[1:]):
+            raise RuntimeError(f"Invalid client installer version {version!r}.")
+        asset = f"public/install-client-{version}.sh"
+        check_release_repo(WEBSITE, paths[0], asset)
+        return {
+            paths[0]: file_hash(entry),
+            "client_entry_blob": git(WEBSITE, "rev-parse", f"HEAD:{paths[0]}"),
+            "client_version": version,
+        }
+    check_release_repo(WEBSITE, *paths)
+    return {path: file_hash(WEBSITE / path) for path in paths}
+
+
+def released_script(deploy, commit, name):
+    entry = git(deploy, "ls-tree", commit, "--", name).partition(" ")[0]
+    if entry not in {"100644", "100755"}:
+        raise RuntimeError(f"Expected a regular {name} in the pushed mn-deploy commit.")
+    data = subprocess.check_output(
+        ["git", "-C", str(deploy), "cat-file", "blob", f"{commit}:{name}"]
+    )
+    return data, int(entry, 8) & 0o777
+
+
+def publish_client_installer(deploy, commit, previous):
+    entry = "public/install.sh"
+    version = previous["client_version"]
+    asset = f"public/install-client-{version}.sh"
+    installer, mode = released_script(deploy, commit, "install.sh")
+    digest = hashlib.sha256(installer).hexdigest()
+    base = subprocess.check_output(
+        ["git", "-C", str(WEBSITE), "cat-file", "blob", previous["client_entry_blob"]]
+    )
+    updated = base.decode()
+    for name, pattern, value in (
+        ("version", r"v[0-9]+\.[0-9]+\.[0-9]+", version),
+        ("sha256", r"[a-f0-9]{64}", digest),
+    ):
+        setting = f"mn_public_client_{name}"
+        updated, matches = re.subn(
+            rf"^{setting}='{pattern}'$", f"{setting}='{value}'", updated, flags=re.M
+        )
+        if matches != 1:
+            raise RuntimeError(f"Expected one {setting} in the website installer.")
+    updated = updated.encode()
+    if file_hash(WEBSITE / entry) not in (
+        previous[entry],
+        hashlib.sha256(updated).hexdigest(),
+    ):
+        raise RuntimeError("The website installer changed during publishing.")
+    target = WEBSITE / asset
+    if target.is_symlink() or file_hash(target) not in (None, digest):
+        raise RuntimeError(f"The versioned client installer {asset} already differs.")
+    write_file(target, installer, mode=mode)
+    write_file(WEBSITE / entry, updated)
+    commit_and_push(WEBSITE, [entry, asset], f"Publish Wasm client installer {version}")
+
+
 def publish_scripts(deploy, commit, previous, support):
     paths = website_scripts()
+    if "client_entry_blob" in previous:
+        publish_client_installer(deploy, commit, previous)
+        return
     copies = []
     for name, relative in zip(INSTALL_SCRIPTS, paths, strict=True):
         target = WEBSITE / relative
         current = file_hash(target)
-        entry = git(deploy, "ls-tree", commit, "--", name).partition(" ")[0]
-        if entry not in {"100644", "100755"}:
-            raise RuntimeError(
-                f"Expected a regular {name} in the pushed mn-deploy commit."
-            )
-        try:
-            data = subprocess.check_output(
-                ["git", "-C", str(deploy), "cat-file", "blob", f"{commit}:{name}"]
-            )
-        except subprocess.CalledProcessError as exc:
-            raise RuntimeError(
-                f"Cannot read {name} from the pushed mn-deploy commit."
-            ) from exc
+        data, mode = released_script(deploy, commit, name)
         digest = hashlib.sha256(data).hexdigest()
         if current not in (previous[relative], digest):
             raise RuntimeError(
                 f"{target} changed during publishing. Reconcile it and rerun."
             )
-        mode = 0o755 if entry == "100755" else 0o644
         if current != digest or stat.S_IMODE(target.stat().st_mode) != mode:
             copies.append((target, data, mode))
     for target, data, mode in copies:
@@ -990,6 +1130,7 @@ def release_options(args):
             "location",
             "python_repository",
             "npm_repository",
+            "client_repository",
             "docker_repository",
             "update_latest",
             "publish_scripts",
@@ -1005,7 +1146,7 @@ def complete_release(args, workspace, pending, state):
     check_release_repo(deploy)
     if args.publish_scripts:
         check_release_repo(WEBSITE)
-        if (
+        if "client_entry_blob" not in state["website"] and (
             git(deploy, "status", "--porcelain", "--", "uninstall.sh")
             or file_hash(deploy / "uninstall.sh") != state["uninstaller"]
         ):
@@ -1062,8 +1203,8 @@ def main():
     parser.add_argument(
         "--only",
         nargs="+",
-        choices=["python", "web-ui", "core", "membrane"],
-        default=["python", "web-ui", "core", "membrane"],
+        choices=["python", "clients", "web-ui", "core", "membrane"],
+        default=["python", "clients", "web-ui", "core", "membrane"],
         help="Limit changed component types.",
     )
     parser.add_argument("--workspace-root", type=Path, default=SCRIPTS.parent.parent)
@@ -1082,6 +1223,7 @@ def main():
         "--npm-repository",
         default=os.environ.get("MN_GAR_NPM_REPOSITORY", "mirrorneuron-npm"),
     )
+    parser.add_argument("--client-repository", default="mirrorneuron-binaries")
     parser.add_argument("--docker-repository", default="mirrorneuron-runtime")
     parser.add_argument("--platforms", default="linux/amd64,linux/arm64")
     parser.add_argument("--qemu", choices=["auto", "always", "never"], default="auto")
@@ -1130,7 +1272,12 @@ def update(args, workspace, cache):
         if not args.apply:
             print("Next: rerun the original --apply command to finish publishing.")
             return
-        if state["options"] != release_options(args):
+        options = release_options(args)
+        if not any(c["kind"] == "clients" for c in state["plan"]["components"]):
+            state["options"].setdefault(
+                "client_repository", options["client_repository"]
+            )
+        if state["options"] != options:
             raise RuntimeError(
                 "Rerun with the original registry and publication options to finish the pending release."
             )
@@ -1161,7 +1308,7 @@ def update(args, workspace, cache):
     for component in planned["components"]:
         action = (
             f"{component['previous']} -> {component['version']}"
-            if component["kind"] == "web-ui"
+            if component["kind"] in ("web-ui", "clients")
             else f"repair {component['version']} from HEAD"
         )
         print(f"==> {component['kind']}: {action}", flush=True)
@@ -1181,24 +1328,22 @@ def update(args, workspace, cache):
         return
     deploy = workspace / "mn-deploy"
     deploy_paths = list(deploy_changes(planned))
-    if args.publish_scripts:
-        deploy_paths.append("uninstall.sh")
-    check_release_repo(deploy, *deploy_paths)
-    deploy_head = git(deploy, "rev-parse", "HEAD")
-    website = None
+    website = website_snapshot(planned) if args.publish_scripts else None
     uninstaller = None
-    if args.publish_scripts:
-        paths = website_scripts()
-        check_release_repo(WEBSITE, *paths)
-        website = {path: file_hash(WEBSITE / path) for path in paths}
+    if website is not None and "client_entry_blob" not in website:
+        deploy_paths.append("uninstall.sh")
         source = deploy / "uninstall.sh"
         if not source.is_file() or source.is_symlink():
             raise RuntimeError(f"Expected a regular uninstaller at {source}.")
         uninstaller = file_hash(source)
+    check_release_repo(deploy, *deploy_paths)
+    deploy_head = git(deploy, "rev-parse", "HEAD")
     required = ["PYTHON"] if planned["packages"] else []
     if any(c["kind"] == "web-ui" for c in planned["components"]):
         required.append("NPM")
-    if any(c["kind"] != "web-ui" for c in planned["components"]):
+    if any(c["kind"] == "clients" for c in planned["components"]):
+        required.append("GENERIC")
+    if any(c["kind"] in DOCKER_PACKAGES for c in planned["components"]):
         required.append("DOCKER")
         run(args.docker, "info", capture=True)
         run(args.docker, "buildx", "version", capture=True)
@@ -1207,6 +1352,7 @@ def update(args, workspace, cache):
             "PYTHON": args.python_repository,
             "NPM": args.npm_repository,
             "DOCKER": args.docker_repository,
+            "GENERIC": args.client_repository,
         }[kind]
         data = json.loads(
             run(
@@ -1239,6 +1385,7 @@ def update(args, workspace, cache):
                 args.location,
                 args.python_repository,
                 args.npm_repository,
+                args.client_repository,
                 args.docker_repository,
                 args.platforms,
                 args.update_latest,

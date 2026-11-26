@@ -6,17 +6,17 @@ home and each installed command remembers its home.
 | Command                       | Role      | Installed components                                                     | Default home    |
 | ----------------------------- | --------- | ------------------------------------------------------------------------ | --------------- |
 | `./install.sh`                | `full`    | CLI/API surface and runtime node                                         | `~/.mn`         |
-| `./install.sh --no-runtime`   | `client`  | Native Rust CLI, API and client support                                  | `~/.mn`         |
+| `./install.sh --no-runtime`   | `client`  | Wasm CLI, API and client support on host Wasmtime                        | `~/.mn`         |
 | `./install.sh --runtime-only` | `runtime` | Core, native runtime, Redis, Compose and selected execution dependencies | `~/.mn-runtime` |
 
-The Rust CLI and API call `mn-client-support` through the versioned WIT interface over private process pipes. Support connects to Core over `mirrorneuron.runtime.v1.RuntimeControlService`. Its build includes a copy of the runtime protobuf. Execution nodes install `mirrorneuron-runtime` and its Python worker SDK.
+The Rust CLI and API call `mn-client-support` through the versioned WIT interface over an authenticated loopback connection. Support connects to Core over `mirrorneuron.runtime.v1.RuntimeControlService`. Its build includes a copy of the runtime protobuf. Execution nodes install `mirrorneuron-runtime` and its Python worker SDK.
 
 Full and runtime installs place the Bytecode Alliance WAC executable in
 `MN_HOME/bin`. The native runtime uses it to link WebAssembly blueprint workers
 to their declared skill components during preparation. Reinstalls verify the
 managed binary against the pinned release digest and download it when needed.
 
-The role flags are mutually exclusive. All modes support client-only installation. The runtime-only role is available in binary mode. Client-only installation writes native executables and user-owned state under `MN_HOME`. Build from the three sibling checkouts in local mode, their Git refs in GitHub mode or verified release assets in binary mode.
+The role flags are mutually exclusive. All modes support client-only installation. The runtime-only role is available in binary mode. Client-only installation installs three WASI components, stock Wasmtime and user-owned state under `MN_HOME`. Build from the three sibling checkouts in local mode, their Git refs in GitHub mode or versioned Wasm assets from the public GAR generic repository in binary mode.
 
 Full and runtime installations start their selected services by default. Use
 `--no-start` to prepare an installation without starting services. A full startup

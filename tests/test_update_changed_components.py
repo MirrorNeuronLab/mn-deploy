@@ -132,7 +132,7 @@ def test_preview_plans_only_changed_versions_without_source_writes(workspace):
         repair.default(planned["installer"], "MN_DEFAULT_AGENT_PACKAGE_INDEX_VERSION")
         == "v1.3.61"
     )
-    assert repair.default(planned["installer"], "MN_DEFAULT_API_VERSION") == "v1.0.1"
+    assert repair.default(planned["installer"], "MN_DEFAULT_API_VERSION") == "v1.0.0"
     assert before == {
         str(p): p.read_bytes()
         for p in workspace.rglob("*")
@@ -768,6 +768,11 @@ def test_apply_pushes_only_release_files_and_resumes_before_cleanup(
     argv = [
         "update-changed-components.py",
         "--apply",
+        "--only",
+        "python",
+        "web-ui",
+        "core",
+        "membrane",
         "--workspace-root",
         str(workspace),
         "--project",
@@ -904,3 +909,100 @@ printf '%s\\n' "$INSTALL_VERSION" "$CORE_INSTALL_VERSION" "$RUNTIME_COMPOSE_TEMP
         "/fixture/install_support/v1.3.61/docker-compose.yml",
         "/fixture/install_support/v1.3.62/package-index/python-packages.toml",
     ]
+
+
+def test_shared_support_changes_create_a_new_wasm_version_for_all_clients(workspace):
+    deploy = workspace / "mn-deploy"
+    installer = deploy / "install.sh"
+    installer.write_text(
+        installer.read_text()
+        + 'MN_DEFAULT_CLIENT_VERSION="${MN_DEFAULT_CLIENT_VERSION:-v1.0.0}"\n'
+    )
+    for name in ("mn-cli", "mn-client-support"):
+        repo = workspace / name
+        repo.mkdir()
+        git(repo, "init", "--initial-branch=main", "-q")
+        git(repo, "config", "user.email", "test@example.invalid")
+        git(repo, "config", "user.name", "Test")
+        (repo / "source.txt").write_text("guest")
+        commit(repo)
+    first = repair.plan(workspace, {"clients"})
+    assert [c["version"] for c in first["components"]] == ["v1.0.0"]
+    (deploy / "package-index/component-sources.json").write_text(
+        json.dumps(first["manifest"])
+    )
+    assert not repair.plan(workspace, {"clients"})["components"]
+    change(workspace, "mn-client-support")
+    update = repair.plan(workspace, {"clients"})
+    assert not update["packages"]
+    assert set(update["components"][0]["trees"]) == set(repair.CLIENT_REPOS)
+    assert all(
+        repair.default(update["installer"], setting) == "v1.0.1"
+        for setting in repair.CLIENT_SETTINGS
+    )
+
+    # An aggregate release can precede the first independent client release.
+    (deploy / "package-index/component-sources.json").unlink()
+    builder = workspace / "mn-client-support/scripts/build-wasm.sh"
+    builder.parent.mkdir()
+    builder.write_text("#!/bin/sh\n")
+    commit(workspace / "mn-client-support")
+    for name in repair.CLIENT_REPOS:
+        git(workspace / name, "tag", "v1.0.0")
+    assert not repair.plan(workspace, {"clients"})["components"]
+    change(workspace, "mn-cli")
+    update = repair.plan(workspace, {"clients"})
+    assert [c["version"] for c in update["components"]] == ["v1.0.1"]
+
+
+def test_client_release_updates_only_the_versioned_website_installer(
+    workspace, monkeypatch
+):
+    deploy = workspace / "mn-deploy"
+    website = workspace / "mn-website"
+    public = website / "public"
+    public.mkdir(parents=True)
+    git(website, "init", "--initial-branch=main", "-q")
+    git(website, "config", "user.email", "test@example.invalid")
+    git(website, "config", "user.name", "Test")
+    old_client = b"previous client installer\n"
+    (public / "install-client-v1.0.0.sh").write_bytes(old_client)
+    entry = public / "install.sh"
+    entry.write_text(
+        "mn_public_client_version='v1.0.0'\n"
+        f"mn_public_client_sha256='{hashlib.sha256(old_client).hexdigest()}'\n"
+        "echo production runtime installer\n"
+    )
+    uninstaller = public / "uninstall.sh"
+    uninstaller.write_text("existing\n")
+    commit(website)
+    remote = add_remote(website)
+    monkeypatch.setattr(repair, "WEBSITE", website)
+    plan = {"components": [{"kind": "clients", "version": "v1.0.1"}], "packages": []}
+    base = repair.website_snapshot(plan)
+    asset = public / "install-client-v1.0.1.sh"
+    deploy_commit = git(deploy, "rev-parse", "HEAD")
+    asset.write_text("already released under another checksum")
+    with pytest.raises(RuntimeError, match="already differs"):
+        repair.publish_scripts(deploy, deploy_commit, base, "support")
+    asset.unlink()
+    original = entry.read_bytes()
+    entry.write_bytes(original + b"another change\n")
+    with pytest.raises(RuntimeError, match="changed during publishing"):
+        repair.publish_scripts(deploy, deploy_commit, base, "support")
+    entry.write_bytes(original)
+
+    repair.publish_scripts(deploy, deploy_commit, base, "support")
+    first = git(website, "rev-parse", "HEAD")
+    repair.publish_scripts(deploy, deploy_commit, base, "support")
+    assert (
+        git(remote, "rev-parse", "main") == first == git(website, "rev-parse", "HEAD")
+    )
+    assert asset.read_bytes() == (deploy / "install.sh").read_bytes()
+    assert entry.read_text() == (
+        "mn_public_client_version='v1.0.1'\n"
+        f"mn_public_client_sha256='{hashlib.sha256(asset.read_bytes()).hexdigest()}'\n"
+        "echo production runtime installer\n"
+    )
+    assert (public / "install-client-v1.0.0.sh").read_bytes() == old_client
+    assert uninstaller.read_text() == "existing\n"

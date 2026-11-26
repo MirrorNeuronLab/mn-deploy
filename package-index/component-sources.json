@@ -28,5 +28,15 @@
   },
   "web-ui:v1.4.3": {
     "tree": "4fda825669f2cfe86dfe5462fc9769ac808b1360"
+  },
+  "clients:v2.0.0": {
+    "mn-api": "09cb2a1ed2751b0a753677798238842026ed83d0",
+    "mn-cli": "3ba3431f2b32d248b512381333054b4abe2570f3",
+    "mn-client-support": "95811e00a6f207402c7477b687010bf0f2af41f7"
+  },
+  "clients:v2.0.1": {
+    "mn-api": "38aaeac18b22fe06b175a146ffca537db411de0d",
+    "mn-cli": "68b5ad6496f8fec8ba0c73115507b599406c1992",
+    "mn-client-support": "ca12bc3dc3b139836efa79b74d1887bec6f25446"
   }
 }

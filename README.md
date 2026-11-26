@@ -3,7 +3,7 @@
 ## Installer interface
 
 The OtterDesk Installer shows the selected mode, home, components, host
-architecture, memory and detected GPU. A full install prepares the native
+architecture, memory and detected GPU. A full install prepares the Wasm
 client commands before setting up Podman and the execution runtime. The
 installer reports when each part is ready and when runtime startup has passed
 its readiness check. With `--no-start`, it reports that runtime verification
@@ -35,17 +35,19 @@ commands identify their diagnostic logs in the default output. Use
 | Install                       | Components                                             | Home            |
 | ----------------------------- | ------------------------------------------------------ | --------------- |
 | `./install.sh`                | CLI/API and runtime, attached automatically            | `~/.mn`         |
-| `./install.sh --no-runtime`   | Native Rust CLI, API and client support                | `~/.mn`         |
+| `./install.sh --no-runtime`   | WASI CLI, API and client support                | `~/.mn`         |
 | `./install.sh --runtime-only` | Core, native runtime, Redis and execution dependencies | `~/.mn-runtime` |
 
-The client uses the same `~/.mn` default as a full installation. Set `MN_HOME` to choose a separate home when both roles share a computer. An unpinned checkout install builds the three sibling Rust packages with Cargo. A standalone binary install downloads checksummed native executables. All three modes honor `--no-runtime`. Client-only installation runs under the current user and starts no services.
+A production `./install.sh --no-runtime` downloads three versioned Wasm components from the public GAR generic repository `mirrorneuron-binaries`. The installer verifies their SHA-256 checksums and starts each with Wasmtime before switching the active generation under `~/.mn`. It uses an available Wasmtime installation or downloads the pinned engine for the host. Set `MN_HOME` for a separate client installation. Specify `--mode local` or `--mode github` to build from source.
+
+For development, `MN_ENV=dev ./install.sh --no-runtime` builds all three Wasm components from the sibling Rust checkouts. An explicit `--mode local` also selects that path. Set `MN_CLIENT_SOURCE_ROOT` to use checkouts in another workspace.
 
 On macOS and Ubuntu, `--mode local` clones `mn-client-support` from `main`
 when its sibling path is absent. The installer uses Cargo from `PATH` or
 `${CARGO_HOME:-$HOME/.cargo}/bin`. If preparing the Rust client sources fails
 during `--reset`, the installer stops before deleting runtime data.
 
-To prepare binary assets on a release platform, run `scripts/package-rust-client.sh /path/to/dist`. The CLI release owns `mn-<target>`, the API release owns `mn-api-<target>` and `mn-web-ui-server-<target>`, and the support release owns `mn-client-support-<target>`. Each asset has a matching `.sha256` file. To install from a local artifact directory, run `MN_CLIENT_DIST_DIR=/path/to/dist ./install.sh --mode binary --no-runtime`.
+For a source build, install the Rust `wasm32-wasip2` target and set `WASI_SDK_PATH` to the WASI SDK for SQLite. Run `scripts/package-rust-client.sh /path/to/dist` to build `mn.wasm`, `mn-api.wasm`, and `mn-client-support.wasm` with their checksums. Use `scripts/publish-wasm-clients.sh --version vX.Y.Z` to preview the GAR packages, then add `--apply` to publish and verify them. An offline binary install accepts `MN_CLIENT_DIST_DIR=/path/to/dist` and `MN_WASMTIME_BIN=/path/to/wasmtime`.
 
 ```bash
 ./install.sh --no-runtime
@@ -93,7 +95,7 @@ to five calls per model group (`MN_LITELLM_MAX_CONCURRENT_REQUESTS=5` and
 also allow five parallel calls. Queue size and timeout settings are unchanged;
 historical installer support snapshots retain their released defaults.
 
-Current source uses Python 3.12 across the runtime, SDK components, CLI, API,
+Current source uses Python 3.12 across the runtime, SDK components,
 agents, skills, and Membrane Python packages. Each install mode selects a native
 Python 3.12 interpreter or provisions the existing uv-managed private runtime.
 `--python` / `MN_PYTHON` selects an explicit interpreter; it must match
@@ -189,7 +191,7 @@ by default. Core reaches it by its Compose service name.
 
 ## Podman runtime
 
-Core and Redis run in Podman. Runtime installation automatically installs the Podman CLI if it is missing.
+Core and Redis run in Podman. The macOS installer initializes new Podman machines with 8192 MiB of memory. Runtime installation automatically installs the Podman CLI if it is missing.
 With `--reset`, Podman setup runs after you type `YES` so the installer can
 verify and clean the previous runtime before installing the client and runtime.
 If the package manager needs administrator access, sudo can prompt for your
@@ -368,6 +370,7 @@ Run its isolated Git regression test with:
 ./scripts/update-changed-components.sh --plan
 ./scripts/update-changed-components.sh --apply
 ./scripts/update-changed-components.sh --apply --only python web-ui
+./scripts/update-changed-components.sh --apply --only clients --publish-scripts
 ./scripts/update-changed-components.sh --apply --publish-scripts
 ./scripts/update-changed-components.sh --apply --publish-scripts --remove-old-versions
 ```
@@ -381,6 +384,11 @@ Changed Core and Membrane images are rebuilt from committed HEAD and published
 under their existing numeric/`v` tags. Docker `latest` is updated only with
 `--update-latest`; Docker repositories with immutable tags reject repairs.
 Published Python and npm versions are immutable.
+
+A client-only release builds the three Rust checkouts together and publishes their
+Wasm components to GAR under one version. With `--publish-scripts`, the public
+client installer and its checksum advance to that version. Development installs
+use the local Rust checkouts.
 
 The default preview uses local Git history and writes no release metadata.
 It reports uncommitted work; commit or stash it before `--apply`. Fetch tags
@@ -514,7 +522,7 @@ ensure-context-engine` performs the same package preparation for an existing
   `package-index/python-packages.toml`.
   The inventory includes the optional `mirrorneuron-computer-use-skill`; it is
   not a binary installer default and requires separate native OS grants to run.
-- Binary mode downloads the native clients from tagged GitHub releases. Runtime Python packages
+- Binary mode downloads the client Wasm components from versioned GAR generic packages. Runtime Python packages
   come from
   `https://us-central1-python.pkg.dev/mirrorneuron-public-packages/agent-skills/simple/`, with public dependencies resolved directly from PyPI; the Web UI comes from `https://us-central1-npm.pkg.dev/mirrorneuron-public-packages/mirrorneuron-npm/`, while its public build dependencies come directly from npmjs;
   and runtime images come from the `mirrorneuron-runtime` Docker repository.
@@ -618,11 +626,11 @@ snapshots keep their original package selections.
 
 The Python package index includes independently built SDK component projects
 under `mn-python-sdk/packages/`. Local source installation resolves every SDK
-component plus the SDK, CLI, and API projects in one editable transaction, so
+component and the runtime in one editable transaction, so
 no internal SDK dependency falls back to GAR. GitHub source installation uses
 the SDK installer group, and binary installation selects versioned wheels from
 the same inventory and preserves extras when using a bundled wheelhouse. Local
-installation also imports the SDK, CLI, and API together before accepting the
+installation also imports the SDK and runtime before accepting the
 new virtual environment. If sibling checkouts are revision-incompatible,
 installation stops before service startup and restores the previous virtual
 environment.
@@ -641,8 +649,9 @@ versions or lowers existing versions. Conflicting requirements stop preparation
 before metadata changes. Unchanged packages retain their versions when compatible;
 manually advanced static versions are preserved. The SDK
 and its component wheels share one version group because blueprint capability
-defaults derive from SDK identity. CLI, API, skills, agents, and Membrane Python
-projects advance independently. Missing SDK index entries fail preparation;
+defaults derive from SDK identity. Skills, agents, and Membrane Python
+projects advance independently. The CLI, API, and support Wasm releases share
+a version so each client can use its matching support component. Missing SDK index entries fail preparation;
 historical snapshots remain immutable. The aggregate release builds and verifies the complete Python
 inventory and self-contained Web UI package directly from sibling worktrees in
 GAR before it pushes the prepared source tags. `scripts/release_all.sh` uses `uv` to

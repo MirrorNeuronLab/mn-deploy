@@ -1,37 +1,35 @@
 #!/usr/bin/env bash
-# Build the host's native client release assets from sibling Rust repositories.
+# Produce architecture-independent release assets for the three Rust clients.
 set -euo pipefail
-if [ "$#" -ne 1 ]; then
-  echo 'Usage: package-rust-client.sh OUTPUT_DIRECTORY' >&2
-  exit 2
+if [ "$#" -lt 1 ] || [ "$#" -gt 2 ] || { [ "$#" -eq 2 ] && [ "$2" != --wasm-only ]; }; then
+  echo 'Usage: package-rust-client.sh OUTPUT_DIRECTORY [--wasm-only]' >&2; exit 2
 fi
-root="$(cd "$(dirname "$0")/../.." && pwd)"
-target="$(rustc -vV | awk '$1 == "host:" {print $2}')"
-case "$target" in
-aarch64-apple-darwin | x86_64-apple-darwin | aarch64-unknown-linux-gnu | x86_64-unknown-linux-gnu) ;;
-*)
-  echo "Unsupported release target $target" >&2
-  exit 1
-  ;;
-esac
+root=${MN_CLIENT_SOURCE_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}
 mkdir -p "$1"
-out="$(cd "$1" && pwd)"
-stage="$(mktemp -d "$out/.native.XXXXXXXX")"
+out=$(cd "$1" && pwd)
+stage=$(mktemp -d "$out/.wasm.XXXXXXXX")
 trap 'rm -rf "$stage"' EXIT
-build_dir="${CARGO_TARGET_DIR:-$stage/target}"
-mkdir -p "$build_dir"
-build_dir="$(cd "$build_dir" && pwd)"
+target=${CARGO_TARGET_DIR:-$root/mn-client-support/target}
+engine=${MN_WASMTIME_BIN:-wasmtime}
 for repo in mn-client-support mn-cli mn-api; do
-  cargo build --locked --release --bins --manifest-path "$root/$repo/Cargo.toml" --target-dir "$build_dir"
-done
-for command in mn-client-support mn mn-api mn-web-ui-server; do
-  "$build_dir/release/$command" --version
-  asset="$command-$target"
-  cp "$build_dir/release/$command" "$stage/$asset"
-  if command -v shasum >/dev/null; then
-    (cd "$stage" && shasum -a 256 "$asset" >"$asset.sha256")
-  else
-    (cd "$stage" && sha256sum "$asset" >"$asset.sha256")
-  fi
+  command=$repo; [ "$repo" != mn-cli ] || command=mn
+  "$root/mn-client-support/scripts/build-wasm.sh" "$root/$repo" "$command" "$target"
+  asset="$command.wasm"
+  cp "$target/wasm32-wasip2/release/$asset" "$stage/$asset"
+  "$engine" run -C cache=n -S cli-exit-with-code "$stage/$asset" --version
+  if command -v shasum >/dev/null; then (cd "$stage" && shasum -a 256 "$asset" >"$asset.sha256")
+  else (cd "$stage" && sha256sum "$asset" >"$asset.sha256"); fi
   mv "$stage/$asset" "$stage/$asset.sha256" "$out/"
 done
+
+# The optional web UI proxy retains its platform-specific release artifact.
+if [ "${2:-}" != --wasm-only ]; then
+  triple=$(rustc -vV | awk '$1 == "host:" {print $2}')
+  cargo build --locked --release --manifest-path "$root/mn-api/Cargo.toml" --bin mn-web-ui-server --target-dir "$target"
+  asset="mn-web-ui-server-$triple"
+  cp "$target/release/mn-web-ui-server" "$stage/$asset"
+  "$stage/$asset" --version
+  if command -v shasum >/dev/null; then (cd "$stage" && shasum -a 256 "$asset" >"$asset.sha256")
+  else (cd "$stage" && sha256sum "$asset" >"$asset.sha256"); fi
+  mv "$stage/$asset" "$stage/$asset.sha256" "$out/"
+fi

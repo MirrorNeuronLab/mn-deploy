@@ -21,7 +21,7 @@ case "$name:$*" in
   'podman:info') test "$TEST_OS" = Linux || test "$TEST_READY" = yes || test -f "$TEST_ROOT/started";;
   'podman:machine inspect') test "$TEST_MACHINE" = yes;;
   'podman:machine start') test "$TEST_FAIL" != yes && touch "$TEST_ROOT/started";;
-  'podman:machine init') echo "provider=$CONTAINERS_MACHINE_PROVIDER" >> "$TEST_LOG";;
+  'podman:machine init --memory 8192') echo "provider=$CONTAINERS_MACHINE_PROVIDER" >> "$TEST_LOG";;
   'brew:install --formula podman') test "$HOMEBREW_NO_ASK" = 1 && test -z "$HOMEBREW_ASK";;
   'systemctl:'*|'apt-get:update'|'apt-get:install -y --no-install-recommends podman') ;;
   'ps:'*) echo 'Wed Nov 25 12:00:00 2026';;
@@ -136,7 +136,7 @@ def test_fresh_arm_mac_uses_default_workload_machine(tmp_path):
     result, calls = invoke(tmp_path, bootstrap=True, machine=False)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "provider=libkrun" not in calls
-    assert "podman machine init" in calls and "podman machine start" in calls
+    assert "podman machine init --memory 8192" in calls and "podman machine start" in calls
 
 
 @pytest.mark.parametrize(

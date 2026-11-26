@@ -51,7 +51,7 @@ Create a complete multi-repository release:
      consuming or waiting for GitHub release workflow artifacts;
   5. update named blueprint pins and record the completed release.
 
-Resume phases: prepare, computer-use, python, web-ui, membrane, core, tags, or finalize.
+Resume phases: prepare, computer-use, python, clients, web-ui, membrane, core, tags, or finalize.
 Resume only while the prepared package set remains compatible. An incompatible
 frozen package index requires a new aggregate release version.
 
@@ -186,11 +186,12 @@ phase_rank() {
   prepare) printf '0' ;;
   computer-use) printf '1' ;;
   python) printf '2' ;;
-  web-ui) printf '3' ;;
-  membrane) printf '4' ;;
-  core) printf '5' ;;
-  tags) printf '6' ;;
-  finalize) printf '7' ;;
+  clients) printf '3' ;;
+  web-ui) printf '4' ;;
+  membrane) printf '5' ;;
+  core) printf '6' ;;
+  tags) printf '7' ;;
+  finalize) printf '8' ;;
   *) die "Unknown release phase: $1" ;;
   esac
 }
@@ -349,6 +350,11 @@ publish_and_verify_gar() {
       --no-prune
   fi
 
+  if should_run_phase clients; then
+    CURRENT_PHASE="clients"
+    "${SCRIPT_DIR}/publish-wasm-clients.sh" --version "$TAG" --project "$PROJECT" --location "$LOCATION" --from-tag --apply
+  fi
+
   if should_run_phase web-ui; then
     CURRENT_PHASE="web-ui"
     "${SCRIPT_DIR}/publish_web_ui_to_google_artifact_registry.sh" \
@@ -415,7 +421,7 @@ publish_and_verify_gar() {
 
 update_installer_pins() {
   local setting version package_versions
-  for setting in MN_DEFAULT_CORE_VERSION MN_DEFAULT_WEB_UI_VERSION \
+  for setting in MN_DEFAULT_CORE_VERSION MN_DEFAULT_WEB_UI_VERSION MN_DEFAULT_CLIENT_VERSION MN_DEFAULT_CLI_VERSION MN_DEFAULT_API_VERSION \
     MN_DEFAULT_AGENT_PACKAGE_INDEX_VERSION MN_DEFAULT_MEMBRANE_CONTEXT_ENGINE_VERSION \
     MN_DEFAULT_INSTALL_VERSION MN_DEFAULT_INSTALL_SUPPORT_VERSION; do
     set_installer_default_version "$setting" "$TAG"
@@ -441,6 +447,7 @@ update_post_release_pins() {
 
 ## ${TAG} -- $(date +%F)
 
+- GAR generic: mn-cli, mn-api and mn-client-support Wasm components at ${TAG}.
 - GAR npm: mirrorneuron-web-ui@${VERSION} in ${NPM_REPOSITORY}.
 - GAR Python: all packages in package-index/python-packages.toml, including
   mirrorneuron-runtime and mirrorneuron-python-sdk.
@@ -561,7 +568,7 @@ else
   bash "${SCRIPT_DIR}/validate-runtime-split.sh" --two-runtimes
 fi
 
-if should_run_phase computer-use || should_run_phase python || should_run_phase web-ui ||
+if should_run_phase computer-use || should_run_phase python || should_run_phase clients || should_run_phase web-ui ||
   should_run_phase membrane || should_run_phase core; then
   publish_and_verify_gar
 fi

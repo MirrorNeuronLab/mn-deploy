@@ -26,7 +26,16 @@ for component in mn-client-support mn-cli mn-api; do
   cargo test --locked --manifest-path "$WORKSPACE_ROOT/$component/Cargo.toml"
   cargo build --locked --manifest-path "$WORKSPACE_ROOT/$component/Cargo.toml" --bins
 done
-export MN_RUST_CLIENT_BIN="$CARGO_TARGET_DIR/debug"
+export MN_RUST_CLIENT_BIN="$VALIDATION_HOME/wasm-bin"
+mkdir -p "$MN_RUST_CLIENT_BIN"
+"$DEPLOY_DIR/scripts/package-rust-client.sh" "$MN_RUST_CLIENT_BIN" --wasm-only
+engine="${MN_WASMTIME_BIN:-$(command -v wasmtime)}"
+ln -s "$engine" "$MN_RUST_CLIENT_BIN/wasmtime"
+for command in mn mn-api mn-client-support; do
+  "$engine" run -C cache=n "$MN_RUST_CLIENT_BIN/mn-client-support.wasm" --print-launcher >"$MN_RUST_CLIENT_BIN/$command"
+  chmod 755 "$MN_RUST_CLIENT_BIN/$command"
+done
+cp "$CARGO_TARGET_DIR/debug/mn-web-ui-server" "$MN_RUST_CLIENT_BIN/"
 (cd "$WORKSPACE_ROOT/mn-system-tests" && "$VALIDATION_PYTHON" -m pytest tests/integration/installer -q)
 (cd "$WORKSPACE_ROOT/mn-system-tests" && "$VALIDATION_PYTHON" -m pytest \
   tests/integration/contracts/test_api_contracts.py \
@@ -41,13 +50,19 @@ export MN_RUST_CLIENT_BIN="$CARGO_TARGET_DIR/debug"
   tests/integration/contracts/test_blueprint_runtime_model_preflight_contract.py -q)
 (cd "$DEPLOY_DIR" && "$VALIDATION_PYTHON" -m pytest tests/test_job_ui_proxy.py -q)
 (cd "$WORKSPACE_ROOT/mn-python-sdk" && "$VALIDATION_PYTHON" -m pytest tests packages/runtime/tests_runtime -q)
-MN_RUST_CLIENT_BIN="$CARGO_TARGET_DIR/debug" "$VALIDATION_PYTHON" -m pytest -q "$WORKSPACE_ROOT/mn-system-tests/tests/integration/contracts/test_native_rust_client.py"
+(cd "$WORKSPACE_ROOT/mn-system-tests" && "$VALIDATION_PYTHON" -m pytest -q \
+  tests/integration/contracts/test_native_rust_client.py \
+  tests/integration/contracts/test_cli_python_parity.py \
+  tests/integration/contracts/test_api_python_parity.py \
+  tests/integration/contracts/test_wasm_release.py)
 (cd "$WORKSPACE_ROOT/MirrorNeuron" && mix test --no-start tests/unit/grpc/runtime_control_auth_test.exs tests/unit/grpc/runtime_membership_test.exs tests/unit/grpc/runtime_control_route_test.exs tests/unit/core_environment_test.exs tests/e2e/runner/core_connection_test.exs)
 "$VALIDATION_PYTHON" "$DEPLOY_DIR/scripts/validate-runtime-wheels.py"
 "$VALIDATION_PYTHON" "$DEPLOY_DIR/scripts/prepare-python-package-index.py" \
   "$DEPLOY_DIR/package-index/python-packages.toml" "$WORKSPACE_ROOT" 1.4.8 --verify-worktree --verify-dependencies
 if [ "$live" = Y ]; then
-  (cd "$WORKSPACE_ROOT/mn-system-tests" && MN_SPLIT_RUNTIME_ACCEPTANCE=1 "$VALIDATION_PYTHON" -m pytest tests/integration/live/test_split_runtime_acceptance.py -q)
+  (cd "$WORKSPACE_ROOT/mn-system-tests" && MN_SPLIT_RUNTIME_ACCEPTANCE=1 "$VALIDATION_PYTHON" -m pytest -q \
+    tests/integration/live/test_split_runtime_acceptance.py \
+    tests/integration/live/test_node_lifecycle.py)
 else
   printf 'Offline gate passed. Release also requires --two-runtimes (Docker, cached Redis image, Elixir).\n'
 fi

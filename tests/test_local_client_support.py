@@ -45,19 +45,25 @@ def local_install(tmp_path):
 set -eu
 echo build >> "$MN_TEST_COMMANDS"
 while [ "$1" != --target-dir ]; do shift; done
-mkdir -p "$2/release"
+mkdir -p "$2/release" "$2/wasm32-wasip2/release"
 for command in mn mn-api mn-client-support mn-web-ui-server; do
     printf '#!/bin/sh\nexit 0\n' > "$2/release/$command"
+    cp "$2/release/$command" "$2/wasm32-wasip2/release/$command.wasm"
 done
 """)
     cargo.chmod(0o755)
     for name, source in {
+        "wasmtime": """#!/bin/sh
+case "$*" in *--print-launcher) printf '#!/bin/sh\\nexit 0\\n';; *) echo 'wasmtime 51.0.0';; esac
+""",
         "git": """#!/bin/sh
 set -eu
 [ "$GIT_TERMINAL_PROMPT" = 0 ]
 [ "$1 $2 $3 $4" = 'clone --branch main https://github.com/MirrorNeuronLab/mn-client-support.git' ]
 echo clone >> "$MN_TEST_COMMANDS"
-mkdir "$5"
+mkdir -p "$5/scripts"
+printf '#!/bin/sh\\ncargo build --target-dir "$3"\\n' >"$5/scripts/build-wasm.sh"
+chmod 755 "$5/scripts/build-wasm.sh"
 printf '[package]\\nname = "mn-client-support"\\n' > "$5/Cargo.toml"
 exit "$MN_TEST_CLONE_STATUS"
 """,
@@ -71,7 +77,7 @@ exit 1
         tool.write_text(source)
         tool.chmod(0o755)
 
-    def run(*args, answer="", clone_status=0):
+    def run(*args, answer="", clone_status=0, cwd=None):
         return subprocess.run(
             [
                 "/bin/bash",
@@ -94,6 +100,7 @@ exit 1
                 "MN_TEST_CLONE_STATUS": str(clone_status),
             },
             input=answer,
+            cwd=cwd,
             start_new_session=True,
             capture_output=True,
             text=True,
@@ -123,7 +130,12 @@ def test_bootstraps_missing_checkout_and_reuses_it(local_install):
     manifest = support / "Cargo.toml"
     manifest.write_text(manifest.read_text() + "# local edit\n")
     commands.write_text("")
-    reinstall = run(clone_status=1)
+    # Invoking an installer from a different checkout must build its own siblings.
+    other = workspace.parent / "another workspace"
+    for name in ("mn-cli", "mn-client-support"):
+        (other / name).mkdir(parents=True)
+        (other / name / "Cargo.toml").touch()
+    reinstall = run(clone_status=1, cwd=other)
     events = commands.read_text().splitlines()
     assert events[:4] == ["build", "build", "build", "podman"], (
         reinstall.stdout + reinstall.stderr

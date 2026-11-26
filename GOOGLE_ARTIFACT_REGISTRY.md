@@ -11,6 +11,16 @@ npm packages, Docker images, and generic release archives require separate
 format-specific repositories inside that project; GAR cannot mix those formats
 in one repository.
 
+
+## Client WebAssembly components
+
+The generic repository `mirrorneuron-binaries` contains `mn-cli` (`mn.wasm`), `mn-api` (`mn-api.wasm`), and `mn-client-support` (`mn-client-support.wasm`). Each immutable `vMAJOR.MINOR.PATCH` version also carries a SHA-256 file. `scripts/publish-wasm-clients.sh --version vX.Y.Z --apply` verifies the component identities before upload and reads the published files back. `install.sh --no-runtime` consumes these releases directly.
+
+Tagged releases cache the original build by version and the three source trees before uploading.
+The changed-component publisher retains it with the release plan. To retry from another
+machine, pass the original Wasm files and checksums with `--artifacts DIR`. Another build of
+the same Rust source can produce different bytes.
+
 ## Current Registry
 
 - Project: `mirrorneuron-public-packages`
@@ -274,13 +284,13 @@ gcloud artifacts generic download \
 
 ## Install From Public GAR
 
-Example direct install:
+Run `./install.sh --no-runtime --yes` to install the three Wasm clients from the version pinned in the installer. The Python SDK is available separately.
 
 ```bash
 python -m pip install \
   --index-url https://us-central1-python.pkg.dev/mirrorneuron-public-packages/agent-skills/simple/ \
   --extra-index-url https://pypi.org/simple \
-  mirrorneuron-cli
+  mirrorneuron-python-sdk
 ```
 
 Binary installer example:

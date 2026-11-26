@@ -29,6 +29,61 @@ validator = module("validate-python-release.py")
 stager = module("stage-python-release-sources.py")
 
 
+def test_tagged_wasm_publish_retains_original_build_after_upload_failure(tmp_path):
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    for name in ("publish-wasm-clients.sh", "validate-version-tag.sh"):
+        shutil.copy2(SCRIPTS / name, tools / name)
+    for name in ("mn-cli", "mn-api", "mn-client-support"):
+        repo = repository(tmp_path, name)
+        (repo / "source.txt").write_text(name)
+        commit(repo)
+        git(repo, "tag", "v2.0.1")
+    build = tools / "package-rust-client.sh"
+    build.write_text("""#!/bin/bash
+set -eu
+echo build >> "$BUILD_LOG"
+mkdir -p "$1"
+for name in mn mn-api mn-client-support; do
+  printf '%s 2.0.1\n' "$name" > "$1/$name.wasm"
+  (cd "$1"; shasum -a 256 "$name.wasm" > "$name.wasm.sha256")
+done
+""")
+    engine = tools / "wasmtime"
+    engine.write_text('#!/bin/bash\ncat "${@: -2:1}"\n')
+    for tool in (engine, build):
+        tool.chmod(0o755)
+    build_log = tmp_path / "builds"
+    env = {
+        **os.environ,
+        "MN_CLIENT_SOURCE_ROOT": str(tmp_path),
+        "XDG_CACHE_HOME": str(tmp_path / "cache"),
+        "MN_WASMTIME_BIN": str(engine),
+        "BUILD_LOG": str(build_log),
+        "MN_GCLOUD_BIN": "false",
+    }
+    publish = [
+        tools / "publish-wasm-clients.sh",
+        "--from-tag",
+        "--version",
+        "v2.0.1",
+        "--apply",
+    ]
+    for _ in range(2):
+        result = subprocess.run(publish, env=env, capture_output=True, text=True)
+        assert result.returncode == 1, result.stderr
+    assert build_log.read_text().splitlines() == ["build"]
+    cached = list((tmp_path / "cache").rglob("*.wasm"))
+    assert sorted(path.name for path in cached) == [
+        "mn-api.wasm",
+        "mn-client-support.wasm",
+        "mn.wasm",
+    ]
+    cached[0].write_bytes(b"corrupt")
+    result = subprocess.run(publish, env=env, capture_output=True, text=True)
+    assert result.returncode and "Invalid checksum" in result.stderr
+
+
 def test_release_preparation_reads_package_index_with_bash_32(tmp_path):
     release = SCRIPTS / "release_all.sh"
     source, separator, _ = release.read_text().partition('\nwhile [[ "$#" -gt 0 ]]')
@@ -101,6 +156,9 @@ prepare_release_metadata
     assert result.stdout.splitlines() == [
         "PIN:MN_DEFAULT_CORE_VERSION=v1.3.55",
         "PIN:MN_DEFAULT_WEB_UI_VERSION=v1.3.55",
+        "PIN:MN_DEFAULT_CLIENT_VERSION=v1.3.55",
+        "PIN:MN_DEFAULT_CLI_VERSION=v1.3.55",
+        "PIN:MN_DEFAULT_API_VERSION=v1.3.55",
         "PIN:MN_DEFAULT_AGENT_PACKAGE_INDEX_VERSION=v1.3.55",
         "PIN:MN_DEFAULT_MEMBRANE_CONTEXT_ENGINE_VERSION=v1.3.55",
         "PIN:MN_DEFAULT_INSTALL_VERSION=v1.3.55",

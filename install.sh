@@ -31,10 +31,10 @@ exec 3>&1
 # Core is a GAR Podman image.
 MN_DEFAULT_CORE_VERSION="${MN_DEFAULT_CORE_VERSION:-v1.4.1}"
 # The SDK uses pip. The native client has its own release line.
-MN_DEFAULT_CLIENT_VERSION="${MN_DEFAULT_CLIENT_VERSION:-v2.0.0}"
+MN_DEFAULT_CLIENT_VERSION="${MN_DEFAULT_CLIENT_VERSION:-v2.0.1}"
 MN_DEFAULT_PYTHON_SDK_VERSION="${MN_DEFAULT_PYTHON_SDK_VERSION:-v1.4.23}"
-MN_DEFAULT_CLI_VERSION="${MN_DEFAULT_CLI_VERSION:-v2.0.0}"
-MN_DEFAULT_API_VERSION="${MN_DEFAULT_API_VERSION:-v2.0.0}"
+MN_DEFAULT_CLI_VERSION="${MN_DEFAULT_CLI_VERSION:-v2.0.1}"
+MN_DEFAULT_API_VERSION="${MN_DEFAULT_API_VERSION:-v2.0.1}"
 # Web UI is a GAR npm package (the installer strips the leading `v`).
 MN_DEFAULT_WEB_UI_VERSION="${MN_DEFAULT_WEB_UI_VERSION:-v1.4.3}"
 # Additional pip packages are selected from the versioned package index.
@@ -424,7 +424,7 @@ function mn_start_podman() {
           print_error "No Podman machine is configured. Run podman machine init first."
           return 1
         fi
-        podman machine init || return 1
+        podman machine init --memory 8192 || return 1
       fi
       podman machine start || return 1
     fi
@@ -2616,11 +2616,80 @@ function mn_client_asset() {
   chmod 755 "$dest"
 }
 
-function mn_install_native_clients() (
+# Stock Wasmtime is the only execution engine required by a release client.
+function mn_client_engine() {
+  local stage="$1" engine platform digest archive actual version=51.0.0
+  engine="${MN_WASMTIME_BIN:-$(command -v wasmtime || true)}"
+  if [ -z "$engine" ]; then engine="$INSTALL_DIR/client-current/bin/wasmtime"; fi
+  if [ -x "$engine" ] && "$engine" --version | awk '$1 == "wasmtime" { split($2,v,"."); ok=v[1]+0 >= 51 } END{ exit !ok }'; then
+    cp "$engine" "$stage/bin/wasmtime"
+    return
+  fi
+  case "$(uname -s)/$(uname -m)" in
+    Darwin/arm64) platform=aarch64-macos; digest=61dd882b44bcf854b301518781f407b9f6db4c6bd157a55f8f44b1f1357f93dc ;;
+    Darwin/x86_64) platform=x86_64-macos; digest=51767ef35ea3c2653205c09892f174b75e507cf8ffccfcba00ed557832f0e72d ;;
+    Linux/aarch64|Linux/arm64) platform=aarch64-linux; digest=a263f34aefad1b24ba4d9ca635ddfea415f4acfe3f3f1bb6d4525c34fc6a7397 ;;
+    Linux/x86_64) platform=x86_64-linux; digest=a18020674fac4107f329bc9ed720ea9c88e4b30a61e8a527787bcce051123d32 ;;
+    *) print_error "Install Wasmtime for this host and rerun."; return 1 ;;
+  esac
+  archive="wasmtime-v$version-$platform"
+  curl --proto '=https' --proto-redir '=https' -fsSL --retry 2     "https://github.com/bytecodealliance/wasmtime/releases/download/v$version/$archive.tar.xz" -o "$stage/engine.tar.xz" || return 1
+  if command -v shasum >/dev/null; then actual=$(shasum -a 256 "$stage/engine.tar.xz"); else actual=$(sha256sum "$stage/engine.tar.xz"); fi
+  if [ "${actual%% *}" != "$digest" ]; then print_error "Wasmtime archive failed checksum verification."; return 1; fi
+  tar -xJf "$stage/engine.tar.xz" -C "$stage" "$archive/wasmtime" && mv "$stage/$archive/wasmtime" "$stage/bin/wasmtime"
+}
+
+function mn_client_wasm_asset() {
+  local name="$1" package="$2" version="$3" dest="$4" file url actual expected
+  local project="${MN_GAR_PROJECT:-$MN_DEFAULT_CORE_GAR_PROJECT}" region="${MN_GAR_LOCATION:-$MN_DEFAULT_CORE_GAR_LOCATION}"
+  local repo="${MN_CLIENT_GAR_REPOSITORY:-mirrorneuron-binaries}"
+  mn_validate_version_tag_or_exit "$version"
+  for file in "$name.wasm" "$name.wasm.sha256"; do
+    if [ -n "${MN_CLIENT_DIST_DIR:-}" ]; then cp "$MN_CLIENT_DIST_DIR/$file" "$dest/$file" || return 1
+    else
+      url="https://artifactregistry.googleapis.com/download/v1/projects/$project/locations/$region/repositories/$repo/files/$package%3A$version%3A$file:download?alt=media"
+      curl --proto '=https' --proto-redir '=https' -fsSL --retry 2 "$url" -o "$dest/$file" || { print_error "Cannot download $package $version ($file) from GAR."; return 1; }
+    fi
+  done
+  expected=$(awk 'NR == 1 {print $1}' "$dest/$name.wasm.sha256")
+  if command -v shasum >/dev/null; then actual=$(shasum -a 256 "$dest/$name.wasm"); else actual=$(sha256sum "$dest/$name.wasm"); fi
+  if ! [[ "$expected" =~ ^[a-fA-F0-9]{64}$ ]] || [ "${actual%% *}" != "$expected" ]; then print_error "Invalid checksum for $name.wasm."; return 1; fi
+  if [ "$(od -An -tx1 -N8 "$dest/$name.wasm" | tr -d ' \n')" != 0061736d0d000100 ]; then print_error "$name.wasm is not a WebAssembly component."; return 1; fi
+}
+
+function mn_local_client_root() {
+  local siblings
+  if [ -n "${MN_CLIENT_SOURCE_ROOT:-}" ]; then
+    printf '%s' "$MN_CLIENT_SOURCE_ROOT"
+    return
+  fi
+  siblings="$(cd "$(mn_script_dir)/.." && pwd -P)" || return 1
+  if [ -f "$PWD/mn-cli/Cargo.toml" ] && { [ -n "${MN_INSTALL_STREAM_NAME:-}" ] || [ ! -f "$siblings/mn-cli/Cargo.toml" ]; }; then
+    pwd -P
+  else
+    printf '%s' "$siblings"
+  fi
+}
+
+function mn_client_build_mode() {
+  case "${MN_ENV:-prod}" in
+  dev | development)
+    if [ "$MN_INSTALL_MODE_EXPLICIT" = N ] && [ "$MN_INSTALL_MODE" = binary ] &&
+      [ -z "${MN_INSTALL_VERSION:-}${MN_CLIENT_VERSION:-}${MN_CLIENT_DIST_DIR:-}${MN_CLI_VERSION:-}${MN_API_VERSION:-}${MN_CLI_VERSION_OVERRIDE:-}${MN_API_VERSION_OVERRIDE:-}" ]; then
+      printf 'local'
+      return
+    fi
+    ;;
+  esac
+  printf '%s' "$MN_INSTALL_MODE"
+}
+
+function mn_install_wasm_clients() (
   set -e
-  local mode="$MN_INSTALL_MODE" root tag cli_tag api_tag repo ref command target target_dir stage gen component_tag
+  local mode root tag cli_tag api_tag repo ref command target target_dir stage gen component_tag
   local -a repos=(mn-client-support) commands=(mn-client-support)
-  root="$(cd "$(mn_script_dir)/.." && pwd)"
+  mode="$(mn_client_build_mode)"
+  root="$(mn_local_client_root)"
   tag="${MN_CLIENT_VERSION:-$MN_DEFAULT_CLIENT_VERSION}"
   if [ "$MN_INSTALL_ROLE" = client ]; then tag="${MN_CLIENT_VERSION:-${MN_INSTALL_VERSION:-$tag}}"; fi
   component_tag="${MN_CLIENT_VERSION:-}"
@@ -2637,12 +2706,13 @@ function mn_install_native_clients() (
   if [ "${INSTALL_API:-Y}" = Y ] || [ "${INSTALL_WEB_UI:-N}" = Y ]; then
     repos+=(mn-api)
     if [ "${INSTALL_API:-Y}" = Y ]; then commands+=(mn-api); fi
-    commands+=(mn-web-ui-server)
+    if [ "${INSTALL_WEB_UI:-N}" = Y ]; then commands+=(mn-web-ui-server); fi
   fi
   mkdir -p "$INSTALL_DIR/bin" "$INSTALL_DIR/client-releases"
   stage="$(mktemp -d "$INSTALL_DIR/client-releases/.stage.XXXXXXXX")"
   trap 'rm -rf "$stage"' EXIT
   mkdir "$stage/bin"
+  mn_client_engine "$stage" || return 1
   case "$mode" in
   local | github)
     if [ "$mode" = local ]; then
@@ -2660,20 +2730,18 @@ function mn_install_native_clients() (
       done
     fi
     target_dir="${CARGO_TARGET_DIR:-$INSTALL_DIR/cache/rust-client}"
-    for repo in "${repos[@]}"; do
-      [ -f "$root/$repo/Cargo.toml" ] || {
-        print_error "Missing Rust checkout at $root/$repo."
-        return 1
-      }
-      cargo build --quiet --locked --release --bins --manifest-path "$root/$repo/Cargo.toml" --target-dir "$target_dir"
-    done
     for command in "${commands[@]}"; do
-      cp "$target_dir/release/$command" "$stage/bin/$command"
-      chmod 755 "$stage/bin/$command"
+      case "$command" in mn) repo=mn-cli ;; mn-web-ui-server|mn-api) repo=mn-api ;; *) repo=mn-client-support ;; esac
+      if [ "$command" = mn-web-ui-server ]; then
+        cargo build --quiet --locked --release --bin "$command" --manifest-path "$root/$repo/Cargo.toml" --target-dir "$target_dir" || return 1
+        cp "$target_dir/release/$command" "$stage/bin/$command" || return 1
+      else
+        "$root/mn-client-support/scripts/build-wasm.sh" "$root/$repo" "$command" "$target_dir" || return 1
+        cp "$target_dir/wasm32-wasip2/release/$command.wasm" "$stage/bin/" || return 1
+      fi
     done
     ;;
   binary)
-    target="$(mn_client_target)" || return 1
     for command in "${commands[@]}"; do
       case "$command" in mn)
         repo=mn-cli
@@ -2688,11 +2756,21 @@ function mn_install_native_clients() (
         ref="$tag"
         ;;
       esac
-      mn_client_asset "$command" "$repo" "$ref" "$stage/bin/$command" "$target" || return 1
+      if [ "$command" = mn-web-ui-server ]; then
+        target="$(mn_client_target)" || return 1
+        mn_client_asset "$command" "$repo" "$ref" "$stage/bin/$command" "$target" || return 1
+      else
+        mn_client_wasm_asset "$command" "$repo" "$ref" "$stage/bin" || return 1
+      fi
     done
     ;;
   esac
+  "$stage/bin/wasmtime" run -C cache=n "$stage/bin/mn-client-support.wasm" --print-launcher >"$stage/launcher" || return 1
+  chmod 755 "$stage/launcher"
   for command in "${commands[@]}"; do
+    if [ "$command" != mn-web-ui-server ]; then
+      cp "$stage/launcher" "$stage/bin/$command" || return 1
+    fi
     if ! "$stage/bin/$command" --version >/dev/null; then
       print_error "Could not run the staged $command executable. Check the client build or release target and rerun."
       return 1
@@ -2700,7 +2778,7 @@ function mn_install_native_clients() (
   done
   # Keep running API processes paired with their original support executable.
   # The shared link changes only after every binary is present and executable.
-  gen="$(mktemp -d "$INSTALL_DIR/client-releases/rust.XXXXXXXX")"
+  gen="$(mktemp -d "$INSTALL_DIR/client-releases/wasm.XXXXXXXX")"
   mv "$stage/bin" "$gen/bin"
   ln -s "client-releases/${gen##*/}" "$stage/active"
   # GNU and BSD mv expose different flags for replacing a directory symlink.
@@ -2716,8 +2794,8 @@ function mn_install_native_clients() (
 function mn_install_client_stage() {
   [ -n "$MN_INSTALL_CLIENT_COMPONENTS" ] || return 0
   mn_print_stage "Installing the client"
-  print_step "Installing native client commands in $BIN_DIR"
-  mn_install_native_clients
+  print_step "Installing Wasm client commands in $BIN_DIR"
+  mn_install_wasm_clients
   if [ "$MN_INSTALL_ROLE" = client ]; then
     "$BIN_DIR/mn-client-support" init-client
   fi
@@ -2809,6 +2887,11 @@ function mn_install_client() {
         print_error "Missing value after $arg."
         return 1
       }
+      case "$arg" in
+      --gar-project) MN_GAR_PROJECT=$1 ;;
+      --gar-location) MN_GAR_LOCATION=$1 ;;
+      --gar-repository) MN_CLIENT_GAR_REPOSITORY=$1 ;;
+      esac
       shift
       ;;
     --cli-version | --api-version)
@@ -2834,12 +2917,7 @@ function mn_install_client() {
   INSTALL_DIR="$MN_RESET_HOME"
   export MN_HOME="$INSTALL_DIR"
   BIN_DIR="$INSTALL_DIR/bin"
-  local root
-  root="$(cd "$(mn_script_dir)/.." && pwd)"
-  # The unpinned workspace invocation tests the sibling checkouts. Explicit
-  # binary mode, streamed installs and version pins always select release assets.
-  if [ "$MN_INSTALL_MODE" = binary ] && [ "$MN_INSTALL_MODE_EXPLICIT" = N ] && [ -z "${MN_INSTALL_STREAM_NAME:-}${MN_INSTALL_VERSION:-}${MN_CLIENT_VERSION:-}${MN_CLIENT_DIST_DIR:-}${MN_CLI_VERSION:-}${MN_API_VERSION:-}${MN_CLI_VERSION_OVERRIDE:-}${MN_API_VERSION_OVERRIDE:-}" ] &&
-    [ -f "$root/mn-client-support/Cargo.toml" ] && [ -f "$root/mn-cli/Cargo.toml" ] && [ -f "$root/mn-api/Cargo.toml" ]; then MN_INSTALL_MODE=local; fi
+  MN_INSTALL_MODE="$(mn_client_build_mode)"
   INSTALL_CLI=Y
   INSTALL_API=Y
   INSTALL_WEB_UI=N
@@ -2858,12 +2936,12 @@ function mn_install_client() {
       print_warning "Reset cancelled."
       return 0
     fi
-  elif [ "$reinstall" = N ] && [ -x "$BIN_DIR/mn" ] && [ -x "$BIN_DIR/mn-api" ] && [ -x "$BIN_DIR/mn-client-support" ]; then
-    print_success "Keeping the existing Rust client."
+  elif [ "$reinstall" = N ] && [ -f "$INSTALL_DIR/client-current/bin/mn.wasm" ] && [ -f "$INSTALL_DIR/client-current/bin/mn-api.wasm" ] && [ -f "$INSTALL_DIR/client-current/bin/mn-client-support.wasm" ] && [ -x "$BIN_DIR/mn" ] && [ -x "$BIN_DIR/mn-api" ] && [ -x "$BIN_DIR/mn-client-support" ]; then
+    print_success "Keeping the existing Wasm client."
     return 0
   fi
   if [ "$MN_INSTALL_RESET" = Y ]; then
-    if [ "$MN_INSTALL_MODE" = local ]; then mn_prepare_local_clients "$root" || return 1; fi
+    if [ "$MN_INSTALL_MODE" = local ]; then mn_prepare_local_clients "$(mn_local_client_root)" || return 1; fi
     rm -f "$INSTALL_DIR/client.json" "$INSTALL_DIR/api.token"
     rm -rf "$INSTALL_DIR/outputs" "$INSTALL_DIR/logs"
   fi
