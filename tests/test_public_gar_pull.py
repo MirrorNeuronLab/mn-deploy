@@ -53,7 +53,7 @@ elif args[:2] == ['image', 'inspect']:
         + ":v1.3.57"
     )
     script = "exec 3>&2\n"
-    for name in ("mn_run_logged", "mn_pull_public_gar_image"):
+    for name in ("mn_run_logged", "mn_anonymous_podman", "mn_pull_public_gar_image"):
         script += "\n".join(function(name)) + "\n"
     if target == "core":
         script += "\n".join(function("install_core_from_gar")) + "\n"
@@ -141,3 +141,77 @@ def test_private_core_override_keeps_credentials(tmp_path):
     assert result.returncode == 0, result.stderr
     assert records[0]["authfile"] == str(authfile)
     assert records[0]["host"] == "ssh://private"
+
+
+@pytest.mark.parametrize(
+    "first_status,first_error,anonymous_status,should_retry",
+    [
+        (0, "", 0, False),
+        (
+            125,
+            "Error: error getting credentials - err: exit status 1, out: ``",
+            0,
+            True,
+        ),
+        (
+            125,
+            "Error: error getting credentials - err: exit status 1, out: ``",
+            9,
+            True,
+        ),
+        (125, "Error: failed to build stage", 0, False),
+    ],
+)
+def test_source_build_retries_only_a_client_credential_failure(
+    tmp_path, first_status, first_error, anonymous_status, should_retry
+):
+    script = "\n".join(
+        function("mn_anonymous_podman") + function("mn_build_with_registry_auth")
+    )
+    script += r"""
+podman() {
+  [ "$1" = build ] || return 91
+  shift
+  if [ "$1" = --authfile ]; then
+    echo "$2" > "$TMPDIR/used-authfile"
+    cat "$2" > "$TMPDIR/auth-used.json"
+    shift 2
+    status=$ANONYMOUS_STATUS
+  else
+    [ "$REGISTRY_AUTH_FILE" = "$TMPDIR/caller.json" ] || return 92
+    printf '%s\n' "$FIRST_ERROR" >&2
+    status=$FIRST_STATUS
+  fi
+  [ "$#" = 3 ] && [ "$1" = --target ] && [ "$2" = runtime ] && [ "$3" = "a project" ] || return 93
+  echo build >> "$TMPDIR/calls"
+  return "$status"
+}
+mn_build_with_registry_auth --target runtime "a project"
+"""
+    caller = tmp_path / "caller.json"
+    caller.write_text('{"credHelpers":{"private.example":"test"}}')
+    result = subprocess.run(
+        ["bash", "-euc", script],
+        text=True,
+        capture_output=True,
+        env={
+            **os.environ,
+            "REGISTRY_AUTH_FILE": str(caller),
+            "TMPDIR": str(tmp_path),
+            "FIRST_STATUS": str(first_status),
+            "FIRST_ERROR": first_error,
+            "ANONYMOUS_STATUS": str(anonymous_status),
+        },
+    )
+    assert result.returncode == (anonymous_status if should_retry else first_status), (
+        result.stderr
+    )
+    assert (tmp_path / "calls").read_text().splitlines() == ["build"] * (
+        2 if should_retry else 1
+    )
+    if should_retry:
+        assert json.loads((tmp_path / "auth-used.json").read_text()) == {"auths": {}}
+        assert not Path((tmp_path / "used-authfile").read_text().strip()).exists()
+    if result.returncode:
+        assert first_error in result.stderr
+    assert not list(tmp_path.glob("mn-podman-build.*"))

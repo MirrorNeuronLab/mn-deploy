@@ -353,11 +353,17 @@ function mn_install_podman_cli() {
 # Bind mounts are resolved by the engine. On a Mac this is the socket inside
 # the Podman machine, even though the client connects via a forwarded socket.
 function mn_resolve_podman_socket() {
-  if [ -n "${PODMAN_HOST_SOCKET:-}" ]; then
-    printf '%s\n' "$PODMAN_HOST_SOCKET"
-  else
-    podman info --format '{{.Host.RemoteSocket.Path}}'
+  local socket_path="${PODMAN_HOST_SOCKET:-}"
+  if [ -z "$socket_path" ]; then
+    socket_path="$(podman info --format '{{.Host.RemoteSocket.Path}}')" || return 1
   fi
+  socket_path="${socket_path#unix://}"
+  if [[ "$socket_path" != /* || "$socket_path" == *:* ||
+    "$socket_path" == *$'\n'* || "$socket_path" == *$'\r'* ]]; then
+    print_error "Expected an absolute Podman API socket path. Check PODMAN_HOST_SOCKET or podman info."
+    return 1
+  fi
+  printf '%s\n' "$socket_path"
 }
 
 function mn_start_podman() {
@@ -408,20 +414,13 @@ function mn_ensure_podman_for_install() {
   if ! command -v podman >/dev/null 2>&1; then
     mn_install_podman_cli || return 1
   fi
-  mn_start_podman install
+  mn_start_podman install || return 1
+  PODMAN_HOST_SOCKET="$(mn_resolve_podman_socket)" || return 1
+  export PODMAN_HOST_SOCKET
 }
 
 function mn_prepare_runtime_podman() {
   mn_ensure_podman_for_install || return 1
-  PODMAN_HOST_SOCKET="$(mn_resolve_podman_socket)" || return 1
-  case "$PODMAN_HOST_SOCKET" in
-  /*) ;;
-  *)
-    print_error "Podman did not report an absolute API socket path."
-    return 1
-    ;;
-  esac
-  export PODMAN_HOST_SOCKET
   local rootless container_uid container_gid
   rootless="$(podman info --format '{{.Host.Security.Rootless}}')" || return 1
   if [ "$rootless" = true ]; then
@@ -646,17 +645,47 @@ function mn_install_support_asset_path() {
   fi
 }
 
-function mn_pull_public_gar_image() (
-  local image="$1" auth_dir
+# The remote client loads credentials for every configured registry, even for
+# cached images. Give public and local-only operations their own auth file.
+function mn_anonymous_podman() (
+  local action="$1"
+  shift
+  mn_podman_authfile="$(mktemp "${TMPDIR:-/tmp}/mn-podman-auth.XXXXXXXX")" || return 1
+  trap 'rm -f "$mn_podman_authfile"' EXIT
+  printf '{"auths":{}}\n' >"$mn_podman_authfile" || return 1
+  podman "$action" --authfile "$mn_podman_authfile" "$@"
+)
+
+function mn_pull_public_gar_image() {
+  local image="$1"
   case "$image" in
   us-central1-docker.pkg.dev/mirrorneuron-public-packages/*)
-    auth_dir="$(mktemp -d)" || return 1
-    trap 'rm -rf "$auth_dir"' EXIT
-    printf '{"auths":{}}\n' >"$auth_dir/auth.json"
-    mn_run_logged "Podman image download" podman pull --authfile "$auth_dir/auth.json" "$image"
+    mn_run_logged "Podman image download" mn_anonymous_podman pull "$image"
     ;;
   *) mn_run_logged "Podman image download" podman pull "$image" ;;
   esac
+}
+
+# Custom Dockerfiles may use private base images. Keep the caller's credentials
+# unless Podman fails to read them before submitting the build to the engine.
+function mn_build_with_registry_auth() (
+  local status
+  set -o pipefail
+  mn_build_stderr="$(mktemp "${TMPDIR:-/tmp}/mn-podman-build.XXXXXXXX")" || return 1
+  trap 'rm -f "$mn_build_stderr"' EXIT
+  # Stream both channels as usual while keeping Podman's final diagnostic.
+  exec 4>&1
+  if podman build "$@" 2>&1 >&4 4>&- | tee "$mn_build_stderr" >&2; then
+    return 0
+  else
+    status=$?
+  fi
+  if [ "$status" -eq 125 ] && tail -n 1 "$mn_build_stderr" | grep -q '^Error: error getting credentials - err:'; then
+    printf 'Podman could not read registry credentials. Retrying the build anonymously.\n' >&2
+    mn_anonymous_podman build "$@"
+    return
+  fi
+  return "$status"
 )
 
 function mn_report_podman_failure() {
@@ -667,7 +696,7 @@ function mn_report_podman_failure() {
 
 function mn_run_podman_build() {
   local status
-  if mn_run_logged "Podman image build" podman build "$@"; then
+  if mn_run_logged "Podman image build" mn_build_with_registry_auth "$@"; then
     return 0
   else
     status=$?
@@ -1429,7 +1458,7 @@ function mn_prepare_membrane_image() {
   # Recheck before Podman is invoked; no fallback to an older image on failure.
   mn_validate_membrane_build || return 1
   print_step "Building Membrane Podman image from local source"
-  if ! mn_run_logged "Membrane image build" podman build --target runtime \
+  if ! mn_run_logged "Membrane image build" mn_build_with_registry_auth --target runtime \
     --file "$MN_BUILD_MEMBRANE_DIR/Dockerfile" \
     --tag "$(mn_selected_membrane_image '')" "$MN_BUILD_MEMBRANE_DIR"; then
     print_error "Membrane image build failed. The GAR image was not used as a fallback."
@@ -1571,7 +1600,7 @@ function mn_reset_remove_docker_owned_files() {
   # parent or HOME, and use an image already available on the host.
   for cleanup_image in "${MN_RESET_CLEANUP_IMAGES[@]:-}"; do
     [ -n "$cleanup_image" ] || continue
-    if podman run --rm --user 0:0 \
+    if mn_anonymous_podman run --pull=never --rm --user 0:0 \
       --volume "$MN_RESET_HOME:/mnt/mn-reset:rw" \
       --entrypoint /bin/sh \
       "$cleanup_image" -ec "$cleanup_command" >/dev/null 2>&1; then
@@ -2266,7 +2295,11 @@ function generate_openshell_jwt_keys() (
   set -euo pipefail
   local jwt_dir="$1"
   local gateway_image="${OPENSHELL_GATEWAY_IMAGE:-$MN_DEFAULT_OPENSHELL_GATEWAY_IMAGE}"
-  local bootstrap_dir="" container_id="" name
+  local bootstrap_dir="" container_id="" name podman_client=podman
+
+  case "$gateway_image" in
+  ghcr.io/nvidia/openshell/gateway | ghcr.io/nvidia/openshell/gateway[:@]*) podman_client=mn_anonymous_podman ;;
+  esac
 
   # Invoked by the EXIT trap in this subshell.
   # shellcheck disable=SC2329
@@ -2283,7 +2316,7 @@ function generate_openshell_jwt_keys() (
   trap 'exit 143' TERM
 
   bootstrap_dir="$(mktemp -d "${jwt_dir}/.jwt-bootstrap.XXXXXX")"
-  if ! container_id="$(podman create \
+  if ! container_id="$("$podman_client" create \
     --user "$OPENSHELL_GATEWAY_USER" \
     --env HOME=/tmp/openshell-bootstrap \
     "$gateway_image" generate-certs \
@@ -3596,7 +3629,7 @@ EOF
     local readiness_announced="N"
 
     while [ "$attempt" -le "$max_attempts" ]; do
-      if podman run --rm \
+      if mn_anonymous_podman run --pull=never --rm \
         --network "$network_name" \
         --entrypoint openshell \
         mirror-neuron-core:latest \
@@ -5194,7 +5227,7 @@ EOF
     local readiness_announced="N"
 
     while [ "$attempt" -le "$max_attempts" ]; do
-      if podman run --rm \
+      if mn_anonymous_podman run --pull=never --rm \
         --network "$network_name" \
         --entrypoint openshell \
         mirror-neuron-core:latest \
@@ -7115,7 +7148,7 @@ EOF
     local readiness_announced="N"
 
     while [ "$attempt" -le "$max_attempts" ]; do
-      if podman run --rm \
+      if mn_anonymous_podman run --pull=never --rm \
         --network "$network_name" \
         --entrypoint openshell \
         mirror-neuron-core:latest \

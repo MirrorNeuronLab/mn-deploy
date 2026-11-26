@@ -116,11 +116,11 @@ resource to check before retrying.
 
 ## Public image downloads (unreleased)
 
-Core and Membrane downloads from the public GAR project use an isolated Docker
-configuration, so expired gcloud credentials do not block installation. No
-`gcloud auth login` is required. Pulls retain the selected Docker daemon and
-leave the user's Docker configuration unchanged. Custom private image locations
-continue to use the user's Docker credentials.
+Podman pulls the public Core and Membrane images, NVIDIA OpenShell gateway
+and Compose provider with anonymous registry credentials. Custom gateway and
+Core images use the caller's registry credentials. Source builds also use the
+caller's credentials for private base images. If a credential helper fails
+before Podman submits the build, the installer retries it anonymously.
 
 ## Installer compatibility fix (unreleased)
 
@@ -185,8 +185,10 @@ If the package manager needs administrator access, sudo can prompt for your
 password in the terminal. Unattended runs and explicit `--yes` use non-interactive
 sudo. On Linux the installer starts the native API socket for the invoking user.
 On macOS Homebrew installs the Podman formula without a confirmation prompt,
-and workloads run in a Podman machine. The Compose
-provider runs in a pinned container. Client-only installation requires Python tooling.
+and workloads run in a Podman machine. The installer accepts the machine's API
+socket as either an absolute path or a `unix://` URI and checks the path before
+reset deletes any data. The Compose provider runs in a pinned container.
+Client-only installation requires Python tooling.
 
 Start an existing engine or machine with:
 

@@ -17,7 +17,7 @@ case "$name:$*" in
   uname:-m) echo arm64;;
   id:-u|id:-g) echo "$TEST_UID";;
   'podman:info --format {{.Host.Security.Rootless}}') test "$TEST_UID" = 0 && echo false || echo true;;
-  'podman:info --format {{.Host.RemoteSocket.Path}}') echo /run/user/1000/podman/podman.sock;;
+  'podman:info --format {{.Host.RemoteSocket.Path}}') echo "$TEST_SOCKET";;
   'podman:info') test "$TEST_OS" = Linux || test "$TEST_READY" = yes || test -f "$TEST_ROOT/started";;
   'podman:machine inspect') test "$TEST_MACHINE" = yes;;
   'podman:machine start') test "$TEST_FAIL" != yes && touch "$TEST_ROOT/started";;
@@ -40,6 +40,8 @@ def invoke(
     uid="1000",
     fail=False,
     connection="",
+    reported_socket="/run/user/1000/podman/podman.sock",
+    socket_override="",
     bootstrap=False,
     package=False,
     stdin=subprocess.DEVNULL,
@@ -62,11 +64,13 @@ def invoke(
     # Keep a missing Podman and the sudo probe isolated from the host.
     for exe in ("basename", "cat", "chmod", "dirname", "mkdir", "rm", "rmdir", "touch"):
         (folder / exe).symlink_to(shutil.which(exe))
+    runtime = tmp_path / "runtime"
+    had_runtime = runtime.exists()
     env = {
         **os.environ,
         "PATH": str(folder),
         "HOME": str(tmp_path),
-        "MN_HOME": str(tmp_path / "runtime"),
+        "MN_HOME": str(runtime),
         "TEST_LOG": str(tmp_path / "calls"),
         "TEST_ROOT": str(tmp_path),
         "TEST_UID": uid,
@@ -75,6 +79,8 @@ def invoke(
         "TEST_MACHINE": "yes" if machine else "no",
         "TEST_FAIL": "yes" if fail else "no",
         "CONTAINER_HOST": connection,
+        "TEST_SOCKET": reported_socket,
+        "PODMAN_HOST_SOCKET": socket_override,
         "HOMEBREW_ASK": "1",
         "HOMEBREW_NO_ASK": "",
     }
@@ -88,9 +94,13 @@ def invoke(
         cmd = [
             "/bin/bash",
             "-c",
-            'print_success(){ :; }; print_error(){ echo "$*"; }; print_step(){ :; }\n'
+            'print_success(){ :; }; print_error(){ echo "$*" >&2; }; print_step(){ :; }\n'
             + section
-            + ("\nmn_install_podman_cli" if package else "\nmn_prepare_runtime_podman"),
+            + (
+                "\nmn_install_podman_cli"
+                if package
+                else '\nmn_prepare_runtime_podman && echo "$PODMAN_HOST_SOCKET"'
+            ),
         ]
     else:
         cmd = ["/bin/bash", str(SCRIPT), *args]
@@ -104,7 +114,7 @@ def invoke(
         start_new_session=True,
     )
     calls = tmp_path / "calls"
-    assert not (tmp_path / "runtime").exists()
+    assert runtime.exists() == had_runtime
     return result, calls.read_text() if calls.exists() else ""
 
 
@@ -126,6 +136,56 @@ def test_fresh_arm_mac_uses_default_workload_machine(tmp_path):
     assert result.returncode == 0, result.stdout + result.stderr
     assert "provider=libkrun" not in calls
     assert "podman machine init" in calls and "podman machine start" in calls
+
+
+@pytest.mark.parametrize(
+    "reported,override,expected",
+    [
+        ("/run/podman/podman.sock", "", "/run/podman/podman.sock"),
+        (
+            "unix:///run/user/501/podman/podman.sock",
+            "",
+            "/run/user/501/podman/podman.sock",
+        ),
+        ("", "unix:///custom dir/podman.sock", "/custom dir/podman.sock"),
+    ],
+)
+def test_runtime_uses_absolute_engine_socket(tmp_path, reported, override, expected):
+    result, calls = invoke(
+        tmp_path,
+        bootstrap=True,
+        ready=True,
+        reported_socket=reported,
+        socket_override=override,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.splitlines() == [expected]
+    assert ("{{.Host.RemoteSocket.Path}}" in calls) == (not override)
+
+
+def test_reset_preserves_data_when_machine_reports_an_invalid_socket(tmp_path):
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    marker = runtime / "old-runtime-data"
+    marker.write_text("keep this")
+    answer = tmp_path / "answer"
+    answer.write_text("YES\n")
+    with answer.open() as stdin:
+        result, calls = invoke(
+            tmp_path,
+            "--mode",
+            "local",
+            "--reset",
+            "--build-membrane",
+            ready=True,
+            reported_socket="unix://other-host/run/podman.sock",
+            stdin=stdin,
+        )
+    assert result.returncode != 0
+    assert "absolute Podman API socket path" in result.stdout
+    assert "Reset stopped before host cleanup" in result.stdout
+    assert "podman exec" not in calls
+    assert marker.read_text() == "keep this"
 
 
 @pytest.mark.parametrize(

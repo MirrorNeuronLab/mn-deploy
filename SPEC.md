@@ -74,10 +74,12 @@ overrides take precedence over the shared release version only for their named
 component.
 
 Runtime modes check Podman before preparing installed state. Linux uses its
-native API socket. macOS uses a Podman machine. The only container package
-installed on the host is the Podman CLI and its platform dependencies. The
-Compose provider runs in an image and Core includes the checksum-pinned remote
-CLI. Client-only installations require Python tooling.
+native API socket. macOS uses the API socket inside the Podman machine.
+Before reset cleanup, the installer resolves `PODMAN_HOST_SOCKET` or the
+engine-reported socket to an absolute bind path, accepting a `unix://` prefix.
+The installer installs the Podman CLI and its platform dependencies on the
+host. The Compose provider runs in an image and Core includes the
+checksum-pinned remote CLI. Client-only installations require Python tooling.
 
 All modes use the single `mn runtime start` contract. There is no worker-only
 runtime, and worker-only installer flags are rejected.
@@ -88,6 +90,8 @@ policy. Explicit environment values override the saved range and pin it.
 The installer reports a Docker TCP port conflict and retains the startup log
 when a non-interactive startup fails.
 
+OpenShell certificate bootstrap uses anonymous registry credentials for the
+public NVIDIA gateway and the caller's credentials for a private gateway.
 When OpenShell is selected, automatic startup creates its Compose service and
 network before resolving the final host gateway endpoint. The installer
 persists that endpoint before `mn runtime start` launches the native SDK
