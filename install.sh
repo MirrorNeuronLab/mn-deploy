@@ -177,7 +177,9 @@ function mn_report_system() {
     if [ -d /proc/driver/nvidia/gpus ]; then gpu="NVIDIA GPU"; fi
     for device in /sys/class/drm/card[0-9]*/device/vendor; do
       if [ -n "$gpu" ]; then break; fi
-      [ -r "$device" ] && IFS= read -r vendor <"$device" || continue
+      if [ ! -r "$device" ] || ! IFS= read -r vendor <"$device"; then
+        continue
+      fi
       case "$vendor" in
       0x10de) gpu="NVIDIA GPU" ;;
       0x1002) gpu="AMD GPU" ;;
