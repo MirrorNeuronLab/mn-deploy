@@ -98,7 +98,9 @@ def local_install(tmp_path):
     installer = workspace / "mn-deploy/install_dev.sh"
     installer.parent.mkdir(parents=True)
     shutil.copyfile(INSTALLER, installer)
-    shutil.copyfile(INSTALLER.with_name("install.sh"), installer.with_name("install.sh"))
+    shutil.copyfile(
+        INSTALLER.with_name("install.sh"), installer.with_name("install.sh")
+    )
     for name in (
         "MirrorNeuron/Dockerfile",
         "mn-cli/Cargo.toml",
