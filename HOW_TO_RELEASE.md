@@ -10,8 +10,8 @@ process does not wait for or consume packages produced by them.
 Run the orchestrator from `mn-deploy`:
 
 ```bash
-./scripts/release_all.sh --plan  # Preview using local tags; no writes or publishing.
-./scripts/release_all.sh         # Refresh tags and release changed committed sources.
+./scripts/release.sh all --plan  # Preview using local tags; no writes or publishing.
+./scripts/release.sh all         # Refresh tags and release changed committed sources.
 ```
 
 The command:
@@ -77,36 +77,30 @@ is present, finalization also requires it to be clean and synchronized.
 
 ## Component publishers
 
-The aggregate command delegates to these component publishers in `scripts/`
-with `--apply`:
+The aggregate release publishes the computer-use app, Python packages, Wasm
+clients, Web UI, Membrane and Core. Run `scripts/publish.sh --help` to list
+the individual publishers and `scripts/publish.sh clients --help` for an
+example of the available options.
 
-```text
-scripts/publish_python_packages_to_google_artifact_registry.sh
-scripts/publish_web_ui_to_google_artifact_registry.sh
-scripts/publish_public_core_to_google_artifact_registry.sh
-scripts/publish_public_membrane_to_google_artifact_registry.sh
-```
-
-The separate desktop publisher,
-`scripts/publish_public_otterdesk_to_google_artifact_registry.sh`, is run
-explicitly for Otterdesk releases. It is not part of the aggregate release.
+Use `scripts/publish.sh otterdesk` for an independent desktop release and
+`scripts/publish.sh dmr` to restore the native runners pinned by the SDK.
 Publishing environments, package indexes, and generated artifacts keep their
 existing locations under `mn-deploy/`.
 
 Each publisher also supports a dry run or focused backfill. For example:
 
 ```bash
-./scripts/publish_python_packages_to_google_artifact_registry.sh \
+./scripts/publish.sh python \
   --python ./.venv-gar-publish/bin/python \
   --project mirrorneuron-public-packages \
   --no-prune
 
-./scripts/publish_web_ui_to_google_artifact_registry.sh --version v1.3.43
+./scripts/publish.sh web-ui --version v1.3.43
 
-./scripts/publish_public_core_to_google_artifact_registry.sh \
+./scripts/publish.sh core \
   --apply --version v1.3.43
 
-./scripts/publish_public_membrane_to_google_artifact_registry.sh \
+./scripts/publish.sh membrane \
   --apply --version v1.3.43 --skip-binary
 ```
 
@@ -117,7 +111,7 @@ The runtime publishers verify the immutable version and `latest` image tags.
 ## Tags and GitHub workflows
 
 Pushing the source tags can still trigger existing GitHub workflows. Those
-workflows are independent side effects: `scripts/release_all.sh` does not require
+workflows are independent side effects: `scripts/release.sh all` does not require
 `gh`, inspect workflow status, download workflow artifacts, or verify packages
 on PyPI or the public npm registry.
 
@@ -192,8 +186,8 @@ phase. Preserve its tags and immutable snapshot, then prepare a new aggregate
 version with the corrected planner. For the failed `v1.3.58` set:
 
 ```bash
-./scripts/release_all.sh -v 1.3.59 --plan
-./scripts/release_all.sh -v 1.3.59
+./scripts/release.sh all -v 1.3.59 --plan
+./scripts/release.sh all -v 1.3.59
 ```
 
 The SDK group selects `1.3.58`; other package versions remain independent.
@@ -215,8 +209,8 @@ The aggregate release publishes the native app before its Python skill. For an
 independent app release from the checked source, use Python 3.12+ on macOS:
 
 ```bash
-python3.12 scripts/publish_computer_use_to_google_artifact_registry.py
-MN_NOTARY_KEYCHAIN_PROFILE=release python3.12 scripts/publish_computer_use_to_google_artifact_registry.py --apply
+./scripts/publish.sh computer-use
+MN_NOTARY_KEYCHAIN_PROFILE=release ./scripts/publish.sh computer-use --apply
 ```
 
 The default targets are arm64 and x86_64; `--architectures arm64` selects one.

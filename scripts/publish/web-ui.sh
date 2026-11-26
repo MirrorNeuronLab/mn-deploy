@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEPLOY_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 WORKSPACE_ROOT="$(cd "${DEPLOY_DIR}/.." && pwd)"
 PROJECT="${MN_GAR_PROJECT:-mirrorneuron-public-packages}"
@@ -19,7 +19,7 @@ SKIP_BUILD="N"
 
 usage() {
   cat <<'EOF'
-Usage: ./scripts/publish_web_ui_to_google_artifact_registry.sh --version VERSION [options]
+Usage: ./scripts/publish.sh web-ui --version VERSION [options]
 
 Build a self-contained mirrorneuron-web-ui npm package from the local checkout
 and publish it to Google Artifact Registry. GitHub workflow artifacts are not inputs. The public npm registry is used only

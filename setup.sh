@@ -9,7 +9,7 @@ BIN_DIR="${HOME}/.local/bin"
 PYTHON_BIN="${MN_PYTHON:-python3.12}"
 FORCE_REINSTALL=false
 REPO_ROOT="$(cd "$DIR/.." && pwd)"
-MN_HOME_DIR="\$HOME/.mn"
+MN_HOME_DIR="${MN_HOME:-\$HOME/.mn}"
 MN_SKILLS_ROOT_DIR="${MN_SKILLS_ROOT:-$REPO_ROOT/mn-skills}"
 MN_BLUEPRINT_LOCAL_DIR="${MN_BLUEPRINT_LOCAL:-$REPO_ROOT/otterdesk-blueprints}"
 MN_ENV_VALUE="${MN_ENV:-dev}"
@@ -85,8 +85,7 @@ done
 
 echo "=> Checking dependencies and environment..."
 echo "=> Fetching Elixir dependencies..."
-mix deps.get
-mix compile
+(cd "$REPO_ROOT/MirrorNeuron" && mix deps.get && mix compile)
 
 if [ "$FORCE_REINSTALL" = true ] && [ -d "$VENV_DIR" ]; then
   echo "=> Force reinstall requested. Removing old venv..."
@@ -106,15 +105,47 @@ echo "=> Installing the SDK from local folders..."
   -e ../mn-python-sdk/packages/contracts -e ../mn-python-sdk/packages/web-ui \
   -e ../mn-python-sdk
 
-echo "=> Installing the native Rust client commands in $BIN_DIR..."
-build_dir="${CARGO_TARGET_DIR:-$VENV_DIR/rust-client-build}"
-mkdir -p "$BIN_DIR" "$build_dir"
-for repository in mn-client-support mn-cli mn-api; do
-  cargo build --locked --release --bins --manifest-path "$REPO_ROOT/$repository/Cargo.toml" --target-dir "$build_dir"
-done
-for command in mn mn-api mn-client-support mn-web-ui-server; do
-  ln -sfn "$build_dir/release/$command" "$BIN_DIR/$command"
-done
+echo "=> Building the local Rust clients as Wasm in $BIN_DIR..."
+install_dev_clients() (
+  set -eu
+  local builds="$VENV_DIR/wasm-clients" target="${CARGO_TARGET_DIR:-$VENV_DIR/rust-client-build}"
+  local source_root="${MN_CLIENT_SOURCE_ROOT:-$REPO_ROOT}" work release engine cargo
+  local profile="${MN_HOME:-$HOME/.mn}" client
+  local cargo_home="${CARGO_HOME:-$HOME/.cargo}" rustup_home="${RUSTUP_HOME:-$HOME/.rustup}"
+  cargo=$(command -v cargo || printf '%s' "$cargo_home/bin/cargo")
+  mkdir -p "$BIN_DIR" "$builds" "$target"
+  work=$(mktemp -d "$builds/.setup.XXXXXXXX")
+  trap 'rm -rf "$work"' EXIT
+  mkdir "$work/home"
+  engine=${MN_WASMTIME_BIN:-$(command -v wasmtime || true)}
+  if [ -z "$engine" ] && [ -x "$builds/current/bin/wasmtime" ]; then engine="$builds/current/bin/wasmtime"; fi
+  if [ -z "$engine" ] && [ -x "$HOME/.mn/client-current/bin/wasmtime" ]; then engine="$HOME/.mn/client-current/bin/wasmtime"; fi
+  # Initialize a fresh client profile through the installer. Stage the binaries
+  # separately when the developer already has a full runtime or other data.
+  client=$work/client
+  if [ ! -e "$profile" ] && [ ! -L "$profile" ]; then
+    client=$profile
+  elif [ -d "$profile" ] && [ ! -L "$profile" ] && [ -z "$(find "$profile" -mindepth 1 -maxdepth 1 -print -quit)" ]; then
+    client=$profile
+  fi
+  HOME="$work/home" MN_HOME="$client" MN_ENV=dev MN_WASMTIME_BIN="$engine" \
+    CARGO_HOME="$cargo_home" RUSTUP_HOME="$rustup_home" CARGO_TARGET_DIR="$target" \
+    MN_CLIENT_SOURCE_ROOT="$source_root" "$DIR/install.sh" --mode local --no-runtime --yes
+  "$cargo" build --locked --release --bin mn-web-ui-server --manifest-path "$source_root/mn-api/Cargo.toml" --target-dir "$target"
+  release=$(mktemp -d "$builds/local.XXXXXXXX")
+  if [ "$client" = "$work/client" ]; then
+    mv "$client/client-current/bin" "$release/bin"
+  else
+    cp -Rp "$client/client-current/bin" "$release/bin"
+  fi
+  cp "$target/release/mn-web-ui-server" "$release/bin/"
+  ln -s "${release##*/}" "$work/current"
+  mv -fT "$work/current" "$builds/current" 2>/dev/null || mv -fh "$work/current" "$builds/current"
+  for command in mn mn-api mn-client-support mn-web-ui-server; do
+    ln -sfn "$builds/current/bin/$command" "$BIN_DIR/$command"
+  done
+)
+install_dev_clients
 
 SHELL_RC="$(detect_shell_rc)"
 
@@ -125,6 +156,10 @@ fi
 
 MN_ENV_BLOCK="$(
   cat <<EOF
+case "\$PATH:" in
+  "$VENV_DIR/wasm-clients/current/bin:"*) ;;
+  *) export PATH="$VENV_DIR/wasm-clients/current/bin:\$PATH" ;;
+esac
 export MN_HOME="$MN_HOME_DIR"
 export MN_ENV="$MN_ENV_VALUE"
 export MN_BLUEPRINT_SOURCE="$MN_BLUEPRINT_SOURCE_VALUE"

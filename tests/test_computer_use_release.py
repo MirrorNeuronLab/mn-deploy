@@ -104,7 +104,7 @@ def test_upload_is_verified_and_manifest_is_published_last(
 
 
 def test_release_orders_native_artifact_before_skill_wheel():
-    source = (SCRIPTS / "release_all.sh").read_text()
+    source = (SCRIPTS / "release.sh").read_text()
     assert source.index('CURRENT_PHASE="computer-use"') < source.index(
         'CURRENT_PHASE="python"'
     )

@@ -236,15 +236,9 @@ def plan(workspace, only):
             installer = pin(
                 installer, "MN_DEFAULT_WEB_UI_VERSION", component["version"]
             )
-            compose, count = re.subn(
-                r"(MN_WEB_UI_PACKAGE_VERSION:\s*\$\{MN_WEB_UI_PACKAGE_VERSION:-)[^}]+(\})",
-                lambda m: m[1] + component["version"][1:] + m[2],
-                compose,
+            compose = module("release-contract.py").pin_compose_web_ui(
+                compose, component["version"][1:]
             )
-            if count != 1:
-                raise RuntimeError(
-                    "Cannot pin the Web UI version in docker-compose.yml."
-                )
     support_versions = [
         default(source, "MN_DEFAULT_INSTALL_SUPPORT_VERSION")[1:],
         default(source, "MN_DEFAULT_AGENT_PACKAGE_INDEX_VERSION")[1:],
@@ -676,7 +670,8 @@ def publish_component(args, workspace, component, directory):
                 stage_repository(workspace / repo, Path(staging) / repo)
             run(
                 "bash",
-                SCRIPTS / "publish-wasm-clients.sh",
+                SCRIPTS / "publish.sh",
+                "clients",
                 "--version",
                 component["version"],
                 "--project",
@@ -699,7 +694,8 @@ def publish_component(args, workspace, component, directory):
         if kind == "web-ui":
             run(
                 "bash",
-                SCRIPTS / "publish_web_ui_to_google_artifact_registry.sh",
+                SCRIPTS / "publish.sh",
+                "web-ui",
                 "--apply",
                 "--version",
                 component["version"],
@@ -1173,7 +1169,7 @@ def complete_release(args, workspace, pending, state):
 
 def main():
     parser = argparse.ArgumentParser(
-        prog="update-changed-components.sh",
+        prog="scripts/release.sh changed",
         description=__doc__,
         epilog=(
             "Default is a local preview; no builds, Git fetches, version edits or uploads. "

@@ -1,14 +1,25 @@
 #!/usr/bin/env bash
 # Local release gate. The live option provisions and removes its own two runtimes.
 set -euo pipefail
-DEPLOY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DEPLOY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 WORKSPACE_ROOT="$(cd "$DEPLOY_DIR/.." && pwd)"
 VALIDATION_PYTHON="${MN_VALIDATION_PYTHON:-$WORKSPACE_ROOT/mn-system-tests/.venv/bin/python}"
+usage() {
+  echo 'Usage: scripts/release.sh check-runtime [--offline|--two-runtimes]'
+}
+if [[ $# -gt 1 ]]; then
+  usage >&2
+  exit 2
+fi
 case "${1:---offline}" in
 --offline) live=N ;;
 --two-runtimes) live=Y ;;
+-h | --help)
+  usage
+  exit 0
+  ;;
 *)
-  printf 'Usage: %s [--offline|--two-runtimes]\n' "$0" >&2
+  usage >&2
   exit 2
   ;;
 esac
@@ -28,7 +39,7 @@ for component in mn-client-support mn-cli mn-api; do
 done
 export MN_RUST_CLIENT_BIN="$VALIDATION_HOME/wasm-bin"
 mkdir -p "$MN_RUST_CLIENT_BIN"
-"$DEPLOY_DIR/scripts/package-rust-client.sh" "$MN_RUST_CLIENT_BIN" --wasm-only
+"$DEPLOY_DIR/scripts/artifacts.sh" clients "$MN_RUST_CLIENT_BIN" --wasm-only
 engine="${MN_WASMTIME_BIN:-$(command -v wasmtime)}"
 ln -s "$engine" "$MN_RUST_CLIENT_BIN/wasmtime"
 for command in mn mn-api mn-client-support; do

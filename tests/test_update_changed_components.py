@@ -150,6 +150,34 @@ def test_no_changes_and_dirty_source_guard(workspace):
         repair.ensure_sources(workspace, planned)
 
 
+@pytest.mark.parametrize(
+    ("template", "expected"),
+    [
+        ("services:\n  core: {}\n", "services:\n  core: {}\n"),
+        (
+            "MN_WEB_UI_PACKAGE_VERSION: ${MN_WEB_UI_PACKAGE_VERSION:-1.3.60}\n",
+            "MN_WEB_UI_PACKAGE_VERSION: ${MN_WEB_UI_PACKAGE_VERSION:-1.3.61}\n",
+        ),
+        ("services:\n  web-ui:\n    image: web-ui\n", None),
+    ],
+)
+def test_web_ui_plan_respects_the_compose_template(workspace, template, expected):
+    change(workspace, "mn-web-ui")
+    compose = workspace / "mn-deploy/docker-compose.yml"
+    compose.write_text(template)
+    if expected is None:
+        with pytest.raises(ValueError, match="Cannot pin the Web UI"):
+            repair.plan(workspace, {"web-ui"})
+    else:
+        planned = repair.plan(workspace, {"web-ui"})
+        assert planned["compose"] == expected
+        assert (
+            repair.default(planned["installer"], "MN_DEFAULT_WEB_UI_VERSION")
+            == "v1.3.61"
+        )
+    assert compose.read_text() == template
+
+
 def test_completed_update_keeps_tags_snapshots_and_does_not_bump_again(workspace):
     change(workspace, "mn-api", "mn-web-ui", "MirrorNeuron", "Membrane")
     repos = ("mn-api", "mn-web-ui", "MirrorNeuron", "Membrane")

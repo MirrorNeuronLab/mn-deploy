@@ -32,27 +32,24 @@ stager = module("stage-python-release-sources.py")
 def test_tagged_wasm_publish_retains_original_build_after_upload_failure(tmp_path):
     tools = tmp_path / "tools"
     tools.mkdir()
-    for name in ("publish-wasm-clients.sh", "validate-version-tag.sh"):
-        shutil.copy2(SCRIPTS / name, tools / name)
     for name in ("mn-cli", "mn-api", "mn-client-support"):
         repo = repository(tmp_path, name)
         (repo / "source.txt").write_text(name)
+        if name == "mn-client-support":
+            build = repo / "scripts/build-wasm.sh"
+            build.parent.mkdir()
+            build.write_text("""#!/bin/bash
+set -eu
+echo "$2" >> "$BUILD_LOG"
+mkdir -p "$3/wasm32-wasip2/release"
+printf '%s %s\n' "$2" "$MN_CLIENT_RELEASE_VERSION" > "$3/wasm32-wasip2/release/$2.wasm"
+""")
+            build.chmod(0o755)
         commit(repo)
         git(repo, "tag", "v2.0.1")
-    build = tools / "package-rust-client.sh"
-    build.write_text("""#!/bin/bash
-set -eu
-echo build >> "$BUILD_LOG"
-mkdir -p "$1"
-for name in mn mn-api mn-client-support; do
-  printf '%s 2.0.1\n' "$name" > "$1/$name.wasm"
-  (cd "$1"; shasum -a 256 "$name.wasm" > "$name.wasm.sha256")
-done
-""")
     engine = tools / "wasmtime"
     engine.write_text('#!/bin/bash\ncat "${@: -2:1}"\n')
-    for tool in (engine, build):
-        tool.chmod(0o755)
+    engine.chmod(0o755)
     build_log = tmp_path / "builds"
     env = {
         **os.environ,
@@ -63,7 +60,8 @@ done
         "MN_GCLOUD_BIN": "false",
     }
     publish = [
-        tools / "publish-wasm-clients.sh",
+        SCRIPTS / "publish.sh",
+        "clients",
         "--from-tag",
         "--version",
         "v2.0.1",
@@ -72,7 +70,7 @@ done
     for _ in range(2):
         result = subprocess.run(publish, env=env, capture_output=True, text=True)
         assert result.returncode == 1, result.stderr
-    assert build_log.read_text().splitlines() == ["build"]
+    assert build_log.read_text().splitlines() == ["mn-client-support", "mn", "mn-api"]
     cached = list((tmp_path / "cache").rglob("*.wasm"))
     assert sorted(path.name for path in cached) == [
         "mn-api.wasm",
@@ -85,11 +83,16 @@ done
 
 
 def test_release_preparation_reads_package_index_with_bash_32(tmp_path):
-    release = SCRIPTS / "release_all.sh"
-    source, separator, _ = release.read_text().partition('\nwhile [[ "$#" -gt 0 ]]')
+    release = SCRIPTS / "release.sh"
+    source, separator, _ = release.read_text().partition('\ncase "${1:-}" in')
     assert separator
     functions = tmp_path / "release-functions.sh"
     functions.write_text(source)
+
+    (tmp_path / "scripts").mkdir()
+    shutil.copy2(SCRIPTS / "release-contract.py", tmp_path / "scripts")
+    compose = tmp_path / "docker-compose.yml"
+    compose.write_text("services:\n  core: {}\n")
 
     index = tmp_path / "package-index" / "python-packages.toml"
     index.parent.mkdir()
@@ -130,7 +133,6 @@ python3() {
   "$TEST_PYTHON" "$@"
 }
 PUBLISH_PYTHON=python3
-set_compose_web_ui_version() { :; }
 prepare_install_support_snapshot() { :; }
 set_installer_default_version() { printf 'PIN:%s=%s\\n' "$1" "$2"; }
 commit_and_push_if_changed() {
@@ -153,6 +155,7 @@ prepare_release_metadata
         },
     )
     assert result.returncode == 0, result.stderr
+    assert compose.read_text() == "services:\n  core: {}\n"
     assert result.stdout.splitlines() == [
         "PIN:MN_DEFAULT_CORE_VERSION=v1.3.55",
         "PIN:MN_DEFAULT_WEB_UI_VERSION=v1.3.55",
@@ -197,7 +200,8 @@ def test_core_publisher_only_adds_qemu_build_flags_for_emulation(tmp_path, platf
     plan = subprocess.check_output(
         [
             "bash",
-            str(SCRIPTS / "publish_public_core_to_google_artifact_registry.sh"),
+            str(SCRIPTS / "publish.sh"),
+            "core",
             "--core-dir",
             str(core),
             "--version",
@@ -237,8 +241,11 @@ def test_release_preview_uses_available_planning_python_without_writes(
     deploy = workspace / "mn-deploy"
     scripts = deploy / "scripts"
     scripts.mkdir(parents=True)
-    for name in ("release_all.sh", "prepare-python-package-index.py"):
+    for name in ("release.sh", "prepare-python-package-index.py"):
         shutil.copy2(SCRIPTS / name, scripts / name)
+    (scripts / "release-contract.py").write_text(
+        "import sys\nassert sys.argv[1] == 'next-version'\nprint('1.4.0')\n"
+    )
     (scripts / "publish_computer_use_to_google_artifact_registry.py").write_text(
         "import sys\nassert len(sys.argv) == 1, 'preview must not apply changes'\n"
     )
@@ -283,8 +290,9 @@ def test_release_preview_uses_available_planning_python_without_writes(
         environment["MN_PUBLISH_PYTHON"] = str(python)
     elif selection == "custom-venv":
         environment["MN_GAR_PUBLISH_VENV"] = str(python.parent.parent)
+    version_args = ["-v", "1.4.0"] if working_directory == "deploy" else []
     result = subprocess.run(
-        [str(scripts / "release_all.sh"), "-v", "1.4.0", "--plan"],
+        [str(scripts / "release.sh"), "all", *version_args, "--plan"],
         cwd=deploy if working_directory == "deploy" else workspace,
         env=environment,
         capture_output=True,
@@ -306,8 +314,8 @@ def test_release_preview_uses_available_planning_python_without_writes(
 def test_release_preview_preserves_explicit_python_and_never_installs(
     tmp_path, failure
 ):
-    release = SCRIPTS / "release_all.sh"
-    source, _, _ = release.read_text().partition('\nwhile [[ "$#" -gt 0 ]]')
+    release = SCRIPTS / "release.sh"
+    source, _, _ = release.read_text().partition('\ncase "${1:-}" in')
     functions = tmp_path / "release-functions.sh"
     functions.write_text(source)
     python = tmp_path / "selected python"
@@ -334,9 +342,7 @@ def test_release_preview_preserves_explicit_python_and_never_installs(
     "state", ["missing", "old-python", "missing-dependencies", "ready"]
 )
 def test_publishing_prepares_python_312_and_reuses_ready_environment(tmp_path, state):
-    source, _, _ = (
-        (SCRIPTS / "release_all.sh").read_text().partition('\nwhile [[ "$#" -gt 0 ]]')
-    )
+    source, _, _ = (SCRIPTS / "release.sh").read_text().partition('\ncase "${1:-}" in')
     functions = tmp_path / "release-functions.sh"
     functions.write_text(source)
     deploy = tmp_path / "mn-deploy"
@@ -722,11 +728,12 @@ def test_publisher_rejects_frozen_conflict_before_builds_or_artifact_cleanup(tmp
     gcloud = tmp_path / "gcloud"
     gcloud.write_text("#!/bin/sh\nexit 99\n")
     gcloud.chmod(0o755)
-    publisher = SCRIPTS / "publish_python_packages_to_google_artifact_registry.sh"
+    publisher = SCRIPTS / "publish.sh"
     result = subprocess.run(
         [
             "bash",
             str(publisher),
+            "python",
             "--index-file",
             str(index),
             "--dist-dir",
@@ -749,8 +756,8 @@ def test_publisher_rejects_frozen_conflict_before_builds_or_artifact_cleanup(tmp
 
 
 def test_frozen_conflict_does_not_recommend_resuming_python(tmp_path):
-    release = SCRIPTS / "release_all.sh"
-    source, _, _ = release.read_text().partition('\nwhile [[ "$#" -gt 0 ]]')
+    release = SCRIPTS / "release.sh"
+    source, _, _ = release.read_text().partition('\ncase "${1:-}" in')
     functions = tmp_path / "release-functions.sh"
     functions.write_text(source)
     result = subprocess.run(

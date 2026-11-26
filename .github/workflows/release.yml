@@ -33,7 +33,7 @@ jobs:
         run: |
           set -euo pipefail
           tag="$GITHUB_REF_NAME"
-          scripts/validate-version-tag.sh "$tag"
+          scripts/artifacts.sh tag "$tag"
 
       - name: Detect project type
         id: detect
@@ -305,7 +305,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist/release-assets
-          scripts/make-release-zip.sh "$TAG_NAME" dist/release-assets
+          scripts/artifacts.sh zip "$TAG_NAME" dist/release-assets
 
       - name: Create SHA256 checksums
         shell: bash
@@ -323,7 +323,7 @@ jobs:
         run: |
           set -euo pipefail
           mapfile -t artifacts < <(find dist dist/release-assets -maxdepth 1 -type f \( -name '*.zip' -o -name '*.whl' -o -name '*.tar.gz' -o -name 'SHA256SUMS.txt' \) | LC_ALL=C sort)
-          scripts/check-release-artifacts.sh "${artifacts[@]}"
+          scripts/artifacts.sh check "${artifacts[@]}"
 
       - name: Upload release artifacts
         uses: actions/upload-artifact@v4

@@ -2,7 +2,7 @@
 
 # Release every tagged MirrorNeuron component from a clean workspace.
 # Run from mn-deploy or the workspace root, for example:
-#   mn-deploy/scripts/release_all.sh -v 1.2.30
+#   mn-deploy/scripts/release.sh all -v 1.2.30
 
 set -euo pipefail
 
@@ -36,7 +36,7 @@ REPOSITORIES=(
 
 usage() {
   cat <<'EOF'
-Usage: scripts/release_all.sh [-v MAJOR.MINOR.PATCH] [--plan] [--resume-from PHASE]
+Usage: scripts/release.sh all [-v MAJOR.MINOR.PATCH] [--plan] [--resume-from PHASE]
 
 Omit -v (or use --auto) to choose the next unused patch when source changed.
 Python distributions advance independently when their tracked inputs change.
@@ -137,18 +137,6 @@ set_installer_default_version() {
     die "Could not set ${setting} to ${tag} in install.sh."
 }
 
-set_compose_web_ui_version() {
-  local file="$1"
-  local version="$2"
-
-  MN_RELEASE_WEB_UI_VERSION="$version" perl -0pi -e \
-    's~(MN_WEB_UI_PACKAGE_VERSION:\s*\$\{MN_WEB_UI_PACKAGE_VERSION:-)[^}]+(\})~$1$ENV{MN_RELEASE_WEB_UI_VERSION}$2~g' \
-    "$file"
-  grep -Fq \
-    "MN_WEB_UI_PACKAGE_VERSION: \${MN_WEB_UI_PACKAGE_VERSION:-${version}}" \
-    "$file" || die "Could not pin the Web UI Compose package version to ${version}."
-}
-
 prepare_install_support_snapshot() {
   local support_dir="${DEPLOY_DIR}/install_support/${TAG}"
 
@@ -203,11 +191,11 @@ should_run_phase() {
 report_resume_command() {
   local status=$?
   if [[ "$status" -eq 65 && "$CURRENT_PHASE" == "python" ]]; then
-    printf 'Next: prepare a new aggregate version with %s --plan, then release it without --resume-from.\n' "$0" >&2
+    printf 'Next: prepare a new aggregate version with %s all --plan, then release it without --resume-from.\n' "$0" >&2
     return
   fi
   if [[ "$status" -ne 0 && -n "$CURRENT_PHASE" ]]; then
-    printf 'Next: fix the error, then run: %s -v %s --resume-from %s\n' \
+    printf 'Next: fix the error, then run: %s all -v %s --resume-from %s\n' \
       "$0" "$VERSION" "$CURRENT_PHASE" >&2
   fi
 }
@@ -281,7 +269,8 @@ prepare_release_metadata() {
     "$index_file" "$WORKSPACE_ROOT" "$VERSION" --independent \
     --baseline "$MN_RELEASE_BASELINE" >/dev/null
 
-  set_compose_web_ui_version "${DEPLOY_DIR}/docker-compose.yml" "$VERSION"
+  "$PUBLISH_PYTHON" "${DEPLOY_DIR}/scripts/release-contract.py" pin-compose-web-ui \
+    "${DEPLOY_DIR}/docker-compose.yml" "$VERSION"
   update_installer_pins
   prepare_install_support_snapshot
 
@@ -341,7 +330,7 @@ publish_and_verify_gar() {
 
   if should_run_phase python; then
     CURRENT_PHASE="python"
-    "${SCRIPT_DIR}/publish_python_packages_to_google_artifact_registry.sh" \
+    "${SCRIPT_DIR}/publish.sh" python \
       --python "$PUBLISH_PYTHON" \
       --project "$PROJECT" \
       --location "$LOCATION" \
@@ -352,12 +341,12 @@ publish_and_verify_gar() {
 
   if should_run_phase clients; then
     CURRENT_PHASE="clients"
-    "${SCRIPT_DIR}/publish-wasm-clients.sh" --version "$TAG" --project "$PROJECT" --location "$LOCATION" --from-tag --apply
+    "${SCRIPT_DIR}/publish.sh" clients --version "$TAG" --project "$PROJECT" --location "$LOCATION" --from-tag --apply
   fi
 
   if should_run_phase web-ui; then
     CURRENT_PHASE="web-ui"
-    "${SCRIPT_DIR}/publish_web_ui_to_google_artifact_registry.sh" \
+    "${SCRIPT_DIR}/publish.sh" web-ui \
       --version "$VERSION" \
       --project "$PROJECT" \
       --location "$LOCATION" \
@@ -380,7 +369,7 @@ publish_and_verify_gar() {
         trap 'git -C "${WORKSPACE_ROOT}/Membrane" worktree remove --force "$membrane_dir" >/dev/null 2>&1 || true; rm -rf "$membrane_worktree_root"' EXIT
         git -C "${WORKSPACE_ROOT}/Membrane" worktree add \
           --detach "$membrane_dir" "refs/tags/${TAG}" >/dev/null
-        "${SCRIPT_DIR}/publish_public_membrane_to_google_artifact_registry.sh" \
+        "${SCRIPT_DIR}/publish.sh" membrane \
           --apply \
           --version "$TAG" \
           --membrane-dir "$membrane_dir" \
@@ -404,7 +393,7 @@ publish_and_verify_gar() {
     if ! grep -qx "$VERSION" "$core_tags_file" ||
       ! grep -qx "$TAG" "$core_tags_file" ||
       ! grep -qx latest "$core_tags_file"; then
-      "${SCRIPT_DIR}/publish_public_core_to_google_artifact_registry.sh" \
+      "${SCRIPT_DIR}/publish.sh" core \
         --apply \
         --version "$TAG" \
         --project "$PROJECT" \
@@ -472,11 +461,48 @@ EOF
     git -C "${WORKSPACE_ROOT}/otterdesk-blueprints" fetch --quiet origin main
     [[ "$(git -C "${WORKSPACE_ROOT}/otterdesk-blueprints" rev-parse HEAD)" == "$(git -C "${WORKSPACE_ROOT}/otterdesk-blueprints" rev-parse origin/main)" ]] ||
       die "otterdesk-blueprints is not synchronized with origin/main."
-    python3 "${DEPLOY_DIR}/scripts/release-contract.py" blueprints \
+    "$PUBLISH_PYTHON" "${DEPLOY_DIR}/scripts/release-contract.py" blueprints \
       "${DEPLOY_DIR}/package-index/python-packages.toml" "${WORKSPACE_ROOT}/otterdesk-blueprints"
     commit_and_push_if_changed otterdesk-blueprints "Pin blueprint dependencies for ${TAG}" .
   fi
 }
+
+release_usage() {
+  cat <<'EOF'
+Usage: scripts/release.sh COMMAND [OPTIONS]
+
+  all            Release the complete tagged set. Use --plan for a preview.
+  changed        Preview changed components. Use --apply to publish them.
+  check-runtime  Run the offline release checks or pass --two-runtimes for acceptance.
+
+Run a command with --help for its options.
+EOF
+}
+
+case "${1:-}" in
+all) shift ;;
+changed)
+  shift
+  # shellcheck source=release/commands.sh
+  source "$SCRIPT_DIR/release/commands.sh"
+  export PYTHONDONTWRITEBYTECODE=1
+  python=$(release_python "$DEPLOY_DIR" python3)
+  exec "$python" "$SCRIPT_DIR/update-changed-components.py" "$@"
+  ;;
+check-runtime)
+  shift
+  exec bash "$SCRIPT_DIR/release/check-runtime.sh" "$@"
+  ;;
+"" | -h | --help)
+  release_usage
+  exit 0
+  ;;
+*)
+  printf 'error: unknown release command %s\n' "$1" >&2
+  release_usage >&2
+  exit 2
+  ;;
+esac
 
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
@@ -504,6 +530,14 @@ while [[ "$#" -gt 0 ]]; do
   shift
 done
 
+if [[ "$PLAN" == "Y" ]]; then
+  select_python_plan_environment
+else
+  # shellcheck source=release/commands.sh
+  source "$SCRIPT_DIR/release/commands.sh"
+  PUBLISH_PYTHON=$(release_python "$DEPLOY_DIR" python3)
+fi
+
 if [[ -z "$VERSION" ]]; then
   [[ -z "$RESUME_FROM" ]] || die "Resuming requires the original explicit --version."
   if [[ "$PLAN" != "Y" ]]; then
@@ -512,7 +546,7 @@ if [[ -z "$VERSION" ]]; then
       git -C "${WORKSPACE_ROOT}/${repo}" fetch --quiet origin main --tags
     done
   fi
-  VERSION="$(python3 "${DEPLOY_DIR}/scripts/release-contract.py" next-version \
+  VERSION="$("$PUBLISH_PYTHON" "${DEPLOY_DIR}/scripts/release-contract.py" next-version \
     "$WORKSPACE_ROOT" "${REPOSITORIES[@]}")"
   [[ -n "$VERSION" ]] || {
     printf 'No source changes since the last release.\n'
@@ -522,7 +556,6 @@ fi
 MN_RELEASE_BASELINE="$(sed -n 's/^MN_DEFAULT_INSTALL_VERSION=.*:-\(v[0-9.]*\)}"/\1/p' "${DEPLOY_DIR}/install.sh")"
 validate_version "$VERSION"
 if [[ "$PLAN" == "Y" ]]; then
-  select_python_plan_environment
   printf 'Next release: v%s (local tags and committed source; publish refreshes remote tags).\n' "$VERSION"
   "$PUBLISH_PYTHON" "${DEPLOY_DIR}/scripts/prepare-python-package-index.py" \
     "${DEPLOY_DIR}/package-index/python-packages.toml" "$WORKSPACE_ROOT" "$VERSION" \
@@ -535,15 +568,15 @@ RESUME_FROM="${RESUME_FROM:-prepare}"
 phase_rank "$RESUME_FROM" >/dev/null
 
 CURRENT_PHASE="$RESUME_FROM"
-for command in git perl python3 cmp; do
+for command in git perl cmp; do
   require_command "$command"
 done
-python3 -c 'import tomllib' >/dev/null 2>&1 ||
-  die "Python 3.12 or newer is required to read the package index."
 if should_run_phase python; then
   require_command gcloud
   prepare_python_publish_environment
 fi
+"$PUBLISH_PYTHON" -c 'import tomllib' >/dev/null 2>&1 ||
+  die "Set MN_PUBLISH_PYTHON to Python 3.12 to read the package index."
 if should_run_phase web-ui; then
   require_command gcloud
   require_command npm
@@ -559,13 +592,13 @@ fi
 
 if [[ "$RESUME_FROM" == "prepare" ]]; then
   check_workspace
-  bash "${SCRIPT_DIR}/validate-runtime-split.sh" --two-runtimes
+  bash "${SCRIPT_DIR}/release/check-runtime.sh" --two-runtimes
   CURRENT_PHASE="prepare"
   prepare_release_metadata
   create_release_tags
 else
   check_resume_workspace
-  bash "${SCRIPT_DIR}/validate-runtime-split.sh" --two-runtimes
+  bash "${SCRIPT_DIR}/release/check-runtime.sh" --two-runtimes
 fi
 
 if should_run_phase computer-use || should_run_phase python || should_run_phase clients || should_run_phase web-ui ||

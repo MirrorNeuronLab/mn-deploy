@@ -5,7 +5,8 @@
 From this repository root, install [uv](https://docs.astral.sh/uv/getting-started/installation/), then run:
 
 ```bash
-bash scripts/install-hooks.sh
+uvx --from pre-commit==4.5.1 pre-commit validate-config
+uvx --from pre-commit==4.5.1 pre-commit install --hook-type pre-push --install-hooks
 ```
 
 This installs the pinned pre-commit runner and isolated checker dependencies,

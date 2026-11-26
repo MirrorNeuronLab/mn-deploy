@@ -285,13 +285,14 @@ def test_restore_wrapper_uses_selected_python_and_preserves_arguments(tmp_path):
         f"#!{sys.executable}\nimport json,os,sys\nfrom pathlib import Path\nPath({str(output)!r}).write_text(json.dumps([sys.argv[1:],os.environ['CLOUDSDK_PYTHON']]))\n"
     )
     python.chmod(0o755)
-    wrapper = SCRIPTS / "publish-dmr.sh"
+    wrapper = SCRIPTS / "publish.sh"
     env = {**os.environ, "MN_PUBLISH_PYTHON": str(python)}
     env.pop("CLOUDSDK_PYTHON", None)
     result = subprocess.run(
         [
             "bash",
             str(wrapper),
+            "dmr",
             "--from-directory",
             "archive path with spaces",
             "--apply",

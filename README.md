@@ -41,13 +41,14 @@ commands identify their diagnostic logs in the default output. Use
 A production `./install.sh --no-runtime` downloads three versioned Wasm components from the public GAR generic repository `mirrorneuron-binaries`. The installer verifies their SHA-256 checksums and starts each with Wasmtime before switching the active generation under `~/.mn`. It uses an available Wasmtime installation or downloads the pinned engine for the host. Set `MN_HOME` for a separate client installation. Specify `--mode local` or `--mode github` to build from source.
 
 For development, `MN_ENV=dev ./install.sh --no-runtime` builds all three Wasm components from the sibling Rust checkouts. An explicit `--mode local` also selects that path. Set `MN_CLIENT_SOURCE_ROOT` to use checkouts in another workspace.
+The developer `setup.sh` shortcut uses the same local Wasm build and exposes it through `~/.local/bin`.
 
 On macOS and Ubuntu, `--mode local` clones `mn-client-support` from `main`
 when its sibling path is absent. The installer uses Cargo from `PATH` or
 `${CARGO_HOME:-$HOME/.cargo}/bin`. If preparing the Rust client sources fails
 during `--reset`, the installer stops before deleting runtime data.
 
-For a source build, install the Rust `wasm32-wasip2` target and set `WASI_SDK_PATH` to the WASI SDK for SQLite. Run `scripts/package-rust-client.sh /path/to/dist` to build `mn.wasm`, `mn-api.wasm`, and `mn-client-support.wasm` with their checksums. Use `scripts/publish-wasm-clients.sh --version vX.Y.Z` to preview the GAR packages, then add `--apply` to publish and verify them. An offline binary install accepts `MN_CLIENT_DIST_DIR=/path/to/dist` and `MN_WASMTIME_BIN=/path/to/wasmtime`.
+For a source build, install the Rust `wasm32-wasip2` target and set `WASI_SDK_PATH` to the WASI SDK for SQLite. Run `scripts/artifacts.sh clients /path/to/dist --wasm-only` to build `mn.wasm`, `mn-api.wasm`, and `mn-client-support.wasm` with their checksums. Use `scripts/publish.sh clients --version vX.Y.Z` to preview the GAR packages, then add `--apply` to publish and verify them. An offline binary install accepts `MN_CLIENT_DIST_DIR=/path/to/dist` and `MN_WASMTIME_BIN=/path/to/wasmtime`.
 
 ```bash
 ./install.sh --no-runtime
@@ -364,15 +365,28 @@ Run its isolated Git regression test with:
 - [Docker and OpenShell for Blueprints](../mn-docs/docker_and_openshell_for_blueprints.md)
 - [Security Model](../mn-docs/security.md)
 
+## Deployment scripts
+
+Run these commands from the `mn-deploy` checkout. Each accepts `--help`.
+
+| Command                  | Purpose                                                                                                                 |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| `scripts/release.sh`     | Preview or run a full release with `all`, update individual components with `changed`, or run the `check-runtime` gate. |
+| `scripts/publish.sh`     | Select one GAR publisher, for example `scripts/publish.sh clients --version v2.0.1`. Add `--apply` to publish.          |
+| `scripts/artifacts.sh`   | Build Wasm clients with `clients`, validate a release `tag`, create a source `zip`, or `check` artifact files.          |
+| `scripts/clear-redis.sh` | Clear the selected Redis database or all Redis state after confirmation.                                                |
+
+The Python publisher path printed by `setup_google_artifact_registry.sh` also forwards to `scripts/publish.sh python`.
+
 ## Publish changed components without advancing the runtime release
 
 ```bash
-./scripts/update-changed-components.sh --plan
-./scripts/update-changed-components.sh --apply
-./scripts/update-changed-components.sh --apply --only python web-ui
-./scripts/update-changed-components.sh --apply --only clients --publish-scripts
-./scripts/update-changed-components.sh --apply --publish-scripts
-./scripts/update-changed-components.sh --apply --publish-scripts --remove-old-versions
+./scripts/release.sh changed --plan
+./scripts/release.sh changed --apply
+./scripts/release.sh changed --apply --only python web-ui
+./scripts/release.sh changed --apply --only clients --publish-scripts
+./scripts/release.sh changed --apply --publish-scripts
+./scripts/release.sh changed --apply --publish-scripts --remove-old-versions
 ```
 
 This helper keeps `MN_DEFAULT_CORE_VERSION` and `MN_DEFAULT_INSTALL_VERSION`
@@ -404,7 +418,7 @@ these caches until publication finishes; a checksum conflict without a matching
 original build still fails verification.
 Uploads are verified against GAR file hashes. Web UI and Docker publishers
 verify integrity/digests.
-Requires the same publishing tools as `scripts/release_all.sh`; set `MN_PUBLISH_PYTHON`
+Requires the same publishing tools as `scripts/release.sh all`; set `MN_PUBLISH_PYTHON`
 or prepare `.venv-gar-publish` with Python 3.12+, packaging, build and twine.
 Use `--help` for registry, platform and component selection options.
 
@@ -464,11 +478,9 @@ see [Google's npm package contract](https://docs.cloud.google.com/artifact-regis
   gateway container, copies them to the selected node and removes the container.
   The signing key has mode 0600. The native CLI uses the published host port
   and Core connects over the internal runtime network.
-- The Web UI is a Compose service published on port `55173` by default;
-  installing it does not require npm on the host. Binary installs fetch the
-  selected `mirrorneuron-web-ui` package from the public GAR npm repository
-  inside the service, while local installs mount and build the `mn-web-ui`
-  checkout inside the service.
+- The optional host process `mn-web-ui-server` serves the Web UI on port
+  `55173` by default. Binary installs use the version of `mirrorneuron-web-ui`
+  pinned by the installer. Local checkouts can supply a built `dist` directory.
   Its local job-UI proxy resolves the authenticated job handle and forwards
   only that job's declared dashboard and companion ports; it never redirects a
   browser to a selected remote node's LAN address.
@@ -545,7 +557,7 @@ ensure-context-engine` performs the same package preparation for an existing
 - GAR publish/sync dry run:
 
   ```bash
-  ./scripts/publish_python_packages_to_google_artifact_registry.sh \
+  ./scripts/publish.sh python \
     --project mirrorneuron-public-packages \
     --location us-central1 \
     --repository agent-skills
@@ -554,7 +566,7 @@ ensure-context-engine` performs the same package preparation for an existing
 - GAR publish/sync apply:
 
   ```bash
-  ./scripts/publish_python_packages_to_google_artifact_registry.sh \
+  ./scripts/publish.sh python \
     --apply \
     --project mirrorneuron-public-packages \
     --location us-central1 \
@@ -564,13 +576,13 @@ ensure-context-engine` performs the same package preparation for an existing
 - Web UI GAR npm publish dry run:
 
   ```bash
-  ./scripts/publish_web_ui_to_google_artifact_registry.sh --version v1.2.30
+  ./scripts/publish.sh web-ui --version v1.2.30
   ```
 
 - Web UI GAR npm publish apply:
 
   ```bash
-  ./scripts/publish_web_ui_to_google_artifact_registry.sh \
+  ./scripts/publish.sh web-ui \
     --apply \
     --version v1.2.30
   ```
@@ -578,26 +590,26 @@ ensure-context-engine` performs the same package preparation for an existing
 - Public Core multi-platform Docker image GAR apply:
 
   ```bash
-  ./scripts/publish_public_core_to_google_artifact_registry.sh \
+  ./scripts/publish.sh core \
     --apply \
     --version v1.2.30
   ```
 
   On Apple Silicon this automatically registers QEMU for the x64 release
-  image. The standard `./scripts/release_all.sh -v 1.2.30` flow runs this local
+  image. The standard `./scripts/release.sh all -v 1.2.30` flow runs this local
   publisher; the Core GitHub Actions workflow only publishes OTP archives.
 
 - Public Membrane Rust binary and Docker image GAR dry run:
 
   ```bash
-  ./scripts/publish_public_membrane_to_google_artifact_registry.sh \
+  ./scripts/publish.sh membrane \
     --version v1.2.8
   ```
 
 - Public Membrane Rust binary and Docker image GAR apply:
 
   ```bash
-  ./scripts/publish_public_membrane_to_google_artifact_registry.sh \
+  ./scripts/publish.sh membrane \
     --apply \
     --version v1.2.8
   ```
@@ -609,7 +621,7 @@ ensure-context-engine` performs the same package preparation for an existing
 - Public Otterdesk desktop app package GAR apply:
 
   ```bash
-  ./scripts/publish_public_otterdesk_to_google_artifact_registry.sh \
+  ./scripts/publish.sh otterdesk \
     --apply \
     --version v1.2.8
   ```
@@ -654,14 +666,14 @@ projects advance independently. The CLI, API, and support Wasm releases share
 a version so each client can use its matching support component. Missing SDK index entries fail preparation;
 historical snapshots remain immutable. The aggregate release builds and verifies the complete Python
 inventory and self-contained Web UI package directly from sibling worktrees in
-GAR before it pushes the prepared source tags. `scripts/release_all.sh` uses `uv` to
+GAR before it pushes the prepared source tags. `scripts/release.sh all` uses `uv` to
 create its dedicated Python publishing environment and install the required
 build, Twine, keyring, and GAR authentication packages automatically. GitHub
 release workflows are neither awaited nor used as package sources.
 An existing dedicated publishing environment with another Python minor is
 recreated with Python 3.12 before publishing.
 
-Run `./scripts/release_all.sh -v 1.4.0 --plan` for a read-only preview. Preview
+Run `./scripts/release.sh all -v 1.4.0 --plan` for a read-only preview. Preview
 uses `MN_PUBLISH_PYTHON`, the existing publishing environment (`MN_GAR_PUBLISH_VENV`
 or `.venv-gar-publish` in `mn-deploy`), or `python3` on PATH when that environment
 is absent. Planning needs Python 3.12 with `packaging` and `tomllib`, without
@@ -671,7 +683,7 @@ Each publishing step is a named resume phase. On failure, the script prints the
 exact recovery command, for example:
 
 ```bash
-./scripts/release_all.sh -v 1.3.46 --resume-from web-ui
+./scripts/release.sh all -v 1.3.46 --resume-from web-ui
 ```
 
 A resumed release validates the existing local release tags. Web UI builds run
@@ -818,7 +830,7 @@ Compose JavaScript without Docker or a live runtime.
 
 ## Native computer-use app releases
 
-`scripts/publish_computer_use_to_google_artifact_registry.py` plans by default;
+`scripts/publish.sh computer-use` plans by default;
 `--apply` builds, Developer ID signs, notarizes, staples and publishes macOS arm64
 and x86_64 ZIPs to public `mirrorneuron-binaries/mn-computer-use` in GAR. The native
 app version plus the SHA-256 of bundled Swift/plist sources identifies an immutable
@@ -826,7 +838,7 @@ release. Per-architecture checksum manifests are uploaded last; existing artifac
 must match and are verified through anonymous HTTPS downloads. Unchanged releases
 are verified and reused. The tool never changes repository IAM or overwrites files.
 
-`release_all.sh` runs the `computer-use` phase before Python publication;
+`release.sh all` runs the `computer-use` phase before Python publication;
 `update-changed-components.py` also publishes/verifies native artifacts before a
 changed computer-use skill wheel. New builds require macOS with Xcode Command Line
 Tools, a Developer ID Application identity for team `983M79B224`, and either
@@ -841,7 +853,7 @@ remains `binary_default = false`. Co-worker dependencies opt in with
 Customer setup downloads and verifies the notarized artifact without a compiler,
 Xcode or gcloud. Existing immutable install-support snapshots remain unchanged.
 
-The runtime separation release gate (`scripts/validate-runtime-split.sh`) requires
+The runtime separation release gate (`scripts/release.sh check-runtime`) requires
 Node for the shipped browser proxy and Elixir for execution credential binding.
 Its offline phase runs worker SDK supervision
 and endpoint-publication contracts plus `tests/test_job_ui_proxy.py`. The

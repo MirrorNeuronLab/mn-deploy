@@ -9,6 +9,89 @@ import pytest
 INSTALLER = Path(__file__).resolve().parents[1] / "install.sh"
 
 
+def test_development_setup_uses_local_wasm_without_replacing_the_runtime_profile(
+    tmp_path,
+):
+    root = tmp_path / "source workspace"
+    deploy = root / "mn-deploy"
+    deploy.mkdir(parents=True)
+    (root / "MirrorNeuron").mkdir()
+    shutil.copy2(INSTALLER.with_name("setup.sh"), deploy / "setup.sh")
+    home = tmp_path / "account"
+    profile = home / ".mn/client.json"
+    profile.parent.mkdir(parents=True)
+    profile.write_text("existing connection")
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    pip = home / ".local/share/mn_venv/bin/pip"
+    pip.parent.mkdir(parents=True)
+    programs = {
+        tools / "mix": 'test "$PWD" = "$EXPECTED_ROOT/MirrorNeuron"',
+        pip: "exit 0",
+        tools
+        / "cargo": '''case " $* " in *" --bin mn-web-ui-server "*) ;; *) exit 20 ;; esac
+while [ "$1" != --target-dir ]; do shift; done
+mkdir -p "$2/release"
+printf '#!/bin/sh\\nexit 0\\n' > "$2/release/mn-web-ui-server"
+chmod +x "$2/release/mn-web-ui-server"''',
+        deploy / "install.sh": """test "$MN_ENV" = dev
+test "$*" = "--mode local --no-runtime --yes"
+test "$MN_CLIENT_SOURCE_ROOT" = "$EXPECTED_ROOT"
+test "$HOME" != "$REAL_HOME"
+test "$CARGO_HOME" = "$REAL_HOME/.cargo"
+if [ -n "${NEW_PROFILE:-}" ]; then test "$MN_HOME" = "$NEW_PROFILE"
+else test "$MN_HOME" != "$REAL_HOME/.mn"; fi
+bin="$MN_HOME/client-current/bin"
+mkdir -p "$bin"
+printf '{"install_role":"client"}\n' > "$MN_HOME/install_metadata.json"
+for name in mn mn-api mn-client-support; do
+  printf 'local %s' "$name" > "$bin/$name.wasm"
+  printf '#!/bin/sh\\nprintf "%%s" "$MN_HOME"\\n' > "$bin/$name"
+  chmod +x "$bin/$name"
+done""",
+    }
+    for path, script in programs.items():
+        path.write_text("#!/bin/sh\nset -eu\n" + script + "\n")
+        path.chmod(0o755)
+    env = {
+        "HOME": str(home),
+        "SHELL": "/bin/bash",
+        "PATH": f"{tools}:/usr/bin:/bin",
+        "EXPECTED_ROOT": str(root),
+        "REAL_HOME": str(home),
+        "MN_HOME": str(profile.parent),
+    }
+    for _ in range(2):
+        proc = subprocess.run(
+            ["bash", deploy / "setup.sh"], env=env, capture_output=True, text=True
+        )
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        for name in ("mn", "mn-api", "mn-client-support"):
+            command = home / ".local/bin" / name
+            assert command.resolve().with_suffix(".wasm").read_text() == "local " + name
+            assert subprocess.check_output([command], env=env, text=True) == str(
+                profile.parent
+            )
+    assert profile.read_text() == "existing connection"
+    shell_rc = next(home.glob(".bash*"))
+    selected = subprocess.check_output(
+        ["bash", "-c", '. "$1"; command -v mn', "bash", str(shell_rc)],
+        env=env,
+        text=True,
+    ).strip()
+    assert Path(selected).resolve() == (home / ".local/bin/mn").resolve()
+    fresh = tmp_path / "new client home"
+    subprocess.run(
+        ["bash", deploy / "setup.sh"],
+        env={**env, "MN_HOME": str(fresh), "NEW_PROFILE": str(fresh)},
+        check=True,
+        capture_output=True,
+    )
+    assert (fresh / "install_metadata.json").is_file()
+    assert (fresh / "client-current/bin/mn.wasm").is_file()
+    assert profile.read_text() == "existing connection"
+
+
 @pytest.fixture
 def local_install(tmp_path):
     workspace = tmp_path / "source workspace"

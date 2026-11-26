@@ -2,15 +2,15 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEPLOY_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 WORKSPACE_ROOT="$(cd "${DEPLOY_DIR}/.." && pwd)"
 
-# shellcheck source=release/commands.sh
+# shellcheck source=../release/commands.sh
 source "$SCRIPT_DIR/release/commands.sh"
-# shellcheck source=release/registry.sh
+# shellcheck source=../release/registry.sh
 source "$SCRIPT_DIR/release/registry.sh"
-# shellcheck source=release/multiarch.sh
+# shellcheck source=../release/multiarch.sh
 source "$SCRIPT_DIR/release/multiarch.sh"
 
 PROJECT="${MN_GAR_PROJECT:-mirrorneuron-public-packages}"
@@ -34,7 +34,7 @@ WORKTREE_DIR=""
 
 usage() {
   cat <<'EOF'
-Usage: ./scripts/publish_public_core_to_google_artifact_registry.sh [options]
+Usage: ./scripts/publish.sh core [options]
 
 Build and publish the Core Docker image from the exact requested Core Git tag.
 The script defaults to a dry run. Pass --apply to create/configure the GAR
@@ -63,9 +63,9 @@ Options:
   -h, --help                      Show this help.
 
 Examples:
-  ./scripts/publish_public_core_to_google_artifact_registry.sh --version v1.2.30
+  ./scripts/publish.sh core --version v1.2.30
 
-  ./scripts/publish_public_core_to_google_artifact_registry.sh \
+  ./scripts/publish.sh core \
     --apply \
     --version v1.2.30
 EOF
@@ -103,16 +103,6 @@ infer_version() {
   die "Release version is required. Pass --version v1.2.30 or set MN_CORE_VERSION."
 }
 
-check_gcloud_auth_for_apply() {
-  local active_account
-  active_account="$("$GCLOUD_BIN" auth list --filter=status:ACTIVE --format='value(account)' 2>/dev/null | head -n 1 || true)"
-  if [ -z "$active_account" ]; then
-    die "No active gcloud account was found. Run: gcloud auth login"
-  fi
-  "$GCLOUD_BIN" auth print-access-token >/dev/null 2>&1 ||
-    die "gcloud cannot refresh an access token for ${active_account}. Run: gcloud auth login"
-}
-
 cleanup() {
   if [ -n "$WORKTREE_DIR" ]; then
     git -C "$CORE_DIR" worktree remove --force "$WORKTREE_DIR" >/dev/null 2>&1 || true
@@ -141,13 +131,7 @@ publish_docker_image() {
   image_repo="${LOCATION}-docker.pkg.dev/${PROJECT}/${DOCKER_REPOSITORY}/${DOCKER_IMAGE_NAME}"
   registry="${LOCATION}-docker.pkg.dev"
 
-  ensure_repository_public "$DOCKER_REPOSITORY" docker "MirrorNeuron runtime Docker images"
-  if [ "$APPLY" = "Y" ]; then
-    "$GCLOUD_BIN" auth configure-docker "$registry" --quiet
-    "$DOCKER_BIN" buildx version >/dev/null
-  else
-    run_or_echo "$GCLOUD_BIN" auth configure-docker "$registry" --quiet
-  fi
+  prepare_docker_repository "$registry"
 
   build_cmd=(
     "$DOCKER_BIN" buildx build
@@ -273,7 +257,7 @@ trap cleanup EXIT
 prepare_tag_worktree "$VERSION_TAG"
 
 if [ "$APPLY" = "Y" ]; then
-  check_gcloud_auth_for_apply
+  check_gcloud_auth
 fi
 publish_docker_image "$VERSION_TAG"
 

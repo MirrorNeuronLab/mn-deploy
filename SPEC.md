@@ -38,7 +38,8 @@ This specification applies only to deployment assets in this repository.
 - `server.sh`: start, stop, and inspect installed services.
 - `prepare_cluster.sh`: prepare cluster-facing deployment configuration.
 - `save_install_support.sh`: snapshot release support under a version.
-- `scripts/publish_*.sh` and `scripts/publish_*.py`: build or publish explicitly selected release artifacts.
+- `scripts/publish.sh COMPONENT` publishes a selected component to GAR.
+- `scripts/artifacts.sh` builds client artifacts and validates release tags and archives.
 
 Flags shown by each script's `--help` are the exact command contract.
 
@@ -194,7 +195,7 @@ are separate settings; historical support snapshots retain their released defaul
 
 ## Safety and Security
 
-`scripts/update-changed-components.sh` is an explicit component repair flow.
+`scripts/release.sh changed` is an explicit component repair flow.
 Its default local preview is read-only. Apply advances changed Python/npm
 versions, keeps Core and the aggregate installer version fixed, and repairs
 changed Docker images under their current tags in a mutable-tag repository.
@@ -220,7 +221,9 @@ Plans reserve versions recorded by earlier completed builds. Changed package
 inputs advance to a new patch, with SDK version grouping and dependency checks
 preserved, even if an earlier attempt stopped before updating the main index.
 Full automatic releases skip version numbers already used by support snapshots.
-The aggregate release entrypoint is `scripts/release_all.sh`. Its read-only
+Full and component releases pin the Web UI version in the installer. They
+update the Compose pin only in templates that include the Web UI.
+The aggregate release entrypoint is `scripts/release.sh all`. Its read-only
 `--plan` uses an explicitly selected Python, the existing publishing environment,
 or `python3` on PATH when that environment is absent. Planning requires Python
 3.12 with `packaging` and `tomllib`; publishing retains the Python 3.12 contract.
@@ -475,7 +478,7 @@ upstream connections. Established WebSockets stay open after the handshake.
 
 ## Native computer-use app releases
 
-`scripts/publish_computer_use_to_google_artifact_registry.py` plans by default;
+`scripts/publish.sh computer-use` plans by default;
 `--apply` builds, Developer ID signs, notarizes, staples and publishes macOS arm64
 and x86_64 ZIPs to public `mirrorneuron-binaries/mn-computer-use` in GAR. The native
 app version plus the SHA-256 of bundled Swift/plist sources identifies an immutable
@@ -483,7 +486,7 @@ release. Per-architecture checksum manifests are uploaded last; existing artifac
 must match and are verified through anonymous HTTPS downloads. Unchanged releases
 are verified and reused. The tool never changes repository IAM or overwrites files.
 
-`release_all.sh` runs the `computer-use` phase before Python publication;
+`release.sh all` runs the `computer-use` phase before Python publication;
 `update-changed-components.py` also publishes/verifies native artifacts before a
 changed computer-use skill wheel. New builds require macOS with Xcode Command Line
 Tools, a Developer ID Application identity for team `983M79B224`, and either

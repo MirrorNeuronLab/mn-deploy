@@ -2,13 +2,13 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEPLOY_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 WORKSPACE_ROOT="$(cd "${DEPLOY_DIR}/.." && pwd)"
 
-# shellcheck source=release/commands.sh
+# shellcheck source=../release/commands.sh
 source "$SCRIPT_DIR/release/commands.sh"
-# shellcheck source=release/registry.sh
+# shellcheck source=../release/registry.sh
 source "$SCRIPT_DIR/release/registry.sh"
 
 PROJECT="${MN_GAR_PROJECT:-mirrorneuron-public-packages}"
@@ -27,7 +27,7 @@ BUILD_ARTIFACTS="N"
 
 usage() {
   cat <<EOF
-Usage: ./scripts/publish_public_otterdesk_to_google_artifact_registry.sh [options]
+Usage: ./scripts/publish.sh otterdesk [options]
 
 Publish public Otterdesk desktop application packages to Google Artifact
 Registry using the public MirrorNeuron package project.
@@ -64,9 +64,9 @@ Options:
   -h, --help                 Show this help.
 
 Examples:
-  ./scripts/publish_public_otterdesk_to_google_artifact_registry.sh --version v1.2.24
+  ./scripts/publish.sh otterdesk --version v1.2.24
 
-  ./scripts/publish_public_otterdesk_to_google_artifact_registry.sh \\
+  ./scripts/publish.sh otterdesk \\
     --apply \\
     --build \\
     --version v1.2.24
@@ -154,19 +154,9 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
-normalize_version_tag() {
-  local value="$1"
-  value="${value#refs/tags/}"
-  value="${value#release/}"
-  case "$value" in
-  v*) printf '%s' "$value" ;;
-  *) printf 'v%s' "$value" ;;
-  esac
-}
-
 infer_version() {
   if [ -n "$VERSION" ]; then
-    normalize_version_tag "$VERSION"
+    package_version_tag "$VERSION"
     return
   fi
 
@@ -174,7 +164,7 @@ infer_version() {
     local package_version
     package_version="$(node -p "require('${OTTERDESK_DIR}/package.json').version" 2>/dev/null || true)"
     if [ -n "$package_version" ]; then
-      normalize_version_tag "$package_version"
+      package_version_tag "$package_version"
       return
     fi
   fi

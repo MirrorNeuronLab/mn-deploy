@@ -21,7 +21,9 @@ installation or cleanup.
   versioned/URL installs.
 - `package-index/python-packages.toml`: published Python package inventory.
 - `save_install_support.sh`: creates versioned support snapshots.
-- `scripts/publish_*.sh`, `setup_google_artifact_registry.sh`: release publishing.
+- `scripts/release.sh` runs full or component releases and runtime checks.
+- `scripts/publish.sh` selects a GAR publisher under `scripts/publish/`.
+- `scripts/artifacts.sh` builds clients and handles release tags and ZIPs.
 - The Core, Membrane and Otterdesk publishers share command execution and
   registry operations in `scripts/release/`. Core and Membrane also share
   multi-architecture build support there.

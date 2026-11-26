@@ -146,8 +146,8 @@ The coordinated installer pins are Core `v1.4.1`, Python SDK/runtime/CLI/API
 `1.4.8`, and support snapshot `v1.4.15`. These artifacts must be published together
 before the binary defaults can be consumed from the public package registry.
 
-`bash scripts/validate-runtime-split.sh --two-runtimes` runs all required local
-checks, clean wheel builds and the provisioned acceptance test. `release_all.sh`
+`bash scripts/release.sh check-runtime --two-runtimes` runs all required local
+checks, clean wheel builds and the provisioned acceptance test. `release.sh all`
 requires it before publishing, including resumed releases. Review-time source
 checks use `prepare-python-package-index.py --verify-worktree`; publishing still
 requires clean committed source matching the index and immutable release tags.

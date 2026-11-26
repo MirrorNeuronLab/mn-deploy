@@ -2,15 +2,15 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEPLOY_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 WORKSPACE_ROOT="$(cd "${DEPLOY_DIR}/.." && pwd)"
 
-# shellcheck source=release/commands.sh
+# shellcheck source=../release/commands.sh
 source "$SCRIPT_DIR/release/commands.sh"
-# shellcheck source=release/registry.sh
+# shellcheck source=../release/registry.sh
 source "$SCRIPT_DIR/release/registry.sh"
-# shellcheck source=release/multiarch.sh
+# shellcheck source=../release/multiarch.sh
 source "$SCRIPT_DIR/release/multiarch.sh"
 
 PROJECT="${MN_GAR_PROJECT:-mirrorneuron-public-packages}"
@@ -38,7 +38,7 @@ PREPARED_BINARY_ARTIFACT_DIR=""
 
 usage() {
   cat <<EOF
-Usage: ./scripts/publish_public_membrane_to_google_artifact_registry.sh [options]
+Usage: ./scripts/publish.sh membrane [options]
 
 Publish public Membrane Rust binary archives and Docker runtime images to
 Google Artifact Registry using the public MirrorNeuron package project.
@@ -87,13 +87,13 @@ Options:
   -h, --help                      Show this help.
 
 Examples:
-  ./scripts/publish_public_membrane_to_google_artifact_registry.sh --version v1.2.24
+  ./scripts/publish.sh membrane --version v1.2.24
 
-  ./scripts/publish_public_membrane_to_google_artifact_registry.sh \\
+  ./scripts/publish.sh membrane \\
     --apply \\
     --version v1.2.24
 
-  ./scripts/publish_public_membrane_to_google_artifact_registry.sh \\
+  ./scripts/publish.sh membrane \\
     --apply \\
     --version v1.2.24 \\
     --binary-artifacts-dir /tmp/membrane-release-assets
@@ -207,19 +207,9 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
-normalize_version_tag() {
-  local value="$1"
-  value="${value#refs/tags/}"
-  value="${value#release/}"
-  case "$value" in
-  v*) printf '%s' "$value" ;;
-  *) printf 'v%s' "$value" ;;
-  esac
-}
-
 infer_version() {
   if [ -n "$VERSION" ]; then
-    normalize_version_tag "$VERSION"
+    package_version_tag "$VERSION"
     return
   fi
 
@@ -227,7 +217,7 @@ infer_version() {
     local tag
     tag="$(git -C "$MEMBRANE_DIR" describe --tags --exact-match 2>/dev/null || true)"
     if [ -n "$tag" ]; then
-      normalize_version_tag "$tag"
+      package_version_tag "$tag"
       return
     fi
   fi
@@ -343,14 +333,7 @@ publish_docker_image() {
 
   [ -f "${MEMBRANE_DIR}/Dockerfile" ] || die "Membrane Dockerfile was not found: ${MEMBRANE_DIR}/Dockerfile"
 
-  ensure_repository_public "$DOCKER_REPOSITORY" docker "MirrorNeuron runtime Docker images"
-
-  if [ "$APPLY" = "Y" ]; then
-    "$GCLOUD_BIN" auth configure-docker "$registry" --quiet
-    "$DOCKER_BIN" buildx version >/dev/null
-  else
-    run_or_echo "$GCLOUD_BIN" auth configure-docker "$registry" --quiet
-  fi
+  prepare_docker_repository "$registry"
 
   if needs_amd64_emulation "$DOCKER_PLATFORMS" "$QEMU_MODE" "$HOST_ARCH"; then
     configure_amd64_emulation "Membrane" "$HOST_ARCH" "$DOCKER_BIN" "$QEMU_IMAGE"

@@ -69,3 +69,11 @@ ensure_repository_public() {
     --condition=None \
     --quiet
 }
+
+prepare_docker_repository() {
+  ensure_repository_public "$DOCKER_REPOSITORY" docker "MirrorNeuron runtime Docker images"
+  run_or_echo "$GCLOUD_BIN" auth configure-docker "$1" --quiet
+  if [ "$APPLY" = "Y" ]; then
+    "$DOCKER_BIN" buildx version >/dev/null
+  fi
+}
