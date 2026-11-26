@@ -329,7 +329,12 @@ function mn_install_podman_cli() {
     ;;
   Linux)
     if command -v apt-get >/dev/null 2>&1; then
-      mn_podman_admin apt-get update && mn_podman_admin apt-get install -y --no-install-recommends podman
+      local recommends=--no-install-recommends
+      if [ "$(id -u)" -ne 0 ]; then
+        # Debian and Ubuntu package rootless UID mapping and networking as Recommends.
+        recommends=--install-recommends
+      fi
+      mn_podman_admin apt-get update && mn_podman_admin apt-get install -y "$recommends" podman
       return
     elif command -v dnf >/dev/null 2>&1; then
       mn_podman_admin dnf install -y --setopt=install_weak_deps=False podman
@@ -398,11 +403,15 @@ function mn_start_podman() {
   [ "$mode" != only ] || print_success "Podman is ready."
 }
 
-function mn_prepare_runtime_podman() {
+function mn_ensure_podman_for_install() {
   if ! command -v podman >/dev/null 2>&1; then
     mn_install_podman_cli || return 1
   fi
-  mn_start_podman install || return 1
+  mn_start_podman install
+}
+
+function mn_prepare_runtime_podman() {
+  mn_ensure_podman_for_install || return 1
   PODMAN_HOST_SOCKET="$(mn_resolve_podman_socket)" || return 1
   case "$PODMAN_HOST_SOCKET" in
   /*) ;;
@@ -1162,8 +1171,12 @@ function mn_is_client_home() {
   [ -f "$1/install_metadata.json" ] && grep -Eq '"install_role"[[:space:]]*:[[:space:]]*"client"' "$1/install_metadata.json"
 }
 
+# Reset may need sudo before dispatching to an install mode.
+NON_INTERACTIVE=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
+  --yes | -y) NON_INTERACTIVE="Y" ;;
+  --interactive) NON_INTERACTIVE="N" ;;
   --mode)
     shift
     if [ "$#" -eq 0 ]; then
@@ -1246,7 +1259,7 @@ fi
 export MN_INSTALL_ROLE
 
 if [ "$MN_INSTALL_START_PODMAN" = "Y" ]; then
-  if [ "$MN_INSTALL_MODE_EXPLICIT" = "Y" ] || [ -n "$MN_INSTALL_VERSION" ] ||
+  if [ "$MN_INSTALL_MODE_EXPLICIT" = "Y" ] || [ -n "$MN_INSTALL_VERSION" ] || [ -n "$NON_INTERACTIVE" ] ||
     [ "$MN_INSTALL_DETECT_ONLY" = "Y" ] || [ "$MN_INSTALL_RESET" = "Y" ] ||
     [ "$MN_BUILD_MEMBRANE" = "Y" ] || [ "$MN_NO_RUNTIME" = "Y" ] || [ "$MN_RUNTIME_ONLY" = "Y" ] || [ "${#MN_INSTALL_ARGS[@]}" -ne 0 ]; then
     printf 'error: --start-podman cannot be combined with detection or installation options.\n' >&3
@@ -1261,7 +1274,7 @@ if [ "$MN_INSTALL_START_PODMAN" = "Y" ]; then
 fi
 
 if [ "$MN_INSTALL_DETECT_ONLY" = "Y" ]; then
-  if [ "$MN_INSTALL_MODE_EXPLICIT" = "Y" ] || [ -n "$MN_INSTALL_VERSION" ] ||
+  if [ "$MN_INSTALL_MODE_EXPLICIT" = "Y" ] || [ -n "$MN_INSTALL_VERSION" ] || [ -n "$NON_INTERACTIVE" ] ||
     [ "$MN_INSTALL_HELP_REQUESTED" = "Y" ] || [ "$MN_INSTALL_VERBOSE" = "Y" ] ||
     [ "$MN_INSTALL_RESET" = "Y" ] || [ "$MN_BUILD_MEMBRANE" = "Y" ] ||
     [ "${#MN_INSTALL_ARGS[@]}" -ne 0 ]; then
@@ -1271,6 +1284,8 @@ if [ "$MN_INSTALL_DETECT_ONLY" = "Y" ]; then
   mn_detect_runtime
   exit 0
 fi
+
+NON_INTERACTIVE="${NON_INTERACTIVE:-Y}"
 
 case "$MN_INSTALL_MODE" in
 github | local | binary) ;;
@@ -1955,15 +1970,11 @@ function mn_reset_install_state() {
 
   mn_reset_resolve_home_or_exit
   mn_reset_confirm_or_exit
-  if ! command -v podman >/dev/null 2>&1; then
-    mn_reset_error "podman is required to clear Redis and MirrorNeuron runtime volumes."
-    exit 1
-  fi
-  if ! podman info >/dev/null 2>&1; then
-    mn_reset_error "Podman is not running; reset stopped before host cleanup."
-    exit 1
-  fi
   mn_reset_acquire_lock
+  if ! mn_ensure_podman_for_install; then
+    mn_reset_error "Podman setup failed. Reset stopped before host cleanup."
+    exit 1
+  fi
   mn_reset_verify_container_home_or_exit
   if compgen -G "$MN_RESET_HOME/models/llama.cpp/*/server.json" >/dev/null && [ -x "$MN_RESET_HOME/venv/bin/python" ]; then
     MN_HOME="$MN_RESET_HOME" "$MN_RESET_HOME/venv/bin/python" -m mn_sdk.models.native_llama stop-all || exit 1
@@ -2809,7 +2820,6 @@ EOF
   INSTALL_OPENSHELL="Y"
   START_NOW="Y"
   REINSTALL="Y"
-  NON_INTERACTIVE="Y"
   INSTALL_PYTHON_SDK="Y"
   INSTALL_CLI="Y"
   INSTALL_API="Y"
@@ -2908,8 +2918,6 @@ EOF
 
   while [ "$#" -gt 0 ]; do
     case "$1" in
-    --yes | -y) NON_INTERACTIVE="Y" ;;
-    --interactive) NON_INTERACTIVE="N" ;;
     --no-reinstall) REINSTALL="N" ;;
     --web-ui) INSTALL_WEB_UI="Y" ;;
     --no-web-ui) INSTALL_WEB_UI="N" ;;
@@ -4156,7 +4164,6 @@ run_install_local() {
   INSTALL_OPENSHELL="Y"
   INSTALL_SKILLS="Y"
   START_NOW="Y"
-  NON_INTERACTIVE="Y"
 
   function run_quiet() {
     local label="$1"
@@ -4432,8 +4439,6 @@ EOF
 
   while [ "$#" -gt 0 ]; do
     case "$1" in
-    --yes | -y) NON_INTERACTIVE="Y" ;;
-    --interactive) NON_INTERACTIVE="N" ;;
     --web-ui) INSTALL_WEB_UI="Y" ;;
     --no-web-ui) INSTALL_WEB_UI="N" ;;
     --redis) INSTALL_REDIS="Y" ;;
@@ -5816,7 +5821,6 @@ run_install_binary() {
   INSTALL_API="Y"
   START_NOW="Y"
   REINSTALL="Y"
-  NON_INTERACTIVE="Y"
 
   function usage() {
     local script_name="${MN_INSTALL_SCRIPT_NAME:-$(basename "$0")}"
@@ -5927,8 +5931,6 @@ EOF
 
   while [ "$#" -gt 0 ]; do
     case "$1" in
-    --yes | -y) NON_INTERACTIVE="Y" ;;
-    --interactive) NON_INTERACTIVE="N" ;;
     --no-reinstall) REINSTALL="N" ;;
     --web-ui) INSTALL_WEB_UI="Y" ;;
     --no-web-ui) INSTALL_WEB_UI="N" ;;

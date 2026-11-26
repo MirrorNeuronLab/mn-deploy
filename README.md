@@ -178,9 +178,12 @@ installer does not run the upstream host package installer.
 
 ## Podman runtime
 
-Runtime installation uses the Podman CLI. On Linux the installer starts the
-native API socket for the invoking user. On macOS it uses a Podman machine for workloads. The Compose provider runs in a
-pinned container. Client-only installation requires Python tooling.
+Runtime installation automatically installs the Podman CLI if it is missing.
+With `--reset`, setup runs after you type `YES` and before cleanup begins.
+If the package manager needs a sudo password, run `sudo -v` first or use
+`--interactive`. On Linux the installer starts the native API socket for the
+invoking user. On macOS it uses a Podman machine for workloads. The Compose
+provider runs in a pinned container. Client-only installation requires Python tooling.
 
 Start an existing engine or machine with:
 
