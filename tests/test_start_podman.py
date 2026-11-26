@@ -56,6 +56,7 @@ def invoke(
         "apt-get",
         "ps",
         "sudo",
+        "cargo",
         *(["podman"] if installed else []),
     ]:
         path = folder / exe

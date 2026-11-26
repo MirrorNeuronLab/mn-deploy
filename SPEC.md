@@ -73,6 +73,12 @@ must not silently cross into another source type. Explicit component-version
 overrides take precedence over the shared release version only for their named
 component.
 
+Local mode builds the Rust clients with Cargo from `PATH` or the configured
+Cargo home, which defaults to `~/.cargo`. If the sibling `mn-client-support`
+path is absent, it clones the Rust `main` branch into the workspace. An
+occupied path must already contain the Rust manifest. During a local reset,
+the installer prepares these prerequisites after confirmation and before cleanup.
+
 Runtime modes check Podman before preparing installed state. Linux uses its
 native API socket. macOS uses the API socket inside the Podman machine.
 Before reset cleanup, the installer resolves `PODMAN_HOST_SOCKET` or the

@@ -40,6 +40,11 @@ startup policy and historical support snapshots unchanged.
 
 The client uses the same `~/.mn` default as a full installation. Set `MN_HOME` to choose a separate home when both roles share a computer. An unpinned checkout install builds the three sibling Rust packages with Cargo. A standalone binary install downloads checksummed native executables. All three modes honor `--no-runtime`. Client-only installation runs under the current user and starts no services.
 
+On macOS and Ubuntu, `--mode local` clones `mn-client-support` from `main`
+when its sibling path is absent. The installer uses Cargo from `PATH` or
+`${CARGO_HOME:-$HOME/.cargo}/bin`. If preparing the Rust client sources fails
+during `--reset`, the installer stops before deleting runtime data.
+
 To prepare binary assets on a release platform, run `scripts/package-rust-client.sh /path/to/dist`. The CLI release owns `mn-<target>`, the API release owns `mn-api-<target>` and `mn-web-ui-server-<target>`, and the support release owns `mn-client-support-<target>`. Each asset has a matching `.sha256` file. To install from a local artifact directory, run `MN_CLIENT_DIST_DIR=/path/to/dist ./install.sh --mode binary --no-runtime`.
 
 ```bash

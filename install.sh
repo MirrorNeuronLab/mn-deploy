@@ -1578,7 +1578,8 @@ function mn_reset_resolve_home_or_exit() {
   if [ -d "$script_dir" ]; then
     script_dir="$(cd "$script_dir" && pwd -P)"
     workspace_dir="$(dirname "$script_dir")"
-    if [ "$resolved_home" = "$script_dir" ] || [ "$resolved_home" = "$workspace_dir" ]; then
+    if [ "$resolved_home" = "$script_dir" ] || [ "$resolved_home" = "$workspace_dir" ] ||
+      [ "$resolved_home" = "$workspace_dir/mn-client-support" ]; then
       mn_reset_error "Refusing to reset a MirrorNeuron source directory: ${resolved_home}"
       exit 1
     fi
@@ -2052,11 +2053,15 @@ MN_RESET_DOCKER_OWNERS
 }
 
 function mn_reset_install_state() {
-  local host_remove_error
+  local host_remove_error workspace_dir
 
   mn_reset_resolve_home_or_exit
   mn_reset_confirm_or_exit
   mn_reset_acquire_lock
+  if [ "$MN_INSTALL_MODE" = local ]; then
+    workspace_dir="$(cd "$(mn_script_dir)/.." && pwd)" || exit 1
+    mn_prepare_local_clients "$workspace_dir" || exit 1
+  fi
   if ! mn_ensure_podman_for_install; then
     mn_reset_error "Podman setup failed. Reset stopped before host cleanup."
     exit 1
@@ -2376,8 +2381,64 @@ if not os.path.isabs(base) or not os.access(base, os.X_OK) or os.path.commonpath
 print(base)' "$VENV_DIR"
 }
 
-# Native Rust packages. Source installs require Cargo only at build time.
+# Native Rust packages. Source installs use Cargo to build the executables.
 # Release assets are named <command>-<rust-target>, with a matching .sha256.
+function mn_require_cargo() {
+  local cargo_bin="${CARGO_HOME:-$HOME/.cargo}/bin"
+  if command -v cargo >/dev/null; then return 0; fi
+  if [ -x "$cargo_bin/cargo" ]; then
+    export PATH="$PATH:$cargo_bin"
+    return 0
+  fi
+  print_error "Cargo is required to build the Rust clients. Install Rust with rustup and rerun, or use a binary release."
+  return 1
+}
+
+function mn_prepare_local_clients() {
+  local root="$1" support="$1/mn-client-support" repo
+  for repo in mn-cli mn-api; do
+    if [ ! -f "$root/$repo/Cargo.toml" ]; then
+      print_error "Missing Rust checkout at $root/$repo. Use its Rust main branch in the local workspace."
+      return 1
+    fi
+  done
+  mn_require_cargo || return 1
+  if [ -f "$support/Cargo.toml" ]; then return 0; fi
+  if [ -e "$support" ] || [ -L "$support" ]; then
+    print_error "Missing Rust client support manifest: $support/Cargo.toml. Restore the checkout or move it aside and rerun."
+    return 1
+  fi
+  if ! command -v git >/dev/null; then
+    print_error "Git is required to clone the missing mn-client-support checkout. Install Git and rerun."
+    return 1
+  fi
+
+  (
+    local stage
+    stage="$(mktemp -d "$root/.mn-client-support.XXXXXXXX")" || {
+      print_error "Could not prepare a directory for mn-client-support in $root. Check workspace permissions and rerun."
+      return 1
+    }
+    trap 'rm -rf "$stage"' EXIT
+    printf '==> Cloning missing Rust client support into %s\n' "$support" >&3
+    if ! GIT_TERMINAL_PROMPT=0 mn_run_logged "Clone mn-client-support" \
+      git clone --branch main https://github.com/MirrorNeuronLab/mn-client-support.git "$stage/mn-client-support"; then
+      printf 'Next: check access to the mn-client-support repository on GitHub and rerun the installer.\n' >&3
+      return 1
+    fi
+    if [ ! -f "$stage/mn-client-support/Cargo.toml" ]; then
+      print_error "The mn-client-support main branch is missing its Rust manifest. Check the repository and retry."
+      return 1
+    fi
+    # Target the parent so mv cannot place the checkout inside an occupied path.
+    mv -n "$stage/mn-client-support" "$root/" || true
+    if [ ! -f "$support/Cargo.toml" ]; then
+      print_error "Could not place the Rust client support checkout at $support. Check that path and rerun."
+      return 1
+    fi
+  )
+}
+
 function mn_client_target() {
   case "$(uname -s)/$(uname -m)" in
   Darwin/arm64) echo aarch64-apple-darwin ;;
@@ -2444,10 +2505,7 @@ function mn_install_native_clients() (
   mkdir "$stage/bin"
   case "$mode" in
   local | github)
-    command -v cargo >/dev/null || {
-      print_error "Cargo is required to build the Rust client. Install Rust in your user account or use a binary release."
-      return 1
-    }
+    mn_require_cargo || return 1
     if [ "$mode" = github ]; then
       root="$stage/src"
       mkdir "$root"
@@ -2642,11 +2700,14 @@ function mn_install_client() {
       print_warning "Reset cancelled."
       return 0
     fi
-    rm -f "$INSTALL_DIR/client.json" "$INSTALL_DIR/api.token"
-    rm -rf "$INSTALL_DIR/outputs" "$INSTALL_DIR/logs"
   elif [ "$reinstall" = N ] && [ -x "$BIN_DIR/mn" ] && [ -x "$BIN_DIR/mn-api" ] && [ -x "$BIN_DIR/mn-client-support" ]; then
     print_success "Keeping the existing Rust client."
     return 0
+  fi
+  if [ "$MN_INSTALL_MODE" = local ]; then mn_prepare_local_clients "$root" || return 1; fi
+  if [ "$MN_INSTALL_RESET" = Y ]; then
+    rm -f "$INSTALL_DIR/client.json" "$INSTALL_DIR/api.token"
+    rm -rf "$INSTALL_DIR/outputs" "$INSTALL_DIR/logs"
   fi
   umask 077
   mkdir -p "$INSTALL_DIR"
@@ -4116,7 +4177,7 @@ run_install_local() {
   CLI_DIR="${WORKSPACE_DIR}/mn-cli"
   API_DIR="${WORKSPACE_DIR}/mn-api"
   PY_SDK_DIR="${WORKSPACE_DIR}/mn-python-sdk"
-  SURFACE_DIR="${WORKSPACE_DIR}/mn-client-support"
+  CLIENT_SUPPORT_DIR="${WORKSPACE_DIR}/mn-client-support"
   WEB_UI_DIR="${WORKSPACE_DIR}/mn-web-ui"
   MN_WEB_UI_SOURCE_MODE="${MN_WEB_UI_SOURCE_MODE:-source}"
   MN_WEB_UI_SOURCE_MOUNT="${MN_WEB_UI_SOURCE_MOUNT:-${WEB_UI_DIR}}"
@@ -4396,6 +4457,7 @@ Usage: ./install.sh --mode local [options]
 
 Installs MirrorNeuron from local sibling folders under:
   ${WORKSPACE_DIR}
+Clones mn-client-support from GitHub if its sibling checkout is missing.
 
 Options:
   --yes                 Use component defaults and require non-interactive sudo.
@@ -4587,7 +4649,7 @@ EOF
   }
 
   function require_install_dir_not_source() {
-    local install_path workspace_path source_path source_label
+    local install_path workspace_path source_path
     install_path="$(canonical_path "$INSTALL_DIR")"
     workspace_path="$(canonical_path "$WORKSPACE_DIR")"
 
@@ -4597,10 +4659,10 @@ EOF
       exit 1
     fi
 
-    for source_label in CORE_DIR CLI_DIR API_DIR PY_SDK_DIR SURFACE_DIR WEB_UI_DIR SKILLS_DIR BLUEPRINTS_DIR DOCS_DIR SYSTEM_TESTS_DIR MEMBRANE_DIR; do
-      source_path="$(canonical_path "${!source_label}")"
-      if [ "$install_path" = "$source_path" ]; then
-        print_error "Refusing to install MirrorNeuron state into source directory ${source_label}: ${INSTALL_DIR}"
+    for source_path in "$CORE_DIR" "$CLI_DIR" "$API_DIR" "$PY_SDK_DIR" "$CLIENT_SUPPORT_DIR" \
+      "$WEB_UI_DIR" "$SKILLS_DIR" "$BLUEPRINTS_DIR" "$DOCS_DIR" "$SYSTEM_TESTS_DIR" "$MEMBRANE_DIR"; do
+      if [ "$install_path" = "$(canonical_path "$source_path")" ]; then
+        print_error "Refusing to install MirrorNeuron state into source directory: ${INSTALL_DIR}"
         print_error "Unset MN_HOME or set it to a state directory such as ${HOME}/.mn."
         exit 1
       fi
@@ -5326,10 +5388,8 @@ EOF
   require_install_dir_not_source
   require_dir "$CORE_DIR" "MirrorNeuron core"
   require_file "$CORE_DIR/Dockerfile" "MirrorNeuron Dockerfile"
-  require_dir "$CLI_DIR" "mn-cli"
-  require_dir "$API_DIR" "mn-api"
   require_dir "$PY_SDK_DIR" "mn-python-sdk"
-  require_file "$SURFACE_DIR/Cargo.toml" "Rust client support"
+  if [ "$MN_INSTALL_RESET" != "Y" ]; then mn_prepare_local_clients "$WORKSPACE_DIR" || exit 1; fi
   for component_project in "$PY_SDK_DIR"/packages/*/pyproject.toml; do
     require_file "$component_project" "SDK component project"
   done
