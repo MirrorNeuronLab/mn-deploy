@@ -397,6 +397,15 @@ binary_default = false
 source_hash = "v2:f96c2e12a5a42b98325c56ab359aef361da8cd7d7d96b6f8fa0cc50bb4651fbd"
 
 [[packages]]
+name = "mn-worker-wasmtime-agent"
+path = "mn-agents/worker_wasmtime_agent"
+publish_group = "agent"
+version = "1.4.1"
+installer_groups = ["runtime-node"]
+binary_default = true
+source_hash = "v2:7b40d68bb0343b6527ba9ecf55d14492b01a04e960e4add636d6880c622475a3"
+
+[[packages]]
 name = "mn-worker-python-docker-agent"
 path = "mn-agents/worker_python_docker_agent"
 publish_group = "agent"

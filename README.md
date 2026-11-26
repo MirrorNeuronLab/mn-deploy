@@ -62,14 +62,12 @@ Current installation uses explicit component pins and current release-index fing
 
 Backward compatibility and automatic migration of obsolete state are unsupported.
 
-OpenShell startup resolves the Compose network gateway before launching the
-host-native SDK helper. The installer uses the containerized Compose provider to create OpenShell
-without starting it, records the resolved bind address
-and endpoint, then starts the runtime. Linux native preparation uses the Podman
-bridge address (for example `172.19.0.1:58080`); Podman machines use loopback and
-explicit gateway overrides remain authoritative. All three install modes use
-this ordering. `create` does not support the `--no-deps` option. Historical
-support snapshots remain unchanged.
+Wasmtime is the built-in sandbox. A normal install starts Core and its services
+without pulling an OpenShell gateway, generating its keys, or building Docker
+coworker images. The first coworker that selects OpenShell or Docker prepares
+that sandbox on its chosen execution node. For a Docker coworker, Podman builds
+the blueprint's Dockerfile with its declared build context and runs the resulting
+image. Later coworkers reuse the installed client and ready gateway or image.
 
 Desktop node identity fixes are unreleased. They require the matching CLI and
 Core changes: persistent `MN_HOME/node-identity.json`, startup validation, and
@@ -174,12 +172,15 @@ warning. For an already-open terminal, run the printed one-time reload command:
 `source ~/.mn/env` for Bash/Zsh, `. ~/.mn/env` for POSIX shells, or
 `source ~/.mn/env.fish` for Fish. Subsequent terminals load the setup automatically.
 
-OpenShell runs through the managed containers in every install mode; the
-installer does not run the upstream host package installer.
+Use `--no-openshell` to disable OpenShell workers on this node.
+`--openshell` permits first-use setup, which is the default. To use an existing
+gateway, supply `OPENSHELL_GATEWAY_ENDPOINT`, or a named `OPENSHELL_GATEWAY`
+with its `OPENSHELL_CONFIG_DIR`. A managed gateway publishes on host loopback
+by default. Core reaches it by its Compose service name.
 
 ## Podman runtime
 
-Runtime installation automatically installs the Podman CLI if it is missing.
+Core and Redis run in Podman. Runtime installation automatically installs the Podman CLI if it is missing.
 With `--reset`, setup runs after you type `YES` and before cleanup begins.
 If the package manager needs administrator access, sudo can prompt for your
 password in the terminal. Unattended runs and explicit `--yes` use non-interactive
@@ -434,14 +435,10 @@ see [Google's npm package contract](https://docs.cloud.google.com/artifact-regis
   OpenShell depending on selected options. `--context-engine` prepares the
   versioned Membrane GAR image before use. A blueprint that requires context
   memory only starts that prepared image; it never builds Membrane source.
-- OpenShell sandbox JWT keys are bootstrapped by the pinned gateway container;
-  installing OpenSSL on the host is not required. Keys are generated in the
-  container filesystem and copied out, so reset-time Podman host-mount
-  caching cannot break bootstrap. The temporary container is removed on success
-  and failure, and the signing key is installed with mode 0600.
-- The OpenShell host endpoint follows its published Compose bind address:
-  Podman machines use loopback, while native Linux uses the runtime bridge
-  gateway so both the host CLI and sandbox containers can reach the service.
+- On first use, the OpenShell plugin generates credentials in a temporary
+  gateway container, copies them to the selected node and removes the container.
+  The signing key has mode 0600. The native CLI uses the published host port
+  and Core connects over the internal runtime network.
 - The Web UI is a Compose service published on port `55173` by default;
   installing it does not require npm on the host. Binary installs fetch the
   selected `mirrorneuron-web-ui` package from the public GAR npm repository

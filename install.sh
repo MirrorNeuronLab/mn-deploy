@@ -59,12 +59,9 @@ MN_DEFAULT_WEB_UI_IMAGE="${MN_DEFAULT_WEB_UI_IMAGE:-docker.io/library/node:22-al
 # These upstream images intentionally retain their existing mutable `latest`
 # policy. Replace `latest` with a release tag or digest here to pin them.
 MN_DEFAULT_SYNCTHING_IMAGE="${MN_DEFAULT_SYNCTHING_IMAGE:-docker.io/syncthing/syncthing:latest}"
-MN_DEFAULT_OPENSHELL_SANDBOX_IMAGE="${MN_DEFAULT_OPENSHELL_SANDBOX_IMAGE:-ghcr.io/nvidia/openshell/sandbox:latest}"
 # Keep the OpenShell gateway and supervisor on matching releases so the
 # gateway can extract /openshell-sandbox at startup.
-MN_DEFAULT_OPENSHELL_VERSION="${MN_DEFAULT_OPENSHELL_VERSION:-v0.0.47}"
 MN_DEFAULT_OPENSHELL_GATEWAY_IMAGE="${MN_DEFAULT_OPENSHELL_GATEWAY_IMAGE:-ghcr.io/nvidia/openshell/gateway:0.0.47}"
-MN_DEFAULT_OPENSHELL_SUPERVISOR_IMAGE="${MN_DEFAULT_OPENSHELL_SUPERVISOR_IMAGE:-ghcr.io/nvidia/openshell/supervisor:0.0.47}"
 # The WAC release and the platform digests in mn_install_wac are one pin.
 MN_WAC_VERSION="v0.12.0"
 
@@ -914,7 +911,6 @@ function mn_print_install_summary() {
   [ "${INSTALL_WEB_UI:-N}" = "Y" ] && services="${services}, Web UI"
   [ "${INSTALL_REDIS:-N}" = "Y" ] && services="${services}, Redis"
   [ "${INSTALL_CONTEXT_ENGINE:-N}" = "Y" ] && services="${services}, Membrane"
-  [ "${INSTALL_OPENSHELL:-N}" = "Y" ] && services="${services}, OpenShell"
   case "${MN_SYNCTHING_ENABLED:-0}" in
   '' | 0 | [Ff][Aa][Ll][Ss][Ee] | [Nn][Oo] | [Nn] | [Oo][Ff][Ff] | [Dd][Ii][Ss][Aa][Bb][Ll][Ee][Dd]) ;;
   *) services="${services}, Syncthing" ;;
@@ -1074,14 +1070,6 @@ function mn_runtime_port_settings() {
     fi
     printf '%s=%s\n' "$start_key" "$start" "$end_key" "$end" "$policy_key" "$policy"
   done
-}
-
-function mn_prepare_openshell_gateway_for_start() {
-  [ "$INSTALL_OPENSHELL" = "Y" ] || return 0
-  # Compose creates its network before we resolve the Linux bridge address.
-  # Persist the final endpoint before the host-native watchdog inherits it.
-  mn_run_runtime_compose create openshell
-  reconcile_openshell_gateway_bind_host "${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
 }
 
 function mn_run_runtime_start_command() {
@@ -1675,7 +1663,7 @@ else
   redis-cli FLUSHALL
   redis-cli MEMORY PURGE >/dev/null 2>&1 || true
 fi'
-  if podman ps --format '{{.Names}}' 2>/dev/null | grep -Fxq "$redis_container"; then
+  if podman ps --format '{{.Names}}' 2>/dev/null | grep -Fx "$redis_container" >/dev/null; then
     if podman exec -i "$redis_container" sh -c "$redis_cli_script" >/dev/null 2>&1; then
       printf '✓ Cleared all Redis databases.\n' >&3
     else
@@ -2289,59 +2277,31 @@ for package in packages:
 PYCODE
 }
 
-# Shared by all install modes. Generate inside the container, then copy out:
-# Podman machine may still hold an obsolete host mount after MN_HOME is reset.
-function generate_openshell_jwt_keys() (
-  set -euo pipefail
-  local jwt_dir="$1"
-  local gateway_image="${OPENSHELL_GATEWAY_IMAGE:-$MN_DEFAULT_OPENSHELL_GATEWAY_IMAGE}"
-  local bootstrap_dir="" container_id="" name podman_client=podman
-
-  case "$gateway_image" in
-  ghcr.io/nvidia/openshell/gateway | ghcr.io/nvidia/openshell/gateway[:@]*) podman_client=mn_anonymous_podman ;;
-  esac
-
-  # Invoked by the EXIT trap in this subshell.
-  # shellcheck disable=SC2329
-  cleanup_openshell_jwt_bootstrap() {
-    if [ -n "$container_id" ]; then
-      podman rm -f "$container_id" >/dev/null 2>&1 || true
-    fi
-    if [ -n "$bootstrap_dir" ]; then
-      rm -rf "$bootstrap_dir"
-    fi
-  }
-  trap cleanup_openshell_jwt_bootstrap EXIT
-  trap 'exit 130' INT
-  trap 'exit 143' TERM
-
-  bootstrap_dir="$(mktemp -d "${jwt_dir}/.jwt-bootstrap.XXXXXX")"
-  if ! container_id="$("$podman_client" create \
-    --user "$OPENSHELL_GATEWAY_USER" \
-    --env HOME=/tmp/openshell-bootstrap \
-    "$gateway_image" generate-certs \
-    --output-dir /tmp/openshell-bootstrap/output \
-    --server-san host.openshell.internal)"; then
-    print_error "Failed to create OpenShell certificate bootstrap container with ${gateway_image}."
-    return 1
+# Persist node policy and endpoints. The owner starts a gateway on first use.
+function mn_openshell_plugin_env() {
+  local endpoint="${OPENSHELL_GATEWAY_ENDPOINT:-}"
+  local config_dir="${OPENSHELL_CONTAINER_CONFIG_DIR:-${OPENSHELL_CONFIG_DIR:-}}"
+  if [ -z "$config_dir" ] && [ -n "${OPENSHELL_GATEWAY:-}" ]; then
+    config_dir="$HOME/.config/openshell"
   fi
-  if ! podman start --attach "$container_id" >/dev/null; then
-    print_error "Failed to generate OpenShell sandbox JWT keys with ${gateway_image}."
-    return 1
+  if [ -z "$endpoint" ] && [ -z "${OPENSHELL_GATEWAY:-}" ]; then
+    endpoint="http://openshell:${OPENSHELL_GATEWAY_PORT:-58080}"
   fi
-  mn_run_logged "OpenShell JWT key copy" podman cp "${container_id}:/tmp/openshell-bootstrap/output/jwt/." "$bootstrap_dir" || return 1
-  for name in signing.pem public.pem kid; do
-    if [ ! -s "${bootstrap_dir}/${name}" ]; then
-      print_error "OpenShell certificate bootstrap did not create jwt/${name}."
-      return 1
-    fi
-  done
-  chmod 600 "${bootstrap_dir}/signing.pem"
-  chmod 644 "${bootstrap_dir}/public.pem" "${bootstrap_dir}/kid"
-  for name in signing.pem public.pem kid; do
-    mv "${bootstrap_dir}/${name}" "${jwt_dir}/${name}"
-  done
-)
+  cat <<EOF
+MN_HOST_OPENSHELL_CONFIG_DIR=${config_dir:-${INSTALL_DIR}/.config/openshell-mirror-neuron}
+OPENSHELL_GATEWAY_PORT=${OPENSHELL_GATEWAY_PORT:-58080}
+MN_OPENSHELL_MODE=${MN_OPENSHELL_MODE}
+OPENSHELL_GATEWAY=${OPENSHELL_GATEWAY:-}
+OPENSHELL_GATEWAY_ENDPOINT=${OPENSHELL_GATEWAY_ENDPOINT:-}
+MN_CORE_OPENSHELL_GATEWAY_ENDPOINT=${endpoint}
+OPENSHELL_GATEWAY_BIND_HOST=${OPENSHELL_GATEWAY_BIND_HOST:-127.0.0.1}
+OPENSHELL_SANDBOX_IMAGE=${OPENSHELL_SANDBOX_IMAGE:-${MN_DEFAULT_OPENSHELL_SANDBOX_IMAGE:-}}
+OPENSHELL_SUPERVISOR_IMAGE=${OPENSHELL_SUPERVISOR_IMAGE:-${MN_DEFAULT_OPENSHELL_SUPERVISOR_IMAGE:-}}
+OPENSHELL_GATEWAY_USER=${OPENSHELL_GATEWAY_USER}
+OPENSHELL_GATEWAY_DOCKER_GROUP=${OPENSHELL_GATEWAY_DOCKER_GROUP}
+OPENSHELL_GATEWAY_IMAGE=${OPENSHELL_GATEWAY_IMAGE:-$MN_DEFAULT_OPENSHELL_GATEWAY_IMAGE}
+EOF
+}
 
 # A PATH entry can belong to the runtime venv being replaced. Resolve its base
 # interpreter and symlinks while it still exists; never build from a moved venv.
@@ -2414,7 +2374,6 @@ function mn_install_client() {
   INSTALL_CONTEXT_ENGINE="N"
   INSTALL_WEB_UI="N"
   INSTALL_REDIS="N"
-  INSTALL_OPENSHELL="N"
   START_NOW="N"
   print_header
   mn_print_install_summary
@@ -2850,14 +2809,13 @@ EOF
   MN_SYNCTHING_SYNC_PORT="${MN_SYNCTHING_SYNC_PORT:-22000}"
   MN_SYNCTHING_RESCAN_INTERVAL_SECONDS="${MN_SYNCTHING_RESCAN_INTERVAL_SECONDS:-3600}"
   MN_BLUEPRINT_PYTHON_ENVS_DIR="${MN_BLUEPRINT_PYTHON_ENVS_DIR:-}"
-  MN_HOST_OPENSHELL_CONFIG_DIR="${OPENSHELL_CONTAINER_CONFIG_DIR:-${INSTALL_DIR}/.config/openshell-mirror-neuron}"
   MN_HOST_OPENSHELL_STATE_DIR="${MN_HOST_OPENSHELL_STATE_DIR:-${INSTALL_DIR}/openshell-state}"
   MN_DYNAMIC_REDIS_PORT_START="${MN_DYNAMIC_REDIS_PORT_START:-56379}"
   MN_DYNAMIC_REDIS_PORT_END="${MN_DYNAMIC_REDIS_PORT_END:-56478}"
 
   INSTALL_WEB_UI="Y"
   INSTALL_REDIS="Y"
-  INSTALL_OPENSHELL="Y"
+  MN_OPENSHELL_MODE="${MN_OPENSHELL_MODE:-lazy}"
   START_NOW="Y"
   REINSTALL="Y"
   INSTALL_PYTHON_SDK="Y"
@@ -2890,7 +2848,7 @@ Options:
   --build-membrane              Local mode: build Membrane source instead of pulling GAR.
                                 Ignored in github/binary modes. Source: MN_MEMBRANE_DIR
                                 or the sibling Membrane checkout.
-  --openshell / --no-openshell  Enable or skip OpenShell gateway setup.
+  --openshell / --no-openshell  Allow or disable on-demand OpenShell workers.
   --syncthing / --no-syncthing  Enable or skip Syncthing shared-storage replication.
   --start / --no-start          Start or skip starting MirrorNeuron after install.
   --python-components LIST      Install only these components: sdk,cli,api.
@@ -2965,8 +2923,8 @@ EOF
     --no-redis) INSTALL_REDIS="N" ;;
     --context-engine) INSTALL_CONTEXT_ENGINE="Y" ;;
     --no-context-engine) INSTALL_CONTEXT_ENGINE="N" ;;
-    --openshell) INSTALL_OPENSHELL="Y" ;;
-    --no-openshell) INSTALL_OPENSHELL="N" ;;
+    --openshell) MN_OPENSHELL_MODE=lazy ;;
+    --no-openshell) MN_OPENSHELL_MODE=disabled ;;
     --syncthing) MN_SYNCTHING_ENABLED="auto" ;;
     --no-syncthing) MN_SYNCTHING_ENABLED="0" ;;
     --start) START_NOW="Y" ;;
@@ -3265,7 +3223,6 @@ EOF
   function compose_profiles() {
     local profiles=()
     [ "$INSTALL_WEB_UI" = "Y" ] && profiles+=("web-ui")
-    [ "$INSTALL_OPENSHELL" = "Y" ] && profiles+=("openshell")
     [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] && profiles+=("context")
     case "$(printf '%s' "$MN_SYNCTHING_ENABLED" | tr '[:upper:]' '[:lower:]')" in
     '' | 0 | false | no | n | off | disabled) ;;
@@ -3277,55 +3234,6 @@ EOF
     fi
     local IFS=,
     printf '%s' "${profiles[*]}"
-  }
-
-  function write_openshell_compose_config() {
-    local gateway_dir="${MN_HOST_OPENSHELL_CONFIG_DIR}/gateways/openshell"
-    local jwt_dir="${MN_HOST_OPENSHELL_STATE_DIR}/jwt"
-    mkdir -p "$gateway_dir"
-    mkdir -p "$jwt_dir"
-    if [ ! -s "${jwt_dir}/signing.pem" ] || [ ! -s "${jwt_dir}/public.pem" ] || [ ! -s "${jwt_dir}/kid" ]; then
-      generate_openshell_jwt_keys "$jwt_dir"
-    fi
-    printf 'openshell\n' >"${MN_HOST_OPENSHELL_CONFIG_DIR}/active_gateway"
-    cat >"${gateway_dir}/metadata.json" <<EOF
-{
-  "name": "openshell",
-  "gateway_endpoint": "http://openshell:${OPENSHELL_GATEWAY_PORT:-58080}",
-  "is_remote": false,
-  "gateway_port": ${OPENSHELL_GATEWAY_PORT:-58080}
-}
-EOF
-    cat >"${MN_HOST_OPENSHELL_STATE_DIR}/gateway.toml" <<EOF
-[openshell]
-version = 1
-
-[openshell.gateway]
-bind_address = "0.0.0.0:${OPENSHELL_GATEWAY_PORT:-58080}"
-log_level = "info"
-# OpenShell uses its Docker-compatible driver against the mounted Podman API.
-compute_drivers = ["docker"]
-sandbox_namespace = "mirror-neuron"
-default_image = "${OPENSHELL_SANDBOX_IMAGE:-$MN_DEFAULT_OPENSHELL_SANDBOX_IMAGE}"
-supervisor_image = "${OPENSHELL_SUPERVISOR_IMAGE:-$MN_DEFAULT_OPENSHELL_SUPERVISOR_IMAGE}"
-
-[openshell.gateway.gateway_jwt]
-signing_key_path = "${jwt_dir}/signing.pem"
-public_key_path = "${jwt_dir}/public.pem"
-kid_path = "${jwt_dir}/kid"
-gateway_id = "openshell"
-ttl_secs = 3600
-
-[openshell.gateway.auth]
-allow_unauthenticated_users = true
-
-[openshell.drivers.docker]
-default_image = "${OPENSHELL_SANDBOX_IMAGE:-$MN_DEFAULT_OPENSHELL_SANDBOX_IMAGE}"
-image_pull_policy = "IfNotPresent"
-sandbox_namespace = "mirror-neuron"
-grpc_endpoint = "http://openshell:${OPENSHELL_GATEWAY_PORT:-58080}"
-network_name = "${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
-EOF
   }
 
   function generate_mn_secret() {
@@ -3566,93 +3474,6 @@ EOF
     fi
   }
 
-  function resolve_openshell_gateway_bind_host() {
-    local network_name="$1"
-    local gateway
-
-    if [ -n "${OPENSHELL_GATEWAY_BIND_HOST:-}" ]; then
-      printf '%s\n' "$OPENSHELL_GATEWAY_BIND_HOST"
-      return 0
-    fi
-
-    if [ "$(uname -s)" != Linux ]; then
-      printf '127.0.0.1\n'
-      return 0
-    fi
-
-    gateway="$(podman network inspect -f '{{ (index .Subnets 0).Gateway }}' "$network_name" 2>/dev/null || true)"
-    printf '%s\n' "${gateway:-127.0.0.1}"
-  }
-
-  function reconcile_openshell_gateway_bind_host() {
-    local network_name="$1"
-    local desired_bind_host desired_endpoint current_bind_host current_endpoint tmp_env
-    desired_bind_host="$(resolve_openshell_gateway_bind_host "$network_name")"
-    desired_endpoint="${OPENSHELL_GATEWAY_ENDPOINT:-http://${desired_bind_host}:${OPENSHELL_GATEWAY_PORT:-58080}}"
-    current_bind_host="$(sed -n 's/^OPENSHELL_GATEWAY_BIND_HOST=//p' "$RUNTIME_COMPOSE_ENV" | tail -1)"
-    current_endpoint="$(sed -n 's/^OPENSHELL_GATEWAY_ENDPOINT=//p' "$RUNTIME_COMPOSE_ENV" | tail -1)"
-    if [ "$current_bind_host" = "$desired_bind_host" ] && [ "$current_endpoint" = "$desired_endpoint" ]; then
-      return 0
-    fi
-
-    tmp_env="${RUNTIME_COMPOSE_ENV}.tmp"
-    awk -v bind_host="$desired_bind_host" -v endpoint="$desired_endpoint" '
-        BEGIN { replaced_bind_host = 0; replaced_endpoint = 0 }
-        /^OPENSHELL_GATEWAY_BIND_HOST=/ {
-            if (!replaced_bind_host) print "OPENSHELL_GATEWAY_BIND_HOST=" bind_host
-            replaced_bind_host = 1
-            next
-        }
-        /^OPENSHELL_GATEWAY_ENDPOINT=/ {
-            if (!replaced_endpoint) print "OPENSHELL_GATEWAY_ENDPOINT=" endpoint
-            replaced_endpoint = 1
-            next
-        }
-        { print }
-        END {
-            if (!replaced_bind_host) print "OPENSHELL_GATEWAY_BIND_HOST=" bind_host
-            if (!replaced_endpoint) print "OPENSHELL_GATEWAY_ENDPOINT=" endpoint
-        }
-    ' "$RUNTIME_COMPOSE_ENV" >"$tmp_env"
-    mv "$tmp_env" "$RUNTIME_COMPOSE_ENV"
-    chmod 600 "$RUNTIME_COMPOSE_ENV" 2>/dev/null || true
-    if [ "$current_bind_host" != "$desired_bind_host" ]; then
-      mn_run_runtime_compose up -d --force-recreate openshell
-    fi
-  }
-
-  function wait_for_openshell_worker_service() {
-    local network_name="${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
-    local gateway_endpoint="http://openshell:${OPENSHELL_GATEWAY_PORT:-58080}"
-    local attempt=1
-    local max_attempts=60
-    local readiness_announced="N"
-
-    while [ "$attempt" -le "$max_attempts" ]; do
-      if mn_anonymous_podman run --pull=never --rm \
-        --network "$network_name" \
-        --entrypoint openshell \
-        mirror-neuron-core:latest \
-        --gateway-endpoint "$gateway_endpoint" \
-        sandbox list >/dev/null 2>&1; then
-        if [ "$readiness_announced" = "Y" ]; then
-          print_step "OpenShell gateway is ready."
-        fi
-        return 0
-      fi
-      if [ "$readiness_announced" != "Y" ]; then
-        print_step "Waiting for OpenShell gateway to become ready"
-        readiness_announced="Y"
-      fi
-      sleep 1
-      attempt=$((attempt + 1))
-    done
-
-    print_error "OpenShell worker service did not become ready at ${gateway_endpoint} after ${max_attempts} seconds."
-    print_error "Next: podman logs openshell-cluster-openshell"
-    return 1
-  }
-
   function ensure_runtime_host_directory() {
     local path="$1"
     local description="$2"
@@ -3687,7 +3508,7 @@ EOF
   }
 
   function write_runtime_compose_files() {
-    local context_auth_token profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_agents_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image litellm_gateway_bind_host openshell_gateway_bind_host openshell_gateway_endpoint api_host
+    local context_auth_token profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_agents_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image litellm_gateway_bind_host api_host
     local grpc_auth_token grpc_admin_token runtime_port_settings
     grpc_auth_token="$(resolve_secret_file "${MN_GRPC_AUTH_TOKEN:-}" "${INSTALL_DIR}/grpc_auth.token" "MN_GRPC_AUTH_TOKEN")"
     grpc_admin_token="$(resolve_secret_file "${MN_GRPC_ADMIN_TOKEN:-}" "${INSTALL_DIR}/grpc_admin.token" "MN_GRPC_ADMIN_TOKEN")"
@@ -3703,8 +3524,6 @@ EOF
     fi
     litellm_gateway_bind_host="${MN_LITELLM_GATEWAY_BIND_HOST:-0.0.0.0}"
     network_name="${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
-    openshell_gateway_bind_host="$(resolve_openshell_gateway_bind_host "$network_name")"
-    openshell_gateway_endpoint="${OPENSHELL_GATEWAY_ENDPOINT:-http://${openshell_gateway_bind_host}:${OPENSHELL_GATEWAY_PORT:-58080}}"
     network_external="$(resolve_docker_network_external "$network_name")"
     network_token="$(resolve_network_token)"
     redis_password="$(resolve_redis_password "mirror_neuron_password_admin")"
@@ -3733,13 +3552,8 @@ EOF
     ensure_runtime_host_directory "$MN_HOST_ARTIFACTS_DIR" "run artifacts host mount" "MN_HOST_ARTIFACTS_DIR"
     ensure_runtime_host_directory "$MN_HOST_BLOB_STORE_DIR" "blob store host mount" "MN_HOST_BLOB_STORE_DIR"
     ensure_runtime_host_directory "$MN_HOST_SHARED_STORAGE_ROOT" "shared storage host mount" "MN_HOST_SHARED_STORAGE_ROOT"
-    ensure_runtime_host_directory "$MN_HOST_OPENSHELL_CONFIG_DIR" "OpenShell config host mount" "MN_HOST_OPENSHELL_CONFIG_DIR"
-    ensure_runtime_host_directory "$MN_HOST_OPENSHELL_STATE_DIR" "OpenShell state host mount" "MN_HOST_OPENSHELL_STATE_DIR"
     prepare_litellm_gateway_config
     mn_write_runtime_compose_file "$RUNTIME_COMPOSE_TEMPLATE" "$RUNTIME_COMPOSE_FILE"
-    if [ "$INSTALL_OPENSHELL" = "Y" ]; then
-      write_openshell_compose_config
-    fi
     runtime_port_settings="$(mn_runtime_port_settings "$RUNTIME_COMPOSE_ENV")"
     cat >"$RUNTIME_COMPOSE_ENV" <<EOF
 COMPOSE_PROJECT_NAME=mirror-neuron
@@ -3755,7 +3569,6 @@ MN_SYNCTHING_GUI_PORT=${MN_SYNCTHING_GUI_PORT}
 MN_SYNCTHING_SYNC_PORT=${MN_SYNCTHING_SYNC_PORT}
 MN_SYNCTHING_RESCAN_INTERVAL_SECONDS=${MN_SYNCTHING_RESCAN_INTERVAL_SECONDS}
 MN_BLUEPRINT_PYTHON_ENVS_DIR=${MN_BLUEPRINT_PYTHON_ENVS_DIR}
-MN_HOST_OPENSHELL_CONFIG_DIR=${MN_HOST_OPENSHELL_CONFIG_DIR}
 MN_HOST_OPENSHELL_STATE_DIR=${MN_HOST_OPENSHELL_STATE_DIR}
 MN_MEMBRANE_SOURCE_MODE=$(mn_selected_membrane_source_mode)
 ENGINE_IMAGE=${membrane_engine_image}
@@ -3848,14 +3661,9 @@ MN_REDIS_RECONNECT_BACKOFF_MS=${MN_REDIS_RECONNECT_BACKOFF_MS:-250}
 MN_REDIS_RECONNECT_MAX_BACKOFF_MS=${MN_REDIS_RECONNECT_MAX_BACKOFF_MS:-2000}
 ERL_EPMD_ADDRESS=${ERL_EPMD_ADDRESS:-0.0.0.0}
 ERL_AFLAGS=${ERL_AFLAGS:--kernel inet_dist_listen_min ${MN_DIST_PORT:-54370} inet_dist_listen_max ${MN_DIST_PORT:-54370}}
-OPENSHELL_GATEWAY_PORT=${OPENSHELL_GATEWAY_PORT:-58080}
-OPENSHELL_GATEWAY_ENDPOINT=${openshell_gateway_endpoint}
-OPENSHELL_GATEWAY_BIND_HOST=${openshell_gateway_bind_host}
-OPENSHELL_GATEWAY_USER=${OPENSHELL_GATEWAY_USER}
+$(mn_openshell_plugin_env)
 MN_SYNCTHING_UID=${MN_SYNCTHING_UID}
 MN_SYNCTHING_GID=${MN_SYNCTHING_GID}
-OPENSHELL_GATEWAY_DOCKER_GROUP=${OPENSHELL_GATEWAY_DOCKER_GROUP}
-OPENSHELL_GATEWAY_IMAGE=${OPENSHELL_GATEWAY_IMAGE:-$MN_DEFAULT_OPENSHELL_GATEWAY_IMAGE}
 PODMAN_HOST_SOCKET=${PODMAN_HOST_SOCKET}
 COMPOSE_PARALLEL_LIMIT=${COMPOSE_PARALLEL_LIMIT:-1}
 MN_COOKIE=${mn_cookie}
@@ -3908,7 +3716,6 @@ EOF
     [ "$INSTALL_WEB_UI" = "Y" ] && RUNTIME_COMPOSE_SIDECARS+=("web-ui")
     grep -q '^  mn-native-sdk-grpc:' "$RUNTIME_COMPOSE_FILE" 2>/dev/null && RUNTIME_COMPOSE_SIDECARS+=("mn-native-sdk-grpc")
     grep -q '^  mn-litellm-proxy:' "$RUNTIME_COMPOSE_FILE" 2>/dev/null && RUNTIME_COMPOSE_SIDECARS+=("mn-litellm-proxy")
-    [ "$INSTALL_OPENSHELL" = "Y" ] && RUNTIME_COMPOSE_SIDECARS+=("openshell")
     if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
       RUNTIME_COMPOSE_SIDECARS+=("membrane-context-engine")
     fi
@@ -3925,10 +3732,6 @@ EOF
     prepare_runtime_compose_sidecars
     if [ "${#RUNTIME_COMPOSE_SIDECARS[@]}" -gt 0 ]; then
       mn_run_runtime_compose up -d --no-build "${RUNTIME_COMPOSE_SIDECARS[@]}"
-    fi
-    if [ "$INSTALL_OPENSHELL" = "Y" ]; then
-      reconcile_openshell_gateway_bind_host "${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
-      wait_for_openshell_worker_service
     fi
   }
 
@@ -3958,7 +3761,6 @@ EOF
     if [ "$MN_BUILD_MEMBRANE" != "Y" ]; then
       INSTALL_CONTEXT_ENGINE=$(ask "Enable the Membrane context engine?" "$INSTALL_CONTEXT_ENGINE")
     fi
-    INSTALL_OPENSHELL=$(ask "Enable OpenShell sandbox workers?" "$INSTALL_OPENSHELL")
     START_NOW=$(ask "Start the runtime after installation?" "$START_NOW")
   fi
   validate_selections
@@ -4078,7 +3880,7 @@ EOF
 
   mn_configure_installed_runtime
   mn_print_stage "Configuring commands and services"
-  if [ "$INSTALL_REDIS" = "Y" ] || [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] || [ "$INSTALL_OPENSHELL" = "Y" ] || [ "$INSTALL_WEB_UI" = "Y" ]; then
+  if [ "$INSTALL_REDIS" = "Y" ] || [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] || [ "$INSTALL_WEB_UI" = "Y" ]; then
     if [ "$START_NOW" = "Y" ]; then
       prepare_runtime_compose_sidecars
       print_detail "Podman services are prepared; automatic startup uses the installed runtime lifecycle entry point."
@@ -4130,11 +3932,7 @@ EOF
 
   if [ "$START_NOW" = "Y" ]; then
     mn_print_stage "Starting MirrorNeuron services"
-    mn_prepare_openshell_gateway_for_start
     mn_run_runtime_start_command "$BIN_DIR/mn-runtime" start || return 1
-    if [ "$INSTALL_OPENSHELL" = "Y" ]; then
-      wait_for_openshell_worker_service
-    fi
     print_step "MirrorNeuron services are running."
   fi
 
@@ -4187,7 +3985,6 @@ run_install_local() {
   MN_SYNCTHING_SYNC_PORT="${MN_SYNCTHING_SYNC_PORT:-22000}"
   MN_SYNCTHING_RESCAN_INTERVAL_SECONDS="${MN_SYNCTHING_RESCAN_INTERVAL_SECONDS:-3600}"
   MN_BLUEPRINT_PYTHON_ENVS_DIR="${MN_BLUEPRINT_PYTHON_ENVS_DIR:-}"
-  MN_HOST_OPENSHELL_CONFIG_DIR="${OPENSHELL_CONTAINER_CONFIG_DIR:-${INSTALL_DIR}/.config/openshell-mirror-neuron}"
   MN_HOST_OPENSHELL_STATE_DIR="${MN_HOST_OPENSHELL_STATE_DIR:-${INSTALL_DIR}/openshell-state}"
   MN_DYNAMIC_REDIS_PORT_START="${MN_DYNAMIC_REDIS_PORT_START:-56379}"
   MN_DYNAMIC_REDIS_PORT_END="${MN_DYNAMIC_REDIS_PORT_END:-56478}"
@@ -4201,7 +3998,7 @@ run_install_local() {
   INSTALL_WEB_UI="Y"
   INSTALL_REDIS="Y"
   INSTALL_CONTEXT_ENGINE="Y"
-  INSTALL_OPENSHELL="Y"
+  MN_OPENSHELL_MODE="${MN_OPENSHELL_MODE:-lazy}"
   INSTALL_SKILLS="Y"
   START_NOW="Y"
 
@@ -4459,8 +4256,8 @@ Options:
   --no-context-engine   Skip Membrane context engine setup.
   --build-membrane      Build local Membrane source instead of pulling GAR.
                         Override source location with MN_MEMBRANE_DIR.
-  --openshell           Install/start OpenShell gateway for sandbox workers.
-  --no-openshell        Skip OpenShell gateway setup.
+  --openshell           Allow on-demand OpenShell workers (default).
+  --no-openshell        Disable OpenShell workers on this node.
   --syncthing / --no-syncthing
                         Enable or skip Syncthing shared-storage replication.
   --no-skills           Skip optional packages under mn-skills. Skills required
@@ -4485,8 +4282,8 @@ EOF
     --no-redis) INSTALL_REDIS="N" ;;
     --context-engine) INSTALL_CONTEXT_ENGINE="Y" ;;
     --no-context-engine) INSTALL_CONTEXT_ENGINE="N" ;;
-    --openshell) INSTALL_OPENSHELL="Y" ;;
-    --no-openshell) INSTALL_OPENSHELL="N" ;;
+    --openshell) MN_OPENSHELL_MODE=lazy ;;
+    --no-openshell) MN_OPENSHELL_MODE=disabled ;;
     --no-skills) INSTALL_SKILLS="N" ;;
     --syncthing) MN_SYNCTHING_ENABLED="auto" ;;
     --no-syncthing) MN_SYNCTHING_ENABLED="0" ;;
@@ -5076,7 +4873,6 @@ finally:
   function compose_profiles() {
     local profiles=()
     [ "$INSTALL_WEB_UI" = "Y" ] && profiles+=("web-ui")
-    [ "$INSTALL_OPENSHELL" = "Y" ] && profiles+=("openshell")
     [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] && profiles+=("context")
     case "$(printf '%s' "$MN_SYNCTHING_ENABLED" | tr '[:upper:]' '[:lower:]')" in
     '' | 0 | false | no | n | off | disabled) ;;
@@ -5088,55 +4884,6 @@ finally:
     fi
     local IFS=,
     printf '%s' "${profiles[*]}"
-  }
-
-  function write_openshell_compose_config() {
-    local gateway_dir="${MN_HOST_OPENSHELL_CONFIG_DIR}/gateways/openshell"
-    local jwt_dir="${MN_HOST_OPENSHELL_STATE_DIR}/jwt"
-    mkdir -p "$gateway_dir"
-    mkdir -p "$jwt_dir"
-    if [ ! -s "${jwt_dir}/signing.pem" ] || [ ! -s "${jwt_dir}/public.pem" ] || [ ! -s "${jwt_dir}/kid" ]; then
-      generate_openshell_jwt_keys "$jwt_dir"
-    fi
-    printf 'openshell\n' >"${MN_HOST_OPENSHELL_CONFIG_DIR}/active_gateway"
-    cat >"${gateway_dir}/metadata.json" <<EOF
-{
-  "name": "openshell",
-  "gateway_endpoint": "http://openshell:${OPENSHELL_GATEWAY_PORT:-58080}",
-  "is_remote": false,
-  "gateway_port": ${OPENSHELL_GATEWAY_PORT:-58080}
-}
-EOF
-    cat >"${MN_HOST_OPENSHELL_STATE_DIR}/gateway.toml" <<EOF
-[openshell]
-version = 1
-
-[openshell.gateway]
-bind_address = "0.0.0.0:${OPENSHELL_GATEWAY_PORT:-58080}"
-log_level = "info"
-# OpenShell uses its Docker-compatible driver against the mounted Podman API.
-compute_drivers = ["docker"]
-sandbox_namespace = "mirror-neuron"
-default_image = "${OPENSHELL_SANDBOX_IMAGE:-$MN_DEFAULT_OPENSHELL_SANDBOX_IMAGE}"
-supervisor_image = "${OPENSHELL_SUPERVISOR_IMAGE:-$MN_DEFAULT_OPENSHELL_SUPERVISOR_IMAGE}"
-
-[openshell.gateway.gateway_jwt]
-signing_key_path = "${jwt_dir}/signing.pem"
-public_key_path = "${jwt_dir}/public.pem"
-kid_path = "${jwt_dir}/kid"
-gateway_id = "openshell"
-ttl_secs = 3600
-
-[openshell.gateway.auth]
-allow_unauthenticated_users = true
-
-[openshell.drivers.docker]
-default_image = "${OPENSHELL_SANDBOX_IMAGE:-$MN_DEFAULT_OPENSHELL_SANDBOX_IMAGE}"
-image_pull_policy = "IfNotPresent"
-sandbox_namespace = "mirror-neuron"
-grpc_endpoint = "http://openshell:${OPENSHELL_GATEWAY_PORT:-58080}"
-network_name = "${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
-EOF
   }
 
   function resolve_docker_network_external() {
@@ -5162,93 +4909,6 @@ EOF
       print_warning "Podman network ${network_name} already exists outside this Compose project; reusing it as an external network."
       printf 'true\n'
     fi
-  }
-
-  function resolve_openshell_gateway_bind_host() {
-    local network_name="$1"
-    local gateway
-
-    if [ -n "${OPENSHELL_GATEWAY_BIND_HOST:-}" ]; then
-      printf '%s\n' "$OPENSHELL_GATEWAY_BIND_HOST"
-      return 0
-    fi
-
-    if [ "$(uname -s)" != Linux ]; then
-      printf '127.0.0.1\n'
-      return 0
-    fi
-
-    gateway="$(podman network inspect -f '{{ (index .Subnets 0).Gateway }}' "$network_name" 2>/dev/null || true)"
-    printf '%s\n' "${gateway:-127.0.0.1}"
-  }
-
-  function reconcile_openshell_gateway_bind_host() {
-    local network_name="$1"
-    local desired_bind_host desired_endpoint current_bind_host current_endpoint tmp_env
-    desired_bind_host="$(resolve_openshell_gateway_bind_host "$network_name")"
-    desired_endpoint="${OPENSHELL_GATEWAY_ENDPOINT:-http://${desired_bind_host}:${OPENSHELL_GATEWAY_PORT:-58080}}"
-    current_bind_host="$(sed -n 's/^OPENSHELL_GATEWAY_BIND_HOST=//p' "$RUNTIME_COMPOSE_ENV" | tail -1)"
-    current_endpoint="$(sed -n 's/^OPENSHELL_GATEWAY_ENDPOINT=//p' "$RUNTIME_COMPOSE_ENV" | tail -1)"
-    if [ "$current_bind_host" = "$desired_bind_host" ] && [ "$current_endpoint" = "$desired_endpoint" ]; then
-      return 0
-    fi
-
-    tmp_env="${RUNTIME_COMPOSE_ENV}.tmp"
-    awk -v bind_host="$desired_bind_host" -v endpoint="$desired_endpoint" '
-        BEGIN { replaced_bind_host = 0; replaced_endpoint = 0 }
-        /^OPENSHELL_GATEWAY_BIND_HOST=/ {
-            if (!replaced_bind_host) print "OPENSHELL_GATEWAY_BIND_HOST=" bind_host
-            replaced_bind_host = 1
-            next
-        }
-        /^OPENSHELL_GATEWAY_ENDPOINT=/ {
-            if (!replaced_endpoint) print "OPENSHELL_GATEWAY_ENDPOINT=" endpoint
-            replaced_endpoint = 1
-            next
-        }
-        { print }
-        END {
-            if (!replaced_bind_host) print "OPENSHELL_GATEWAY_BIND_HOST=" bind_host
-            if (!replaced_endpoint) print "OPENSHELL_GATEWAY_ENDPOINT=" endpoint
-        }
-    ' "$RUNTIME_COMPOSE_ENV" >"$tmp_env"
-    mv "$tmp_env" "$RUNTIME_COMPOSE_ENV"
-    chmod 600 "$RUNTIME_COMPOSE_ENV" 2>/dev/null || true
-    if [ "$current_bind_host" != "$desired_bind_host" ]; then
-      mn_run_runtime_compose up -d --force-recreate openshell
-    fi
-  }
-
-  function wait_for_openshell_worker_service() {
-    local network_name="${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
-    local gateway_endpoint="http://openshell:${OPENSHELL_GATEWAY_PORT:-58080}"
-    local attempt=1
-    local max_attempts=60
-    local readiness_announced="N"
-
-    while [ "$attempt" -le "$max_attempts" ]; do
-      if mn_anonymous_podman run --pull=never --rm \
-        --network "$network_name" \
-        --entrypoint openshell \
-        mirror-neuron-core:latest \
-        --gateway-endpoint "$gateway_endpoint" \
-        sandbox list >/dev/null 2>&1; then
-        if [ "$readiness_announced" = "Y" ]; then
-          print_step "OpenShell gateway is ready."
-        fi
-        return 0
-      fi
-      if [ "$readiness_announced" != "Y" ]; then
-        print_step "Waiting for OpenShell gateway to become ready"
-        readiness_announced="Y"
-      fi
-      sleep 1
-      attempt=$((attempt + 1))
-    done
-
-    print_error "OpenShell worker service did not become ready at ${gateway_endpoint} after ${max_attempts} seconds."
-    print_error "Next: podman logs openshell-cluster-openshell"
-    return 1
   }
 
   function ensure_runtime_host_directory() {
@@ -5285,7 +4945,7 @@ EOF
   }
 
   function write_runtime_compose_files() {
-    local context_auth_token profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_agents_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image litellm_gateway_bind_host openshell_gateway_bind_host openshell_gateway_endpoint api_host
+    local context_auth_token profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_agents_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image litellm_gateway_bind_host api_host
     local grpc_auth_token grpc_admin_token runtime_port_settings
     grpc_auth_token="$(resolve_secret_file "${MN_GRPC_AUTH_TOKEN:-}" "${INSTALL_DIR}/grpc_auth.token" "MN_GRPC_AUTH_TOKEN")"
     grpc_admin_token="$(resolve_secret_file "${MN_GRPC_ADMIN_TOKEN:-}" "${INSTALL_DIR}/grpc_admin.token" "MN_GRPC_ADMIN_TOKEN")"
@@ -5301,8 +4961,6 @@ EOF
     fi
     litellm_gateway_bind_host="${MN_LITELLM_GATEWAY_BIND_HOST:-0.0.0.0}"
     network_name="${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
-    openshell_gateway_bind_host="$(resolve_openshell_gateway_bind_host "$network_name")"
-    openshell_gateway_endpoint="${OPENSHELL_GATEWAY_ENDPOINT:-http://${openshell_gateway_bind_host}:${OPENSHELL_GATEWAY_PORT:-58080}}"
     network_external="$(resolve_docker_network_external "$network_name")"
     network_token="$(resolve_network_token)"
     redis_password="$(resolve_redis_password "mirror_neuron_password_admin")"
@@ -5331,13 +4989,8 @@ EOF
     ensure_runtime_host_directory "$MN_HOST_ARTIFACTS_DIR" "run artifacts host mount" "MN_HOST_ARTIFACTS_DIR"
     ensure_runtime_host_directory "$MN_HOST_BLOB_STORE_DIR" "blob store host mount" "MN_HOST_BLOB_STORE_DIR"
     ensure_runtime_host_directory "$MN_HOST_SHARED_STORAGE_ROOT" "shared storage host mount" "MN_HOST_SHARED_STORAGE_ROOT"
-    ensure_runtime_host_directory "$MN_HOST_OPENSHELL_CONFIG_DIR" "OpenShell config host mount" "MN_HOST_OPENSHELL_CONFIG_DIR"
-    ensure_runtime_host_directory "$MN_HOST_OPENSHELL_STATE_DIR" "OpenShell state host mount" "MN_HOST_OPENSHELL_STATE_DIR"
     prepare_litellm_gateway_config
     mn_write_runtime_compose_file "$RUNTIME_COMPOSE_TEMPLATE" "$RUNTIME_COMPOSE_FILE"
-    if [ "$INSTALL_OPENSHELL" = "Y" ]; then
-      write_openshell_compose_config
-    fi
     runtime_port_settings="$(mn_runtime_port_settings "$RUNTIME_COMPOSE_ENV")"
     cat >"$RUNTIME_COMPOSE_ENV" <<EOF
 COMPOSE_PROJECT_NAME=mirror-neuron
@@ -5353,7 +5006,6 @@ MN_SYNCTHING_GUI_PORT=${MN_SYNCTHING_GUI_PORT}
 MN_SYNCTHING_SYNC_PORT=${MN_SYNCTHING_SYNC_PORT}
 MN_SYNCTHING_RESCAN_INTERVAL_SECONDS=${MN_SYNCTHING_RESCAN_INTERVAL_SECONDS}
 MN_BLUEPRINT_PYTHON_ENVS_DIR=${MN_BLUEPRINT_PYTHON_ENVS_DIR}
-MN_HOST_OPENSHELL_CONFIG_DIR=${MN_HOST_OPENSHELL_CONFIG_DIR}
 MN_HOST_OPENSHELL_STATE_DIR=${MN_HOST_OPENSHELL_STATE_DIR}
 MN_MEMBRANE_SOURCE_MODE=$(mn_selected_membrane_source_mode)
 ENGINE_IMAGE=${membrane_engine_image}
@@ -5446,14 +5098,9 @@ MN_REDIS_RECONNECT_BACKOFF_MS=${MN_REDIS_RECONNECT_BACKOFF_MS:-250}
 MN_REDIS_RECONNECT_MAX_BACKOFF_MS=${MN_REDIS_RECONNECT_MAX_BACKOFF_MS:-2000}
 ERL_EPMD_ADDRESS=${ERL_EPMD_ADDRESS:-0.0.0.0}
 ERL_AFLAGS=${ERL_AFLAGS:--kernel inet_dist_listen_min ${MN_DIST_PORT:-54370} inet_dist_listen_max ${MN_DIST_PORT:-54370}}
-OPENSHELL_GATEWAY_PORT=${OPENSHELL_GATEWAY_PORT:-58080}
-OPENSHELL_GATEWAY_ENDPOINT=${openshell_gateway_endpoint}
-OPENSHELL_GATEWAY_BIND_HOST=${openshell_gateway_bind_host}
-OPENSHELL_GATEWAY_USER=${OPENSHELL_GATEWAY_USER}
+$(mn_openshell_plugin_env)
 MN_SYNCTHING_UID=${MN_SYNCTHING_UID}
 MN_SYNCTHING_GID=${MN_SYNCTHING_GID}
-OPENSHELL_GATEWAY_DOCKER_GROUP=${OPENSHELL_GATEWAY_DOCKER_GROUP}
-OPENSHELL_GATEWAY_IMAGE=${OPENSHELL_GATEWAY_IMAGE:-$MN_DEFAULT_OPENSHELL_GATEWAY_IMAGE}
 PODMAN_HOST_SOCKET=${PODMAN_HOST_SOCKET}
 COMPOSE_PARALLEL_LIMIT=${COMPOSE_PARALLEL_LIMIT:-1}
 MN_COOKIE=${mn_cookie}
@@ -5506,7 +5153,6 @@ EOF
     [ "$INSTALL_WEB_UI" = "Y" ] && RUNTIME_COMPOSE_SIDECARS+=("web-ui")
     grep -q '^  mn-native-sdk-grpc:' "$RUNTIME_COMPOSE_FILE" 2>/dev/null && RUNTIME_COMPOSE_SIDECARS+=("mn-native-sdk-grpc")
     grep -q '^  mn-litellm-proxy:' "$RUNTIME_COMPOSE_FILE" 2>/dev/null && RUNTIME_COMPOSE_SIDECARS+=("mn-litellm-proxy")
-    [ "$INSTALL_OPENSHELL" = "Y" ] && RUNTIME_COMPOSE_SIDECARS+=("openshell")
     if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
       RUNTIME_COMPOSE_SIDECARS+=("membrane-context-engine")
     fi
@@ -5523,10 +5169,6 @@ EOF
     prepare_runtime_compose_sidecars
     if [ "${#RUNTIME_COMPOSE_SIDECARS[@]}" -gt 0 ]; then
       mn_run_runtime_compose up -d --no-build "${RUNTIME_COMPOSE_SIDECARS[@]}"
-    fi
-    if [ "$INSTALL_OPENSHELL" = "Y" ]; then
-      reconcile_openshell_gateway_bind_host "${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
-      wait_for_openshell_worker_service
     fi
   }
 
@@ -5570,7 +5212,6 @@ EOF
       INSTALL_CONTEXT_ENGINE=$(ask "Enable the Membrane context engine?" "$INSTALL_CONTEXT_ENGINE")
     fi
     INSTALL_SKILLS=$(ask "Install optional local skills?" "$INSTALL_SKILLS")
-    INSTALL_OPENSHELL=$(ask "Enable OpenShell sandbox workers?" "$INSTALL_OPENSHELL")
     START_NOW=$(ask "Start the runtime after installation?" "$START_NOW")
   fi
 
@@ -5580,9 +5221,6 @@ EOF
   print_step "Checking dependencies"
   resolve_python_runtime
 
-  if [ "$INSTALL_OPENSHELL" = "Y" ] && ! command -v openshell >/dev/null 2>&1; then
-    require_cmd curl
-  fi
   if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
     require_dir "$MEMBRANE_DIR" "Membrane context engine"
     require_file "$MEMBRANE_DIR/Dockerfile" "Membrane Dockerfile"
@@ -5732,7 +5370,7 @@ EOF
 
   mn_configure_installed_runtime
   mn_print_stage "Configuring commands and services"
-  if [ "$INSTALL_REDIS" = "Y" ] || [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] || [ "$INSTALL_OPENSHELL" = "Y" ] || [ "$INSTALL_WEB_UI" = "Y" ]; then
+  if [ "$INSTALL_REDIS" = "Y" ] || [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] || [ "$INSTALL_WEB_UI" = "Y" ]; then
     if [ "$START_NOW" = "Y" ]; then
       prepare_runtime_compose_sidecars
       print_detail "Podman services are prepared; automatic startup uses the installed runtime lifecycle entry point."
@@ -5757,11 +5395,7 @@ EOF
   if [ "$START_NOW" = "Y" ]; then
     mn_print_stage "Starting MirrorNeuron services"
     "$VENV_DIR/bin/mn" runtime stop >/dev/null 2>&1 || true
-    mn_prepare_openshell_gateway_for_start
     mn_run_runtime_start_command "$BIN_DIR/mn-runtime" start || return 1
-    if [ "$INSTALL_OPENSHELL" = "Y" ]; then
-      wait_for_openshell_worker_service
-    fi
     print_step "MirrorNeuron services are running."
   fi
 
@@ -5839,7 +5473,6 @@ run_install_binary() {
   MN_SYNCTHING_SYNC_PORT="${MN_SYNCTHING_SYNC_PORT:-22000}"
   MN_SYNCTHING_RESCAN_INTERVAL_SECONDS="${MN_SYNCTHING_RESCAN_INTERVAL_SECONDS:-3600}"
   MN_BLUEPRINT_PYTHON_ENVS_DIR="${MN_BLUEPRINT_PYTHON_ENVS_DIR:-}"
-  MN_HOST_OPENSHELL_CONFIG_DIR="${OPENSHELL_CONTAINER_CONFIG_DIR:-${INSTALL_DIR}/.config/openshell-mirror-neuron}"
   MN_HOST_OPENSHELL_STATE_DIR="${MN_HOST_OPENSHELL_STATE_DIR:-${INSTALL_DIR}/openshell-state}"
   MN_DYNAMIC_REDIS_PORT_START="${MN_DYNAMIC_REDIS_PORT_START:-56379}"
   MN_DYNAMIC_REDIS_PORT_END="${MN_DYNAMIC_REDIS_PORT_END:-56478}"
@@ -5854,7 +5487,7 @@ run_install_binary() {
   INSTALL_WEB_UI="Y"
   INSTALL_REDIS="Y"
   INSTALL_CONTEXT_ENGINE="Y"
-  INSTALL_OPENSHELL="Y"
+  MN_OPENSHELL_MODE="${MN_OPENSHELL_MODE:-lazy}"
   INSTALL_PYTHON_SDK="Y"
   INSTALL_AGENTS="Y"
   INSTALL_CLI="Y"
@@ -5883,7 +5516,7 @@ Options:
   --build-membrane              Local mode: build Membrane source instead of pulling GAR.
                                 Ignored in github/binary modes. Source: MN_MEMBRANE_DIR
                                 or the sibling Membrane checkout.
-  --openshell / --no-openshell  Enable or skip OpenShell gateway setup.
+  --openshell / --no-openshell  Allow or disable on-demand OpenShell workers.
   --syncthing / --no-syncthing  Enable or skip Syncthing shared-storage replication.
   --start / --no-start          Start or skip starting MirrorNeuron after install.
 
@@ -5978,8 +5611,8 @@ EOF
     --no-redis) INSTALL_REDIS="N" ;;
     --context-engine) INSTALL_CONTEXT_ENGINE="Y" ;;
     --no-context-engine) INSTALL_CONTEXT_ENGINE="N" ;;
-    --openshell) INSTALL_OPENSHELL="Y" ;;
-    --no-openshell) INSTALL_OPENSHELL="N" ;;
+    --openshell) MN_OPENSHELL_MODE=lazy ;;
+    --no-openshell) MN_OPENSHELL_MODE=disabled ;;
     --syncthing) MN_SYNCTHING_ENABLED="auto" ;;
     --no-syncthing) MN_SYNCTHING_ENABLED="0" ;;
     --start) START_NOW="Y" ;;
@@ -6784,7 +6417,6 @@ PYTHON
   function compose_profiles() {
     local profiles=()
     [ "$INSTALL_WEB_UI" = "Y" ] && profiles+=("web-ui")
-    [ "$INSTALL_OPENSHELL" = "Y" ] && profiles+=("openshell")
     [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] && profiles+=("context")
     case "$(printf '%s' "$MN_SYNCTHING_ENABLED" | tr '[:upper:]' '[:lower:]')" in
     '' | 0 | false | no | n | off | disabled) ;;
@@ -6796,55 +6428,6 @@ PYTHON
     fi
     local IFS=,
     printf '%s' "${profiles[*]}"
-  }
-
-  function write_openshell_compose_config() {
-    local gateway_dir="${MN_HOST_OPENSHELL_CONFIG_DIR}/gateways/openshell"
-    local jwt_dir="${MN_HOST_OPENSHELL_STATE_DIR}/jwt"
-    mkdir -p "$gateway_dir"
-    mkdir -p "$jwt_dir"
-    if [ ! -s "${jwt_dir}/signing.pem" ] || [ ! -s "${jwt_dir}/public.pem" ] || [ ! -s "${jwt_dir}/kid" ]; then
-      generate_openshell_jwt_keys "$jwt_dir"
-    fi
-    printf 'openshell\n' >"${MN_HOST_OPENSHELL_CONFIG_DIR}/active_gateway"
-    cat >"${gateway_dir}/metadata.json" <<EOF
-{
-  "name": "openshell",
-  "gateway_endpoint": "http://openshell:${OPENSHELL_GATEWAY_PORT:-58080}",
-  "is_remote": false,
-  "gateway_port": ${OPENSHELL_GATEWAY_PORT:-58080}
-}
-EOF
-    cat >"${MN_HOST_OPENSHELL_STATE_DIR}/gateway.toml" <<EOF
-[openshell]
-version = 1
-
-[openshell.gateway]
-bind_address = "0.0.0.0:${OPENSHELL_GATEWAY_PORT:-58080}"
-log_level = "info"
-# OpenShell uses its Docker-compatible driver against the mounted Podman API.
-compute_drivers = ["docker"]
-sandbox_namespace = "mirror-neuron"
-default_image = "${OPENSHELL_SANDBOX_IMAGE:-$MN_DEFAULT_OPENSHELL_SANDBOX_IMAGE}"
-supervisor_image = "${OPENSHELL_SUPERVISOR_IMAGE:-$MN_DEFAULT_OPENSHELL_SUPERVISOR_IMAGE}"
-
-[openshell.gateway.gateway_jwt]
-signing_key_path = "${jwt_dir}/signing.pem"
-public_key_path = "${jwt_dir}/public.pem"
-kid_path = "${jwt_dir}/kid"
-gateway_id = "openshell"
-ttl_secs = 3600
-
-[openshell.gateway.auth]
-allow_unauthenticated_users = true
-
-[openshell.drivers.docker]
-default_image = "${OPENSHELL_SANDBOX_IMAGE:-$MN_DEFAULT_OPENSHELL_SANDBOX_IMAGE}"
-image_pull_policy = "IfNotPresent"
-sandbox_namespace = "mirror-neuron"
-grpc_endpoint = "http://openshell:${OPENSHELL_GATEWAY_PORT:-58080}"
-network_name = "${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
-EOF
   }
 
   function generate_mn_secret() {
@@ -7085,93 +6668,6 @@ EOF
     fi
   }
 
-  function resolve_openshell_gateway_bind_host() {
-    local network_name="$1"
-    local gateway
-
-    if [ -n "${OPENSHELL_GATEWAY_BIND_HOST:-}" ]; then
-      printf '%s\n' "$OPENSHELL_GATEWAY_BIND_HOST"
-      return 0
-    fi
-
-    if [ "$(uname -s)" != Linux ]; then
-      printf '127.0.0.1\n'
-      return 0
-    fi
-
-    gateway="$(podman network inspect -f '{{ (index .Subnets 0).Gateway }}' "$network_name" 2>/dev/null || true)"
-    printf '%s\n' "${gateway:-127.0.0.1}"
-  }
-
-  function reconcile_openshell_gateway_bind_host() {
-    local network_name="$1"
-    local desired_bind_host desired_endpoint current_bind_host current_endpoint tmp_env
-    desired_bind_host="$(resolve_openshell_gateway_bind_host "$network_name")"
-    desired_endpoint="${OPENSHELL_GATEWAY_ENDPOINT:-http://${desired_bind_host}:${OPENSHELL_GATEWAY_PORT:-58080}}"
-    current_bind_host="$(sed -n 's/^OPENSHELL_GATEWAY_BIND_HOST=//p' "$RUNTIME_COMPOSE_ENV" | tail -1)"
-    current_endpoint="$(sed -n 's/^OPENSHELL_GATEWAY_ENDPOINT=//p' "$RUNTIME_COMPOSE_ENV" | tail -1)"
-    if [ "$current_bind_host" = "$desired_bind_host" ] && [ "$current_endpoint" = "$desired_endpoint" ]; then
-      return 0
-    fi
-
-    tmp_env="${RUNTIME_COMPOSE_ENV}.tmp"
-    awk -v bind_host="$desired_bind_host" -v endpoint="$desired_endpoint" '
-        BEGIN { replaced_bind_host = 0; replaced_endpoint = 0 }
-        /^OPENSHELL_GATEWAY_BIND_HOST=/ {
-            if (!replaced_bind_host) print "OPENSHELL_GATEWAY_BIND_HOST=" bind_host
-            replaced_bind_host = 1
-            next
-        }
-        /^OPENSHELL_GATEWAY_ENDPOINT=/ {
-            if (!replaced_endpoint) print "OPENSHELL_GATEWAY_ENDPOINT=" endpoint
-            replaced_endpoint = 1
-            next
-        }
-        { print }
-        END {
-            if (!replaced_bind_host) print "OPENSHELL_GATEWAY_BIND_HOST=" bind_host
-            if (!replaced_endpoint) print "OPENSHELL_GATEWAY_ENDPOINT=" endpoint
-        }
-    ' "$RUNTIME_COMPOSE_ENV" >"$tmp_env"
-    mv "$tmp_env" "$RUNTIME_COMPOSE_ENV"
-    chmod 600 "$RUNTIME_COMPOSE_ENV" 2>/dev/null || true
-    if [ "$current_bind_host" != "$desired_bind_host" ]; then
-      mn_run_runtime_compose up -d --force-recreate openshell
-    fi
-  }
-
-  function wait_for_openshell_worker_service() {
-    local network_name="${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
-    local gateway_endpoint="http://openshell:${OPENSHELL_GATEWAY_PORT:-58080}"
-    local attempt=1
-    local max_attempts=60
-    local readiness_announced="N"
-
-    while [ "$attempt" -le "$max_attempts" ]; do
-      if mn_anonymous_podman run --pull=never --rm \
-        --network "$network_name" \
-        --entrypoint openshell \
-        mirror-neuron-core:latest \
-        --gateway-endpoint "$gateway_endpoint" \
-        sandbox list >/dev/null 2>&1; then
-        if [ "$readiness_announced" = "Y" ]; then
-          print_step "OpenShell gateway is ready."
-        fi
-        return 0
-      fi
-      if [ "$readiness_announced" != "Y" ]; then
-        print_step "Waiting for OpenShell gateway to become ready"
-        readiness_announced="Y"
-      fi
-      sleep 1
-      attempt=$((attempt + 1))
-    done
-
-    print_error "OpenShell worker service did not become ready at ${gateway_endpoint} after ${max_attempts} seconds."
-    print_error "Next: podman logs openshell-cluster-openshell"
-    return 1
-  }
-
   function ensure_runtime_host_directory() {
     local path="$1"
     local description="$2"
@@ -7206,7 +6702,7 @@ EOF
   }
 
   function write_runtime_compose_files() {
-    local context_auth_token profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_agents_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image litellm_gateway_bind_host openshell_gateway_bind_host openshell_gateway_endpoint api_host
+    local context_auth_token profiles network_name network_external network_token redis_password mn_cookie runtime_skills_root runtime_agents_root runtime_package_index context_memory_enabled otterdesk_context_memory_enabled membrane_engine_tag membrane_engine_image litellm_gateway_bind_host api_host
     local grpc_auth_token grpc_admin_token runtime_port_settings
     grpc_auth_token="$(resolve_secret_file "${MN_GRPC_AUTH_TOKEN:-}" "${INSTALL_DIR}/grpc_auth.token" "MN_GRPC_AUTH_TOKEN")"
     grpc_admin_token="$(resolve_secret_file "${MN_GRPC_ADMIN_TOKEN:-}" "${INSTALL_DIR}/grpc_admin.token" "MN_GRPC_ADMIN_TOKEN")"
@@ -7222,8 +6718,6 @@ EOF
     fi
     litellm_gateway_bind_host="${MN_LITELLM_GATEWAY_BIND_HOST:-0.0.0.0}"
     network_name="${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
-    openshell_gateway_bind_host="$(resolve_openshell_gateway_bind_host "$network_name")"
-    openshell_gateway_endpoint="${OPENSHELL_GATEWAY_ENDPOINT:-http://${openshell_gateway_bind_host}:${OPENSHELL_GATEWAY_PORT:-58080}}"
     network_external="$(resolve_docker_network_external "$network_name")"
     network_token="$(resolve_network_token)"
     redis_password="$(resolve_redis_password "mirror_neuron_password_admin")"
@@ -7252,13 +6746,8 @@ EOF
     ensure_runtime_host_directory "$MN_HOST_ARTIFACTS_DIR" "run artifacts host mount" "MN_HOST_ARTIFACTS_DIR"
     ensure_runtime_host_directory "$MN_HOST_BLOB_STORE_DIR" "blob store host mount" "MN_HOST_BLOB_STORE_DIR"
     ensure_runtime_host_directory "$MN_HOST_SHARED_STORAGE_ROOT" "shared storage host mount" "MN_HOST_SHARED_STORAGE_ROOT"
-    ensure_runtime_host_directory "$MN_HOST_OPENSHELL_CONFIG_DIR" "OpenShell config host mount" "MN_HOST_OPENSHELL_CONFIG_DIR"
-    ensure_runtime_host_directory "$MN_HOST_OPENSHELL_STATE_DIR" "OpenShell state host mount" "MN_HOST_OPENSHELL_STATE_DIR"
     prepare_litellm_gateway_config
     mn_write_runtime_compose_file "$RUNTIME_COMPOSE_TEMPLATE" "$RUNTIME_COMPOSE_FILE"
-    if [ "$INSTALL_OPENSHELL" = "Y" ]; then
-      write_openshell_compose_config
-    fi
     runtime_port_settings="$(mn_runtime_port_settings "$RUNTIME_COMPOSE_ENV")"
     cat >"$RUNTIME_COMPOSE_ENV" <<EOF
 COMPOSE_PROJECT_NAME=mirror-neuron
@@ -7274,7 +6763,6 @@ MN_SYNCTHING_GUI_PORT=${MN_SYNCTHING_GUI_PORT}
 MN_SYNCTHING_SYNC_PORT=${MN_SYNCTHING_SYNC_PORT}
 MN_SYNCTHING_RESCAN_INTERVAL_SECONDS=${MN_SYNCTHING_RESCAN_INTERVAL_SECONDS}
 MN_BLUEPRINT_PYTHON_ENVS_DIR=${MN_BLUEPRINT_PYTHON_ENVS_DIR}
-MN_HOST_OPENSHELL_CONFIG_DIR=${MN_HOST_OPENSHELL_CONFIG_DIR}
 MN_HOST_OPENSHELL_STATE_DIR=${MN_HOST_OPENSHELL_STATE_DIR}
 MN_MEMBRANE_SOURCE_MODE=$(mn_selected_membrane_source_mode)
 ENGINE_IMAGE=${membrane_engine_image}
@@ -7367,14 +6855,9 @@ MN_REDIS_RECONNECT_BACKOFF_MS=${MN_REDIS_RECONNECT_BACKOFF_MS:-250}
 MN_REDIS_RECONNECT_MAX_BACKOFF_MS=${MN_REDIS_RECONNECT_MAX_BACKOFF_MS:-2000}
 ERL_EPMD_ADDRESS=${ERL_EPMD_ADDRESS:-0.0.0.0}
 ERL_AFLAGS=${ERL_AFLAGS:--kernel inet_dist_listen_min ${MN_DIST_PORT:-54370} inet_dist_listen_max ${MN_DIST_PORT:-54370}}
-OPENSHELL_GATEWAY_PORT=${OPENSHELL_GATEWAY_PORT:-58080}
-OPENSHELL_GATEWAY_ENDPOINT=${openshell_gateway_endpoint}
-OPENSHELL_GATEWAY_BIND_HOST=${openshell_gateway_bind_host}
-OPENSHELL_GATEWAY_USER=${OPENSHELL_GATEWAY_USER}
+$(mn_openshell_plugin_env)
 MN_SYNCTHING_UID=${MN_SYNCTHING_UID}
 MN_SYNCTHING_GID=${MN_SYNCTHING_GID}
-OPENSHELL_GATEWAY_DOCKER_GROUP=${OPENSHELL_GATEWAY_DOCKER_GROUP}
-OPENSHELL_GATEWAY_IMAGE=${OPENSHELL_GATEWAY_IMAGE:-$MN_DEFAULT_OPENSHELL_GATEWAY_IMAGE}
 PODMAN_HOST_SOCKET=${PODMAN_HOST_SOCKET}
 COMPOSE_PARALLEL_LIMIT=${COMPOSE_PARALLEL_LIMIT:-1}
 MN_COOKIE=${mn_cookie}
@@ -7427,7 +6910,6 @@ EOF
     [ "$INSTALL_WEB_UI" = "Y" ] && RUNTIME_COMPOSE_SIDECARS+=("web-ui")
     grep -q '^  mn-native-sdk-grpc:' "$RUNTIME_COMPOSE_FILE" 2>/dev/null && RUNTIME_COMPOSE_SIDECARS+=("mn-native-sdk-grpc")
     grep -q '^  mn-litellm-proxy:' "$RUNTIME_COMPOSE_FILE" 2>/dev/null && RUNTIME_COMPOSE_SIDECARS+=("mn-litellm-proxy")
-    [ "$INSTALL_OPENSHELL" = "Y" ] && RUNTIME_COMPOSE_SIDECARS+=("openshell")
     if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
       RUNTIME_COMPOSE_SIDECARS+=("membrane-context-engine")
     fi
@@ -7444,10 +6926,6 @@ EOF
     prepare_runtime_compose_sidecars
     if [ "${#RUNTIME_COMPOSE_SIDECARS[@]}" -gt 0 ]; then
       mn_run_runtime_compose up -d --no-build "${RUNTIME_COMPOSE_SIDECARS[@]}"
-    fi
-    if [ "$INSTALL_OPENSHELL" = "Y" ]; then
-      reconcile_openshell_gateway_bind_host "${MN_DOCKER_NETWORK_NAME:-mirror-neuron-runtime}"
-      wait_for_openshell_worker_service
     fi
   }
 
@@ -7491,7 +6969,6 @@ EOF
     if [ "$MN_BUILD_MEMBRANE" != "Y" ]; then
       INSTALL_CONTEXT_ENGINE=$(ask "Enable the Membrane context engine?" "$INSTALL_CONTEXT_ENGINE")
     fi
-    INSTALL_OPENSHELL=$(ask "Enable OpenShell sandbox workers?" "$INSTALL_OPENSHELL")
     INSTALL_PYTHON_SDK=$(ask "Install the Python SDK?" "$INSTALL_PYTHON_SDK")
     INSTALL_AGENTS=$(ask "Install agent packages?" "$INSTALL_AGENTS")
     INSTALL_CLI=$(ask "Install the CLI?" "$INSTALL_CLI")
@@ -7549,7 +7026,7 @@ EOF
 
   mn_configure_installed_runtime
   mn_print_stage "Configuring commands and services"
-  if [ "$INSTALL_REDIS" = "Y" ] || [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] || [ "$INSTALL_OPENSHELL" = "Y" ] || [ "$INSTALL_WEB_UI" = "Y" ]; then
+  if [ "$INSTALL_REDIS" = "Y" ] || [ "$INSTALL_CONTEXT_ENGINE" = "Y" ] || [ "$INSTALL_WEB_UI" = "Y" ]; then
     if [ "$START_NOW" = "Y" ]; then
       prepare_runtime_compose_sidecars
       print_detail "Podman services are prepared; automatic startup uses the installed runtime lifecycle entry point."
@@ -7579,11 +7056,7 @@ EOF
 
   if [ "$START_NOW" = "Y" ]; then
     mn_print_stage "Starting MirrorNeuron services"
-    mn_prepare_openshell_gateway_for_start
     mn_run_runtime_start_command "$BIN_DIR/mn-runtime" start || return 1
-    if [ "$INSTALL_OPENSHELL" = "Y" ]; then
-      wait_for_openshell_worker_service
-    fi
     print_step "MirrorNeuron services are running."
   fi
 

@@ -90,16 +90,15 @@ policy. Explicit environment values override the saved range and pin it.
 The installer reports a Docker TCP port conflict and retains the startup log
 when a non-interactive startup fails.
 
-OpenShell certificate bootstrap uses anonymous registry credentials for the
-public NVIDIA gateway and the caller's credentials for a private gateway.
-When OpenShell is selected, automatic startup creates its Compose service and
-network before resolving the final host gateway endpoint. The installer
-persists that endpoint before `mn runtime start` launches the native SDK
-watchdog; it must not change the gateway address after the helper inherits it.
-Linux uses the resolved Docker bridge gateway, Docker Desktop uses loopback,
-and explicit bind/endpoint overrides remain authoritative. Preparation failure
-stops startup before the native helper launches. This ordering applies to
-binary, GitHub and local modes without changing immutable support snapshots.
+Every runtime install mode enables Wasmtime as the built-in sandbox. The
+installer records the node's OpenShell policy and connection settings in
+`docker-compose.env`. On the first OpenShell coworker the selected node installs
+its CLI, prepares the gateway keys and starts the profiled Compose service.
+The public NVIDIA gateway uses anonymous registry access during bootstrap.
+Private gateway images use the operator's registry credentials. An explicit
+gateway endpoint or name selects an existing service. For a Docker coworker, Podman builds the blueprint's Dockerfile in its declared
+context on the selected node and starts its service there.
+The base runtime uses the Podman engine for Core and its infrastructure.
 
 Python 3.12 is the standard runtime minor version across native services,
 HostLocal workers, Python containers, SDK components, agents, and skills.
@@ -130,7 +129,7 @@ restores the previous virtual environment.
 
 Runtime state and generated configuration live below the configured
 `MN_HOME` (documented default `~/.mn`), including private Python tools,
-commands, downloads, caches, and generated OpenShell configuration. All modes
+commands, downloads, caches, and the sandbox clients and configuration created on demand. All modes
 write `MN_HOME/env` and automatically maintain a marked shell startup block for
 the login shell: Bash interactive and selected login profiles, Zsh interactive
 and login profiles (honoring exported `ZDOTDIR`), Fish `conf.d` (honoring
