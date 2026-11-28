@@ -5,6 +5,7 @@ dev_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 source "$dev_dir/install.sh"
 if [ "$MN_INSTALL_MODE_EXPLICIT" = N ]; then MN_INSTALL_MODE=local; fi
 MN_BUILD_MEMBRANE=N
+MN_EXPERIMENTAL_SDK=N
 MN_MEMBRANE_BUILD_PREPARED=N
 
 function print_unified_usage() {
@@ -17,12 +18,13 @@ Usage: ./install_dev.sh [--mode local|github] [options]
   --mode github      Clone and build from GitHub. Use --version TAG to pin a release.
   --no-runtime       Build only the Wasm CLI, API and client support.
   --build-membrane   Build the local Membrane checkout with its runtime.
+  --use-experimental-sdk  Install mn-sdk for Rust/Python blueprints and host services.
   --interactive      Choose components and startup interactively.
   --no-start         Prepare services without starting them.
   --help-all         Show the full options for the selected source.
   -v, --verbose      Show build details.
 
-Run scripts/preapare_dev.sh to prepare the WASI SDK ahead of the first API build.
+Run scripts/preapare_dev.sh to prepare the WASI SDK and Podman ahead of installation.
 EOF
 }
 
@@ -35,6 +37,18 @@ function print_extended_usage() {
   --reset            Clear existing data after confirming with YES.
 
 EOF
+}
+
+function mn_experimental_sdk_manifest() {
+  local checkout=$1
+  if [ -f "$checkout/rust/Cargo.toml" ]; then
+    printf '%s\n' "$checkout/rust/Cargo.toml"
+  elif [ -f "$checkout/Cargo.toml" ]; then
+    printf '%s\n' "$checkout/Cargo.toml"
+  else
+    print_error "Missing mn-sdk workspace at $checkout. Expected rust/Cargo.toml."
+    return 1
+  fi
 }
 
 function mn_configure_install_mode() {
@@ -63,7 +77,9 @@ function mn_configure_install_mode() {
   local arg
   local -a remaining=()
   for arg in ${MN_INSTALL_ARGS[@]+"${MN_INSTALL_ARGS[@]}"}; do
-    if [ "$arg" = --build-membrane ]; then
+    if [ "$arg" = --use-experimental-sdk ] || [ "$arg" = --use-experiemental-sdk ]; then
+      MN_EXPERIMENTAL_SDK=Y
+    elif [ "$arg" = --build-membrane ]; then
       if [ "$MN_INSTALL_START_PODMAN" = Y ] || [ "$MN_INSTALL_DETECT_ONLY" = Y ]; then
         print_error "--build-membrane requires an installation."
         return 1
@@ -74,6 +90,15 @@ function mn_configure_install_mode() {
     fi
   done
   MN_INSTALL_ARGS=(${remaining[@]+"${remaining[@]}"})
+  if [ "$MN_EXPERIMENTAL_SDK" = Y ] && [ "$MN_INSTALL_HELP_REQUESTED" != Y ]; then
+    if [ "$MN_NO_RUNTIME" = Y ] || [ "$MN_INSTALL_START_PODMAN" = Y ] || [ "$MN_INSTALL_DETECT_ONLY" = Y ]; then
+      print_error "--use-experimental-sdk requires a runtime installation."
+      return 1
+    fi
+    if [ "$MN_INSTALL_MODE" = local ]; then
+      mn_experimental_sdk_manifest "$(mn_local_client_root)/mn-sdk" >/dev/null || return 1
+    fi
+  fi
   if [ "$MN_INSTALL_HELP_REQUESTED" != Y ] && [ "$MN_BUILD_MEMBRANE" = Y ]; then
     if [ "$MN_NO_RUNTIME" = Y ]; then
       print_error "--build-membrane conflicts with --no-runtime."
@@ -81,6 +106,159 @@ function mn_configure_install_mode() {
     fi
     mn_validate_membrane_build
   fi
+}
+
+# Install into a fresh virtual environment so switching backends never mixes SDKs.
+function mn_install_experimental_sdk() (
+  local checkout=$1
+  local agent_root=$2
+  local skills_root=$3 context_client=$4 manifest
+  manifest="$(mn_experimental_sdk_manifest "$checkout")" || return 1
+  sdk_target="$(mktemp -d "${TMPDIR:-/tmp}/mn-sdk-build.XXXXXXXX")" || return 1
+  trap 'rm -rf -- "$sdk_target"' EXIT
+  set -e
+  cargo build --locked --release --manifest-path "$manifest" --target-dir "$sdk_target" \
+    -p mn-sdk-cli -p mn-sdk-runtime --bins || exit 1
+  local name
+  for name in mn-sdk mn-runtime mn-native-sdk-grpc; do
+    install -m 755 "$sdk_target/release/$name" "$VENV_DIR/bin/$name" || exit 1
+  done
+  # Core's Python worker bridge installs this same wheel on the selected node.
+  local wheel_root="$VENV_DIR/share/mn-sdk/wheels"
+  mkdir -p "$wheel_root" || exit 1
+  "$VENV_DIR/bin/python" -m pip wheel --no-deps --wheel-dir "$sdk_target/wheels" "$checkout/python" || exit 1
+  local -a sdk_wheels=("$sdk_target/wheels"/mn_sdk-*.whl)
+  [ "${#sdk_wheels[@]}" -eq 1 ] && [ -f "${sdk_wheels[0]}" ] || exit 1
+  "$VENV_DIR/bin/python" -m pip install "${sdk_wheels[0]}[source-providers]" || exit 1
+  local wheel_name="${sdk_wheels[0]##*/}"
+  install -m 644 "${sdk_wheels[0]}" "$wheel_root/$wheel_name" || exit 1
+  printf '%s\n' "$wheel_name" >"$wheel_root/worker-wheel.tmp" || exit 1
+  mv -f "$wheel_root/worker-wheel.tmp" "$wheel_root/worker-wheel" || exit 1
+  if [ -n "$context_client" ]; then
+    "$VENV_DIR/bin/python" -m pip install "$context_client" || exit 1
+  fi
+  mkdir -p "$VENV_DIR/share" || exit 1
+  "$VENV_DIR/bin/mn-sdk" install-agents "$agent_root" "$VENV_DIR/share/mn-agents" || exit 1
+  local -a provider_sources=(--agents "$agent_root")
+  if [ -n "$skills_root" ]; then
+    provider_sources+=(--skills "$skills_root")
+    "$VENV_DIR/bin/python" -m pip install --no-deps "$checkout/python/local_connections" || exit 1
+  fi
+  "$VENV_DIR/bin/python" -I -m mn_sdk.integrations.local_providers "${provider_sources[@]}" || exit 1
+  "$VENV_DIR/bin/python" -I -c 'import mn_sdk; from mn_sdk.blueprints import compile_blueprint' || exit 1
+  "$VENV_DIR/bin/mn-runtime" --version >/dev/null
+)
+
+function mn_github_sdk_skills_root() (
+  if [ -n "${MN_SKILLS_ROOT:-}" ]; then
+    (cd "$MN_SKILLS_ROOT" && pwd -P)
+    return
+  fi
+  local base="$INSTALL_DIR/skill-catalogs/mn-skills" staged revision
+  mkdir -p "$base" || exit 1
+  staged="$(mktemp -d "$base/.checkout.XXXXXXXX")" || exit 1
+  trap 'rm -rf "$staged"' EXIT
+  github_clone "https://github.com/MirrorNeuronLab/mn-skills.git" "$staged/source" >&2 || exit 1
+  revision="$(git -C "$staged/source" rev-parse --verify HEAD)" || exit 1
+  if [ ! -d "$base/$revision" ]; then
+    mv "$staged/source" "$base/$revision" || exit 1
+  fi
+  printf '%s\n' "$base/$revision"
+)
+
+# An existing supervisor must stop its own children before its venv is replaced.
+function mn_dev_stop_previous_backend() {
+  [ -x "$BIN_DIR/mn-runtime" ] && [ -d "$VENV_DIR" ] || return 0
+  local previous=python requested=python
+  if [ -x "$VENV_DIR/bin/mn-sdk" ] && [ -x "$VENV_DIR/bin/mn-native-sdk-grpc" ]; then previous=rust; fi
+  if [ "$MN_EXPERIMENTAL_SDK" = Y ]; then requested=rust; fi
+  [ "$previous" != "$requested" ] || return 0
+  print_step "Stopping the previous SDK host"
+  MN_HOME="$INSTALL_DIR" "$BIN_DIR/mn-runtime" stop
+}
+
+# Both source modes build the venv at its final path. Python console entry
+# points embed that path. Keep the previous launcher family until verification.
+function mn_dev_begin_sdk_install() {
+  MN_DEV_SDK_BACKUP="$(mktemp -d "$INSTALL_DIR/.sdk-previous.XXXXXXXX")" || return 1
+  mkdir -p "$MN_DEV_SDK_BACKUP/bin" || return 1
+  local item
+  for item in bin/mn-sdk bin/mn-runtime server.sh install_metadata.json; do
+    if [ -e "$INSTALL_DIR/$item" ] || [ -L "$INSTALL_DIR/$item" ]; then
+      cp -pP "$INSTALL_DIR/$item" "$MN_DEV_SDK_BACKUP/$item" || return 1
+    fi
+  done
+  if [ -e "$VENV_DIR" ] || [ -L "$VENV_DIR" ]; then
+    mv "$VENV_DIR" "$MN_DEV_SDK_BACKUP/venv" || return 1
+  fi
+  trap 'mn_dev_restore_sdk_install; mn_reset_release_lock' EXIT
+}
+
+function mn_dev_restore_sdk_install() {
+  [ -d "${MN_DEV_SDK_BACKUP:-}" ] || return 0
+  rm -rf "$VENV_DIR"
+  local item
+  for item in bin/mn-sdk bin/mn-runtime server.sh install_metadata.json; do
+    if [ -e "$MN_DEV_SDK_BACKUP/$item" ] || [ -L "$MN_DEV_SDK_BACKUP/$item" ]; then
+      mv -f "$MN_DEV_SDK_BACKUP/$item" "$INSTALL_DIR/$item" || return 1
+    else
+      rm -f "$INSTALL_DIR/$item" || return 1
+    fi
+  done
+  if [ -e "$MN_DEV_SDK_BACKUP/venv" ] || [ -L "$MN_DEV_SDK_BACKUP/venv" ]; then
+    mv "$MN_DEV_SDK_BACKUP/venv" "$VENV_DIR" || return 1
+    print_error "SDK installation failed; restored the previous virtual environment at $VENV_DIR."
+  fi
+  rm -rf "$MN_DEV_SDK_BACKUP"
+  MN_DEV_SDK_BACKUP=""
+}
+
+function mn_dev_commit_sdk_install() {
+  trap mn_reset_release_lock EXIT
+  rm -rf "$MN_DEV_SDK_BACKUP"
+  MN_DEV_SDK_BACKUP=""
+}
+
+function mn_dev_configure_installed_runtime() {
+  if [ "$MN_EXPERIMENTAL_SDK" != Y ]; then
+    mn_configure_installed_runtime || return 1
+    # Remove only the Rust SDK launcher written by this installer.
+    # shellcheck disable=SC2016
+    if [ -f "$BIN_DIR/mn-sdk" ] && grep -Fq 'exec "$MN_HOME/venv/bin/mn-sdk"' "$BIN_DIR/mn-sdk"; then
+      rm -f "$BIN_DIR/mn-sdk" || return 1
+    fi
+    return 0
+  fi
+  mn_install_wac || return 1
+  export PATH="$BIN_DIR:$PATH"
+  local client_command
+  for client_command in "$INSTALL_DIR"/client-current/bin/*; do
+    [ -e "$client_command" ] || continue
+    client_command="${client_command##*/}"
+    ln -sfn "$BIN_DIR/$client_command" "$VENV_DIR/bin/$client_command"
+  done
+  MN_HOME="$INSTALL_DIR" "$VENV_DIR/bin/mn-runtime" prepare --role "$MN_INSTALL_ROLE" || return 1
+  "$VENV_DIR/bin/python" - "$INSTALL_DIR" <<'PY_MN_SDK_LAUNCHER'
+import os
+from pathlib import Path
+import shlex
+import sys
+import tempfile
+
+home = Path(sys.argv[1]).resolve()
+for destination, binary in (("bin/mn-runtime", "mn-runtime"), ("server.sh", "mn-runtime"), ("bin/mn-sdk", "mn-sdk")):
+    target = home / destination
+    with tempfile.NamedTemporaryFile(mode="w", dir=target.parent, delete=False) as script:
+        script.write("#!/usr/bin/env bash\nset -eu\nexport MN_HOME=" + shlex.quote(str(home))
+                     + '\nexport PATH="$MN_HOME/bin:$PATH"\n'
+                     + 'export MN_AGENTS_ROOT="${MN_AGENTS_ROOT:-$MN_HOME/venv/share/mn-agents}"\n'
+                     + 'exec "$MN_HOME/venv/bin/' + binary + '" "$@"\n')
+    os.chmod(script.name, 0o700)
+    os.replace(script.name, target)
+PY_MN_SDK_LAUNCHER
+  function runtime_compose() {
+    MN_HOME="$INSTALL_DIR" "$VENV_DIR/bin/mn-runtime" compose -- "$@"
+  }
 }
 
 function mn_preflight_reset() {
@@ -340,7 +518,7 @@ function mn_stage_client_commands() {
     case "$command" in mn) repo=mn-cli ;; mn-web-ui-server | mn-api) repo=mn-api ;; *) repo=mn-client-support ;; esac
     if [ "$command" = mn-api ] && [ -z "${CC_wasm32_wasip2:-}${WASI_SDK_PATH:-}" ] &&
       ! command -v wasm32-wasip2-clang >/dev/null; then
-      WASI_SDK_PATH=$("$dev_dir/scripts/preapare_dev.sh") || return 1
+      WASI_SDK_PATH=$("$dev_dir/scripts/preapare_dev.sh" --wasi-only) || return 1
       export WASI_SDK_PATH
     fi
     if [ "$command" = mn-web-ui-server ]; then
@@ -751,6 +929,7 @@ Options:
   --redis / --no-redis          Enable or skip Redis Podman setup.
   --context-engine / --no-context-engine
                                 Enable or skip Membrane context engine setup.
+  --use-experimental-sdk        Use the Rust-based SDK and runtime host.
   --build-membrane              Applies only to --mode local. GitHub installs use the released image.
   --openshell / --no-openshell  Allow or disable on-demand OpenShell workers.
   --syncthing / --no-syncthing  Enable or skip Syncthing shared-storage replication.
@@ -1430,9 +1609,13 @@ EOF
 
   mn_begin_runtime_install || return 1
   resolve_python_runtime
+  mn_dev_stop_previous_backend || return 1
   if [ "$EXISTING_INSTALL" = "Y" ]; then
     print_step "Preparing fresh install"
-    mn_remove_existing_install_paths
+    mn_reconcile_native_resources_before_reinstall
+    mn_stop_runtime_containers_for_reinstall
+    if [ "$INSTALL_CLI" != Y ]; then mn_remove_path_or_exit "$BIN_DIR/mn" "MirrorNeuron CLI executable"; fi
+    if [ "$INSTALL_API" != Y ]; then mn_remove_path_or_exit "$BIN_DIR/mn-api" "MirrorNeuron API executable"; fi
   fi
 
   print_step "Installing MirrorNeuron Core (Podman)"
@@ -1450,33 +1633,52 @@ EOF
     mn_run_podman_build -t mirror-neuron-core .
   ) &
   spinner $! "Cloning and building Core (Podman image mirror-neuron-core)"
+  if [ "$MN_EXPERIMENTAL_SDK" = Y ]; then
+    MN_SKILLS_ROOT="$(mn_github_sdk_skills_root)" || return 1
+  fi
   write_runtime_compose_files
 
-  print_step "Installing the runtime and selected Python components from GitHub"
-  (
-    "$MN_PYTHON_BIN" -m venv "$VENV_DIR" >/dev/null 2>&1
-    run_quiet "pip-upgrade" "$VENV_DIR/bin/pip" install --upgrade pip
-    # The Git runtime depends on the worker SDK even when only a surface was
-    # explicitly selected. Use the requested ref in each source repository.
-    local sdk_reference
-    sdk_reference="git+https://github.com/MirrorNeuronLab/mn-python-sdk.git$(github_ref_suffix)"
-    local -a sdk_requirements=("mirrorneuron-python-sdk @ $sdk_reference")
-    local package_name package_path package_extras component_rows
-    component_rows="$(mn_sdk_component_rows sdk)" || return 1
-    while IFS=$'\t' read -r package_name package_path package_extras; do
-      [ -n "$package_name" ] || continue
-      sdk_requirements+=("${package_name}${package_extras} @ ${sdk_reference}#subdirectory=${package_path#mn-python-sdk/}")
-    done <<<"$component_rows"
-    run_quiet "install-mn-python-sdk-github" "$VENV_DIR/bin/pip" install "${sdk_requirements[@]}"
-    run_quiet "install-mn-runtime-github" "$VENV_DIR/bin/pip" install "mirrorneuron-runtime @ git+https://github.com/MirrorNeuronLab/mn-python-sdk.git$(github_ref_suffix)#subdirectory=packages/runtime"
-    if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
-      run_quiet "install-membrane-python-sdk-github" "$VENV_DIR/bin/pip" install "mirrorneuron-membrane-python-sdk @ git+$(context_engine_git_url)$(github_ref_suffix)#subdirectory=mn-context-engine-python-sdk"
-    fi
-  ) &
-  spinner $! "Setting up virtualenv and installing Python packages"
+  mn_dev_begin_sdk_install || return 1
+  if [ "$MN_EXPERIMENTAL_SDK" = Y ]; then
+    print_step "Building mn-sdk and its host services from GitHub"
+    (
+      local source_dir="$MN_DEV_SDK_BACKUP/source"
+      github_clone "https://github.com/MirrorNeuronLab/mn-sdk.git" "$source_dir" || exit 1
+      "$MN_PYTHON_BIN" -m venv "$VENV_DIR" || exit 1
+      local context_client=""
+      if [ "$INSTALL_CONTEXT_ENGINE" = Y ]; then
+        context_client="mirrorneuron-membrane-python-sdk[grpc] @ git+$(context_engine_git_url)$(github_ref_suffix)#subdirectory=mn-context-engine-python-sdk"
+      fi
+      mn_install_experimental_sdk "$source_dir" "$(ensure_agent_catalog_root)" "$MN_SKILLS_ROOT" "$context_client"
+    ) || return 1
+  else
+    print_step "Installing the runtime and selected Python components from GitHub"
+    (
+      "$MN_PYTHON_BIN" -m venv "$VENV_DIR" >/dev/null 2>&1
+      run_quiet "pip-upgrade" "$VENV_DIR/bin/pip" install --upgrade pip
+      # The Git runtime depends on the worker SDK even when only a surface was
+      # explicitly selected. Use the requested ref in each source repository.
+      local sdk_reference
+      sdk_reference="git+https://github.com/MirrorNeuronLab/mn-python-sdk.git$(github_ref_suffix)"
+      local -a sdk_requirements=("mirrorneuron-python-sdk @ $sdk_reference")
+      local package_name package_path package_extras component_rows
+      component_rows="$(mn_sdk_component_rows sdk)" || return 1
+      while IFS=$'\t' read -r package_name package_path package_extras; do
+        [ -n "$package_name" ] || continue
+        sdk_requirements+=("${package_name}${package_extras} @ ${sdk_reference}#subdirectory=${package_path#mn-python-sdk/}")
+      done <<<"$component_rows"
+      run_quiet "install-mn-python-sdk-github" "$VENV_DIR/bin/pip" install "${sdk_requirements[@]}"
+      run_quiet "install-mn-runtime-github" "$VENV_DIR/bin/pip" install "mirrorneuron-runtime @ git+https://github.com/MirrorNeuronLab/mn-python-sdk.git$(github_ref_suffix)#subdirectory=packages/runtime"
+      if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
+        run_quiet "install-membrane-python-sdk-github" "$VENV_DIR/bin/pip" install "mirrorneuron-membrane-python-sdk @ git+$(context_engine_git_url)$(github_ref_suffix)#subdirectory=mn-context-engine-python-sdk"
+      fi
+    ) &
+    spinner $! "Setting up virtualenv and installing Python packages"
+  fi
 
   mn_install_web_package "${MN_WEB_UI_DIST_DIR:-}" "$INSTALL_DIR/webui"
-  mn_configure_installed_runtime
+  mn_dev_configure_installed_runtime || return 1
+  mn_dev_commit_sdk_install
 
   if [ "$INSTALL_CLI" = "Y" ]; then
     print_detail "CLI: mn"
@@ -1796,6 +1998,7 @@ Options:
   --no-redis            Skip Redis Podman setup.
   --context-engine      Install/start Membrane context engine.
   --no-context-engine   Skip Membrane context engine setup.
+  --use-experimental-sdk  Use the Rust-based SDK and runtime host.
   --build-membrane      Build local Membrane source instead of pulling GAR.
                         Override source location with MN_MEMBRANE_DIR.
   --openshell           Allow on-demand OpenShell workers (default).
@@ -1985,7 +2188,7 @@ EOF
       exit 1
     fi
 
-    for source_path in "$CORE_DIR" "$CLI_DIR" "$API_DIR" "$PY_SDK_DIR" "$CLIENT_SUPPORT_DIR" \
+    for source_path in "$CORE_DIR" "$CLI_DIR" "$API_DIR" "$PY_SDK_DIR" "$WORKSPACE_DIR/mn-sdk" "$CLIENT_SUPPORT_DIR" \
       "$WEB_UI_DIR" "$SKILLS_DIR" "$BLUEPRINTS_DIR" "$DOCS_DIR" "$SYSTEM_TESTS_DIR" "$MEMBRANE_DIR"; do
       if [ "$install_path" = "$(canonical_path "$source_path")" ]; then
         print_error "Refusing to install MirrorNeuron state into source directory: ${INSTALL_DIR}"
@@ -2013,16 +2216,24 @@ EOF
   }
 
   function write_local_install_metadata() {
-    local metadata_file="${INSTALL_DIR}/install_metadata.json"
-    local updated_at
-    updated_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-    cat >"$metadata_file" <<EOF
-{
-  "install_type": "local_source",
-  "source_workspace": "${WORKSPACE_DIR}",
-  "updated_at": "${updated_at}"
-}
-EOF
+    "$MN_PYTHON_BIN" - "$INSTALL_DIR/install_metadata.json" "$WORKSPACE_DIR" "$MN_EXPERIMENTAL_SDK" <<'PY_DEV_METADATA'
+from datetime import datetime, timezone
+import json
+import os
+from pathlib import Path
+import sys
+import tempfile
+
+path = Path(sys.argv[1])
+metadata = json.loads(path.read_bytes()) if path.exists() else {}
+metadata.update(install_type="local_source", source_workspace=sys.argv[2],
+                sdk_backend="rust" if sys.argv[3] == "Y" else "python",
+                updated_at=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
+with tempfile.NamedTemporaryFile("w", dir=path.parent, delete=False) as updated:
+    json.dump(metadata, updated, indent=2)
+    updated.write("\n")
+os.replace(updated.name, path)
+PY_DEV_METADATA
   }
 
   function generate_mn_cookie() {
@@ -2441,10 +2652,15 @@ EOF
   require_dir "$CORE_DIR" "MirrorNeuron core"
   require_file "$CORE_DIR/Dockerfile" "MirrorNeuron Dockerfile"
   require_mix_project_file "$CORE_DIR/mix.exs"
-  require_dir "$PY_SDK_DIR" "mn-python-sdk"
-  for component_project in "$PY_SDK_DIR"/packages/*/pyproject.toml; do
-    require_file "$component_project" "SDK component project"
-  done
+  if [ "$MN_EXPERIMENTAL_SDK" = Y ]; then
+    mn_experimental_sdk_manifest "$WORKSPACE_DIR/mn-sdk" >/dev/null || return 1
+    require_file "$WORKSPACE_DIR/mn-sdk/python/pyproject.toml" "mn-sdk Python bindings"
+  else
+    require_dir "$PY_SDK_DIR" "mn-python-sdk"
+    for component_project in "$PY_SDK_DIR"/packages/*/pyproject.toml; do
+      require_file "$component_project" "SDK component project"
+    done
+  fi
 
   if [ "$INSTALL_WEB_UI" = "Y" ]; then require_dir "$WEB_UI_DIR" "mn-web-ui"; fi
   if [ "$INSTALL_SKILLS" = "Y" ]; then require_dir "$SKILLS_DIR" "mn-skills"; fi
@@ -2454,6 +2670,7 @@ EOF
   fi
 
   resolve_python_runtime
+  mn_dev_stop_previous_backend || return 1
 
   print_step "Preparing local install state"
   mkdir -p "$INSTALL_DIR" "$BIN_DIR" "$INSTALL_DIR/.pids" "$INSTALL_DIR/.logs"
@@ -2466,8 +2683,11 @@ EOF
   replace_symlink "$CORE_DIR" "$INSTALL_DIR/core-source"
   replace_symlink "$CLI_DIR" "$INSTALL_DIR/cli-source"
   replace_symlink "$API_DIR" "$INSTALL_DIR/api-source"
-  replace_symlink "$PY_SDK_DIR" "$INSTALL_DIR/python-sdk-source"
-  write_local_install_metadata
+  if [ "$MN_EXPERIMENTAL_SDK" = Y ]; then
+    replace_symlink "$WORKSPACE_DIR/mn-sdk" "$INSTALL_DIR/sdk-source"
+  else
+    replace_symlink "$PY_SDK_DIR" "$INSTALL_DIR/python-sdk-source"
+  fi
   print_step "Writing Compose runtime configuration"
   write_runtime_compose_files
   print_detail "Local component links: ${INSTALL_DIR}"
@@ -2481,8 +2701,9 @@ EOF
 
   function install_local_editable_python_packages() {
     local -a editable_requirements=(-e "${PY_SDK_DIR}")
-    local component_pyproject skill_pyproject agent_pyproject
-    local agents_root="${MN_AGENTS_ROOT:-$AGENTS_DIR}"
+    local bindings agents_root="${MN_AGENTS_ROOT:-$AGENTS_DIR}"
+    bindings="$(dirname "$PY_SDK_DIR")/mn-sdk/python"
+    local component_pyproject skill_pyproject handler_packages package
     # Local mode must keep the complete SDK component family on source paths.
     # Otherwise pip can resolve a CLI/API dependency (for example MCP) from GAR
     # even though its sibling checkout is present, or fail when it is unpublished.
@@ -2490,16 +2711,45 @@ EOF
       [ -f "$component_pyproject" ] || continue
       editable_requirements+=(-e "$(dirname "$component_pyproject")")
     done
+    # Legacy compilers load the neutral WIT graph through a StepSpec factory.
+    if [ -f "$bindings/wit_authoring/pyproject.toml" ]; then
+      editable_requirements+=(-e "$bindings/wit_authoring")
+    fi
     if [ "$INSTALL_CONTEXT_ENGINE" = "Y" ]; then
       editable_requirements+=(-e "$MEMBRANE_DIR/mn-context-engine-python-sdk")
     fi
-    # Block compilation fingerprints its selected default implementations before
-    # isolated worker preparation, including the supervised-service agent.
-    for agent_pyproject in "$agents_root"/*/pyproject.toml; do
-      [ -f "$agent_pyproject" ] || continue
-      editable_requirements+=(-e "$(dirname "$agent_pyproject")")
-    done
+    # Runtime-node templates come from the JSON catalog. Only executable Python
+    # handler factories need local distributions for import and block locking.
+    if [ -f "$agents_root/index.json" ]; then
+      handler_packages="$(
+        "$MN_PYTHON_BIN" - "$agents_root" <<'PY_HANDLER_PACKAGES'
+import json
+from pathlib import Path
+import sys
+
+root = Path(sys.argv[1]).resolve()
+for entry in json.loads((root / "index.json").read_bytes())["agents"]:
+    if entry["package_kind"] == "handler_factory":
+        descriptor = (root / entry["resource_path"]).resolve(strict=True)
+        folder = (root / descriptor.relative_to(root).parts[0]).resolve(strict=True)
+        if (folder / "pyproject.toml").is_file():
+            print(folder)
+PY_HANDLER_PACKAGES
+      )" || return 1
+      while IFS= read -r package; do
+        if [ -n "$package" ]; then editable_requirements+=(-e "$package"); fi
+      done <<<"$handler_packages"
+    else
+      # Older agent source checkouts identify their distributions by pyproject.
+      for package in "$agents_root"/*/pyproject.toml; do
+        [ -f "$package" ] || continue
+        editable_requirements+=(-e "$(dirname "$package")")
+      done
+    fi
     if [ "$INSTALL_SKILLS" = "Y" ]; then
+      if [ -f "$bindings/local_connections/pyproject.toml" ]; then
+        editable_requirements+=(-e "$bindings/local_connections")
+      fi
       for skill_pyproject in "$SKILLS_DIR"/*/pyproject.toml; do
         [ -f "$skill_pyproject" ] || continue
         editable_requirements+=(-e "$(dirname "$skill_pyproject")")
@@ -2509,49 +2759,32 @@ EOF
     "$VENV_DIR/bin/pip" install "${editable_requirements[@]}"
   }
 
-  VENV_BACKUP_DIR=""
-  VENV_INSTALL_OK="N"
-  function restore_local_venv_backup_on_failure() {
-    if [ "$VENV_INSTALL_OK" = "Y" ]; then
-      if [ -n "$VENV_BACKUP_DIR" ]; then
-        rm -rf "$VENV_BACKUP_DIR"
-      fi
-      return
-    fi
+  mn_dev_begin_sdk_install || return 1
 
-    rm -rf "$VENV_DIR"
-    if [ -n "$VENV_BACKUP_DIR" ] && { [ -e "$VENV_BACKUP_DIR" ] || [ -L "$VENV_BACKUP_DIR" ]; }; then
-      mv "$VENV_BACKUP_DIR" "$VENV_DIR"
-      print_error "Local Python install failed; restored the previous virtual environment at $VENV_DIR."
-    fi
-  }
-
-  if [ -e "$VENV_DIR" ] || [ -L "$VENV_DIR" ]; then
-    VENV_BACKUP_DIR="${VENV_DIR}.backup.$$"
-    rm -rf "$VENV_BACKUP_DIR"
-    mv "$VENV_DIR" "$VENV_BACKUP_DIR"
+  if [ "$MN_EXPERIMENTAL_SDK" = Y ]; then
+    print_step "Building mn-sdk and its host services from local source"
+    "$MN_PYTHON_BIN" -m venv "$VENV_DIR"
+    local skills_root="" context_client=""
+    if [ "$INSTALL_SKILLS" = Y ]; then skills_root="${MN_SKILLS_ROOT:-$SKILLS_DIR}"; fi
+    if [ "$INSTALL_CONTEXT_ENGINE" = Y ]; then context_client="$MEMBRANE_DIR/mn-context-engine-python-sdk[grpc]"; fi
+    mn_install_experimental_sdk "$WORKSPACE_DIR/mn-sdk" "${MN_AGENTS_ROOT:-$AGENTS_DIR}" "$skills_root" "$context_client"
+  else
+    print_step "Installing Python components from local source"
+    (
+      mn_run_logged "local Python virtual environment" "$MN_PYTHON_BIN" -m venv "$VENV_DIR"
+      mn_run_logged "pip upgrade" "$VENV_DIR/bin/pip" install --upgrade pip
+      mn_run_logged "local editable Python packages" install_local_editable_python_packages
+    ) &
+    spinner $! "Installing local editable Python packages"
+    "$VENV_DIR/bin/python" -c 'import mn_sdk, mn_runtime' || {
+      print_error "Local SDK and runtime source checkouts are not import-compatible."
+      exit 1
+    }
   fi
-  trap 'restore_local_venv_backup_on_failure; mn_reset_release_lock' EXIT
-
-  print_step "Installing Python components from local source"
-  (
-    mn_run_logged "local Python virtual environment" "$MN_PYTHON_BIN" -m venv "$VENV_DIR"
-    mn_run_logged "pip upgrade" "$VENV_DIR/bin/pip" install --upgrade pip
-    mn_run_logged "local editable Python packages" install_local_editable_python_packages
-  ) &
-  spinner $! "Installing local editable Python packages"
-  "$VENV_DIR/bin/python" -c 'import mn_sdk, mn_runtime' || {
-    print_error "Local SDK and runtime source checkouts are not import-compatible."
-    exit 1
-  }
-  VENV_INSTALL_OK="Y"
-  if [ -n "$VENV_BACKUP_DIR" ]; then
-    rm -rf "$VENV_BACKUP_DIR"
-  fi
-  trap mn_reset_release_lock EXIT
-
   mn_install_web_package "${MN_WEB_UI_DIST_DIR:-}" "$WEB_UI_DIR" "$INSTALL_DIR/webui"
-  mn_configure_installed_runtime
+  mn_dev_configure_installed_runtime || return 1
+  write_local_install_metadata || return 1
+  mn_dev_commit_sdk_install
 
   print_detail "Core image: mirror-neuron-core:latest (${CORE_DIR})"
   print_detail "CLI/API: Wasm builds from the local workspace"

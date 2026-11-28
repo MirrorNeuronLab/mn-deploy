@@ -2,7 +2,8 @@
 
 ## Installer interface
 
-The OtterDesk Installer shows the selected mode, home, components, host
+The installer opens with a Mirrorneuron ASCII banner and the selected installer
+version in a terminal. It shows the selected mode, home, components, host
 architecture, memory and detected GPU. A full install prepares the Wasm
 client commands before setting up Podman and the execution runtime. The
 installer reports when each part is ready and when runtime startup has passed
@@ -60,18 +61,20 @@ checkouts. Set `MN_CLIENT_SOURCE_ROOT` to select a different client workspace.
 A missing `mn-client-support` sibling is cloned from `main`. Use
 `./install_dev.sh --mode github` for GitHub sources and `--help-all` for options.
 
-Install Rust with rustup. The developer installer prepares the Rust
-`wasm32-wasip2` target and uses the WASI C toolchain to compile SQLite for
-`mn-api`. To prepare it separately, run `./scripts/preapare_dev.sh`.
+Install Rust with rustup. Run `./scripts/preapare_dev.sh` to prepare the Rust
+`wasm32-wasip2` target, the WASI C toolchain used to build `mn-api`, and Podman.
+The script installs Podman if needed and verifies its API before reporting success.
 On Linux (including ARM64 Spark) and macOS, it downloads the host's pinned
 WASI SDK, verifies its SHA-256 checksum, and caches it under
 `${XDG_DATA_HOME:-$HOME/.local/share}/mirrorneuron/dev`. Subsequent builds
 reuse it. An existing `WASI_SDK_PATH` or target compiler takes precedence.
+`./scripts/preapare_dev.sh --wasi-path` checks and prints the installed SDK
+path for callers that already have the `wasm32-wasip2` target.
 
 For a standalone artifact build, use the SDK directory printed by the script.
 
 ```bash
-WASI_SDK_PATH=$(./scripts/preapare_dev.sh) && export WASI_SDK_PATH
+WASI_SDK_PATH=$(./scripts/preapare_dev.sh --wasi-only) && export WASI_SDK_PATH
 ./scripts/artifacts.sh clients /path/to/dist --wasm-only
 ```
 
@@ -223,6 +226,12 @@ and workloads run in a Podman machine. The installer accepts the machine's API
 socket as either an absolute path or a `unix://` URI and checks the path before
 reset deletes any data. The Compose provider runs in a pinned container.
 
+On macOS, developer setup, runtime installation, and uninstallation start the
+selected local Podman machine if it is stopped. If the machine reports running
+and still refuses connections after the readiness check, the scripts restart
+it once. This interrupts its containers. Runtime installation and cleanup
+require `podman info` to succeed.
+
 Start an existing engine or machine with:
 
 ```bash
@@ -268,9 +277,11 @@ Install the local runtime:
 ```
 
 The final `mn node add` command uses the installed runtime's advertised Core
-gRPC endpoint and its runtime control token from `MN_HOME/runtime.token`.
-Treat captured installer output as a credential. The command includes
-`--grpc-port` when the advertised port differs from `55051`.
+gRPC host. If the endpoint reports a loopback or wildcard address, the
+installer uses a configured network host or detects the host's LAN IP. The
+command includes the runtime control token from `MN_HOME/runtime.token` and
+`--grpc-port` when the advertised port differs from `55051`. Treat captured
+installer output as a credential.
 
 Install a specific release:
 
@@ -878,3 +889,9 @@ Its offline phase runs worker SDK supervision
 and endpoint-publication contracts plus `tests/test_job_ui_proxy.py`. The
 `--two-runtimes` phase exercises the browser URL through the real HTTP surface
 and both native gateways, including assets, video streaming and WebSockets.
+
+## Experimental SDK
+
+`./install_dev.sh --use-experimental-sdk --no-start` builds the Rust-based `mn-sdk`, its Python authoring interface and its native host lifecycle commands. Local mode reads the sibling `mn-sdk` checkout. GitHub mode builds the selected source ref. Omit the flag to use the existing Python SDK.
+
+The experimental source install reads agent templates from the portable catalog. It installs executable handler factories and the selected WIT skill providers into the host environment. GitHub mode keeps the skill checkout under its commit ID. When Membrane is enabled, the installer includes its gRPC client for source indexing and review memory.

@@ -1,16 +1,20 @@
 #!/usr/bin/env bash
-# Prepare the Rust target and C toolchain used to build mn-api.wasm.
+# Prepare the WASI toolchain and Podman for development.
 set -euo pipefail
 
+usage='Usage: ./scripts/preapare_dev.sh [--wasi-only | --wasi-path]'
 if [[ ${1:-} == --help || ${1:-} == -h ]]; then
-  echo 'Usage: ./scripts/preapare_dev.sh'
-  echo 'Prepare the WASI development tools and print the SDK directory for WASI_SDK_PATH.'
+  echo "$usage"
+  echo 'Prepare WASI development tools and start Podman. Print the SDK directory for WASI_SDK_PATH.'
+  echo 'Use --wasi-only to prepare the toolchain for a standalone client build.'
+  echo 'Use --wasi-path to check and print a toolchain that is already installed.'
   exit 0
 fi
-if [[ $# -ne 0 ]]; then
-  echo 'Usage: ./scripts/preapare_dev.sh' >&2
+if [[ $# -gt 1 || ($# -eq 1 && $1 != --wasi-only && $1 != --wasi-path) ]]; then
+  echo "$usage" >&2
   exit 2
 fi
+mode=${1:-}
 
 export PATH="$PATH:${CARGO_HOME:-$HOME/.cargo}/bin"
 if ! command -v rustc >/dev/null; then
@@ -18,6 +22,10 @@ if ! command -v rustc >/dev/null; then
   exit 1
 fi
 if [[ ! -d "$(rustc --print target-libdir --target wasm32-wasip2)" ]]; then
+  if [[ $mode == --wasi-path ]]; then
+    echo 'error: The Rust wasm32-wasip2 target is missing. Run developer setup with --wasi-only.' >&2
+    exit 1
+  fi
   rustup target add wasm32-wasip2 >&2
 fi
 
@@ -59,6 +67,10 @@ if [[ -z $sdk ]]; then
   esac
   name=wasi-sdk-34.0-$platform
   root=${XDG_DATA_HOME:-$HOME/.local/share}/mirrorneuron/dev
+  if [[ $mode == --wasi-path && ! -d "$root/$name" ]]; then
+    echo 'error: The WASI SDK is missing. Run developer setup with --wasi-only or set WASI_SDK_PATH.' >&2
+    exit 1
+  fi
   mkdir -p "$root"
   root=$(cd "$root" && pwd -P)
   sdk=$root/$name
@@ -88,4 +100,23 @@ if ! check_sdk "$sdk"; then
   echo "error: Cannot use the WASI SDK in $sdk. Set WASI_SDK_PATH to a working SDK." >&2
   exit 1
 fi
+
+if [[ -z $mode ]]; then
+  # Keep the SDK path as the only stdout so callers can export WASI_SDK_PATH.
+  (
+    deploy_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+    # shellcheck source=../install.sh
+    source "$deploy_dir/install.sh"
+    if [[ -z "${MN_PODMAN_SUDO_NON_INTERACTIVE:-}" && (-t 0 || -t 2) ]]; then
+      MN_PODMAN_SUDO_NON_INTERACTIVE=N
+    fi
+    printf '==> Preparing Podman\n' >&3
+    if ! mn_ensure_podman_for_install; then
+      print_error "Could not prepare Podman. Check the Podman output and rerun developer setup."
+      exit 1
+    fi
+    print_success "Podman is ready."
+  ) >&2
+fi
+
 cd "$sdk" && pwd -P

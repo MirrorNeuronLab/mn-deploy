@@ -267,14 +267,115 @@ function remove_compose_project_resources() {
   [ "$cleanup_failed" = "N" ]
 }
 
+# Keep these machine helpers in sync with install.sh, which ships separately.
+function mn_podman_connection_machine() {
+  local connections
+  connections="$(podman system connection list --format '{{.Default}} {{.IsMachine}} {{.Name}} {{.URI}}')" || return 1
+  awk -v selected="${CONTAINER_CONNECTION:-}" '
+    (selected == "" ? $1 == "true" : $3 == selected) {
+      if ($2 != "true") exit 1
+      if ($4 ~ /^ssh:\/\/root@/) sub(/-root$/, "", $3)
+      print $3
+      found = 1
+      exit
+    }
+    END { if (selected != "" && !found) exit 1 }
+  ' <<<"$connections"
+}
+
+function mn_boot_podman_machine() {
+  local machine="$1" output
+  print_step "Starting Podman machine $machine"
+  # Detach stdin so Podman cannot prompt to change the default connection.
+  if output="$(podman machine start "$machine" </dev/null 2>&1)"; then
+    if [ "${MN_INSTALL_VERBOSE:-N}" = Y ]; then printf '%s\n' "$output" >&3; fi
+    return 0
+  fi
+
+  # Another process may have started the machine after the first inspect.
+  case "$(podman machine inspect --format '{{.State}}' "$machine" 2>/dev/null)" in
+  running | starting) return 0 ;;
+  esac
+  printf '%s\n' "$output" >&2
+  print_error "Could not start Podman machine $machine. Check the Podman output and retry."
+  return 1
+}
+
+function mn_wait_for_podman_api() {
+  local attempt
+  # The VM can be running before its API is reachable.
+  for attempt in {1..11}; do
+    if podman info >/dev/null 2>&1; then return 0; fi
+    if [ "$attempt" -lt 11 ]; then sleep 1; fi
+  done
+  return 1
+}
+
+function mn_start_podman_machine() {
+  local machine="$1" state info_error
+  if ! state="$(podman machine inspect --format '{{.State}}' "$machine")"; then
+    print_error "Could not inspect Podman machine $machine. Check podman machine list."
+    return 1
+  fi
+  case "$state" in
+  stopped) mn_boot_podman_machine "$machine" || return 1 ;;
+  running | starting) ;;
+  *)
+    print_error "Podman machine $machine is in state '$state'. Check podman machine list."
+    return 1
+    ;;
+  esac
+
+  if mn_wait_for_podman_api; then return 0; fi
+  # Check the current connection and state again in case another process
+  # changed the target or the machine is still booting.
+  if [ "$(mn_podman_connection_machine)" = "$machine" ] &&
+    [ "$(podman machine inspect --format '{{.State}}' "$machine")" = running ]; then
+    if info_error="$(LC_ALL=C podman info 2>&1 >/dev/null)"; then return 0; fi
+    case "$info_error" in
+    *"connect: connection refused"* | *"target machine actively refused it"*)
+      print_warning "Restarting Podman machine $machine once after its API refused connections. This interrupts its containers."
+      if ! podman machine stop "$machine" </dev/null >/dev/null; then
+        print_error "Could not stop Podman machine $machine. Check the Podman output and retry."
+        return 1
+      fi
+      mn_boot_podman_machine "$machine" || return 1
+      if mn_wait_for_podman_api; then return 0; fi
+      ;;
+    esac
+  fi
+
+  print_error "Podman machine $machine is still unreachable."
+  printf 'Next: check podman info and podman machine inspect %q, then retry.\n' "$machine" >&3
+  return 1
+}
+
+function mn_ensure_podman_for_uninstall() {
+  local machine
+  if podman info >/dev/null 2>&1; then return 0; fi
+  case "$(uname -s)" in
+  Darwin | MINGW* | MSYS* | CYGWIN*)
+    if [ -n "${CONTAINER_HOST:-}" ] || ! machine="$(mn_podman_connection_machine)"; then
+      print_error "The selected Podman connection is unreachable. Check it with podman info."
+      return 1
+    fi
+    if [ -z "$machine" ]; then
+      print_error "No Podman machine connection is selected. Check podman system connection list."
+      return 1
+    fi
+    mn_start_podman_machine "$machine"
+    ;;
+  *)
+    print_error "Podman is unavailable. Check podman info."
+    return 1
+    ;;
+  esac
+}
+
 function remove_docker_runtime_project() {
   local cleanup_failed="N"
 
-  if ! podman info >/dev/null 2>&1; then
-    print_error "Podman is installed but the daemon is not available."
-    printf 'Next: start Podman, then rerun ./uninstall.sh --yes\n' >&3
-    return 1
-  fi
+  mn_ensure_podman_for_uninstall || return 1
 
   # Model servers share the runtime network, but have independent lifecycles.
   local model_filter="label=io.mirrorneuron.model.home=$INSTALL_DIR" model_resources resource

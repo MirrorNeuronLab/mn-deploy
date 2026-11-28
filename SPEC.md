@@ -35,7 +35,7 @@ This specification applies only to deployment assets in this repository.
 
 - `install.sh` installs or updates released packages.
 - `install_dev.sh` builds from local checkouts or GitHub sources.
-- `scripts/preapare_dev.sh` prepares the source-build WASI toolchain and prints its SDK directory.
+- `scripts/preapare_dev.sh` prepares Podman and the source-build WASI toolchain. Its stdout is the SDK directory. `--wasi-only` prepares the toolchain for client builds. `--wasi-path` checks existing tools read-only and prints the SDK directory.
 - `uninstall.sh`: remove installed MirrorNeuron components and selected state.
 - `server.sh`: start, stop, and inspect installed services.
 - `prepare_cluster.sh`: prepare cluster-facing deployment configuration.
@@ -49,6 +49,12 @@ Flags shown by each script's `--help` are the exact command contract.
 socket and exits before installation path preparation. It leaves an already
 reachable connection in place. The legacy `--start-docker` flag invokes the
 same Podman startup. Run installation or detection as a separate command.
+
+On macOS, developer setup, runtime installation, and uninstallation start a
+stopped machine when the selected Podman connection belongs to it. The scripts
+wait for the API and try one restart if a running machine continues to refuse
+connections. An unreachable machine after recovery blocks runtime installation
+and cleanup. Developer setup and installation can initialize a new machine.
 
 `install.sh --detect-only` is a read-only query for integrations. It prints one
 JSON object containing `installed`, `install_role`, `running`, `runtime_ready`,
@@ -504,3 +510,6 @@ remains `binary_default = false`. Co-worker dependencies opt in with
 `setup: on_install`; the SDK invokes setup during API hiring or CLI blueprint add.
 Customer setup downloads and verifies the notarized artifact without a compiler,
 Xcode or gcloud. Existing immutable install-support snapshots remain unchanged.
+
+The developer-only `--use-experiemental-sdk` option selects the `mn-sdk` host and Python authoring interface for the complete runtime installation. It requires a runtime source installation and applies to local and GitHub modes.
+Executable agent factories and host-backed WIT skills install into the selected SDK environment. GitHub mode pins the skills checkout by commit. Membrane-enabled installations include its gRPC client for document and review memory.

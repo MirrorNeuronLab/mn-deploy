@@ -67,9 +67,9 @@ cp "$HOME/payload" "$2"''',
         "MACHINE": machine,
     }
 
-    def prepare(**overrides):
+    def prepare(mode="--wasi-only", **overrides):
         return subprocess.run(
-            ["bash", script],
+            ["bash", script, mode],
             env={**env, **overrides},
             capture_output=True,
             text=True,
@@ -77,10 +77,17 @@ cp "$HOME/payload" "$2"''',
         )
 
     payload.write_bytes(b"incomplete archive")
+    probe = prepare("--wasi-path")
+    assert probe.returncode and "wasm32-wasip2 target is missing" in probe.stderr
+    assert not (tmp_path / "wasip2").exists()
+    assert not data.exists()
     failed = prepare()
     assert failed.returncode and "checksum failed" in failed.stderr
     cache = data / "mirrorneuron/dev"
     assert list(cache.iterdir()) == []
+    probe = prepare("--wasi-path")
+    assert probe.returncode and "WASI SDK is missing" in probe.stderr
+    assert len((tmp_path / "urls").read_text().splitlines()) == 1
     payload.write_bytes(valid)
     installed = prepare()
     assert installed.returncode == 0, installed.stderr
@@ -89,6 +96,9 @@ cp "$HOME/payload" "$2"''',
     cached = prepare()
     assert cached.returncode == 0, cached.stderr
     assert cached.stdout == installed.stdout
+    probe = prepare("--wasi-path")
+    assert probe.returncode == 0, probe.stderr
+    assert probe.stdout == installed.stdout
     explicit = prepare(WASI_SDK_PATH=str(sdk_bin.parent))
     assert explicit.returncode == 0, explicit.stderr
     assert Path(explicit.stdout.strip()) == sdk_bin.parent

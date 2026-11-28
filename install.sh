@@ -118,7 +118,20 @@ function mn_ui_clear_line() {
 }
 
 function print_header() {
-  printf '\n  %sOtterDesk Installer%s\n  %s──────────────────────────────────────────%s\n' "$BOLD" "$RESET" "$DIM" "$RESET" >&3
+  local version="${MN_INSTALL_VERSION:-$MN_DEFAULT_INSTALL_VERSION}"
+  if [ -t 3 ] && [ "${TERM:-dumb}" != "dumb" ]; then
+    printf '\n%s%s' "$CYAN" "$BOLD" >&3
+    cat >&3 <<'MN_BANNER'
+   __  __  _
+  |  \/  |(_) _ __  _ __   ___   _ __  _ __    ___  _   _  _ __   ___   _ __
+  | |\/| || || '__|| '__| / _ \ | '__|| '_ \  / _ \| | | || '__| / _ \ | '_ \
+  | |  | || || |   | |   | (_) || |   | | | ||  __/| |_| || |   | (_) || | | |
+  |_|  |_||_||_|   |_|    \___/ |_|   |_| |_| \___| \__,_||_|    \___/ |_| |_|
+MN_BANNER
+    printf '%s  %sInstaller %s%s\n\n' "$RESET" "$DIM" "$version" "$RESET" >&3
+  else
+    printf '\n  OtterDesk Installer\n  %s\n' "$version" >&3
+  fi
 }
 
 function print_detail() {
@@ -400,8 +413,91 @@ function mn_resolve_podman_socket() {
   printf '%s\n' "$socket_path"
 }
 
+# Keep these machine helpers in sync with uninstall.sh, which ships separately.
+function mn_podman_connection_machine() {
+  local connections
+  connections="$(podman system connection list --format '{{.Default}} {{.IsMachine}} {{.Name}} {{.URI}}')" || return 1
+  awk -v selected="${CONTAINER_CONNECTION:-}" '
+    (selected == "" ? $1 == "true" : $3 == selected) {
+      if ($2 != "true") exit 1
+      if ($4 ~ /^ssh:\/\/root@/) sub(/-root$/, "", $3)
+      print $3
+      found = 1
+      exit
+    }
+    END { if (selected != "" && !found) exit 1 }
+  ' <<<"$connections"
+}
+
+function mn_boot_podman_machine() {
+  local machine="$1" output
+  print_step "Starting Podman machine $machine"
+  # Detach stdin so Podman cannot prompt to change the default connection.
+  if output="$(podman machine start "$machine" </dev/null 2>&1)"; then
+    if [ "${MN_INSTALL_VERBOSE:-N}" = Y ]; then printf '%s\n' "$output" >&3; fi
+    return 0
+  fi
+
+  # Another process may have started the machine after the first inspect.
+  case "$(podman machine inspect --format '{{.State}}' "$machine" 2>/dev/null)" in
+  running | starting) return 0 ;;
+  esac
+  printf '%s\n' "$output" >&2
+  print_error "Could not start Podman machine $machine. Check the Podman output and retry."
+  return 1
+}
+
+function mn_wait_for_podman_api() {
+  local attempt
+  # The VM can be running before its API is reachable.
+  for attempt in {1..11}; do
+    if podman info >/dev/null 2>&1; then return 0; fi
+    if [ "$attempt" -lt 11 ]; then sleep 1; fi
+  done
+  return 1
+}
+
+function mn_start_podman_machine() {
+  local machine="$1" state info_error
+  if ! state="$(podman machine inspect --format '{{.State}}' "$machine")"; then
+    print_error "Could not inspect Podman machine $machine. Check podman machine list."
+    return 1
+  fi
+  case "$state" in
+  stopped) mn_boot_podman_machine "$machine" || return 1 ;;
+  running | starting) ;;
+  *)
+    print_error "Podman machine $machine is in state '$state'. Check podman machine list."
+    return 1
+    ;;
+  esac
+
+  if mn_wait_for_podman_api; then return 0; fi
+  # Check the current connection and state again in case another process
+  # changed the target or the machine is still booting.
+  if [ "$(mn_podman_connection_machine)" = "$machine" ] &&
+    [ "$(podman machine inspect --format '{{.State}}' "$machine")" = running ]; then
+    if info_error="$(LC_ALL=C podman info 2>&1 >/dev/null)"; then return 0; fi
+    case "$info_error" in
+    *"connect: connection refused"* | *"target machine actively refused it"*)
+      print_warning "Restarting Podman machine $machine once after its API refused connections. This interrupts its containers."
+      if ! podman machine stop "$machine" </dev/null >/dev/null; then
+        print_error "Could not stop Podman machine $machine. Check the Podman output and retry."
+        return 1
+      fi
+      mn_boot_podman_machine "$machine" || return 1
+      if mn_wait_for_podman_api; then return 0; fi
+      ;;
+    esac
+  fi
+
+  print_error "Podman machine $machine is still unreachable."
+  printf 'Next: check podman info and podman machine inspect %q, then retry.\n' "$machine" >&3
+  return 1
+}
+
 function mn_start_podman() {
-  local mode="${1:-only}" host_os socket_path
+  local mode="${1:-only}" host_os socket_path machine machines
   if ! command -v podman >/dev/null 2>&1; then
     print_error "Podman CLI is missing. Install Podman or run the runtime installer."
     return 1
@@ -410,18 +506,24 @@ function mn_start_podman() {
   case "$host_os" in
   Darwin | MINGW* | MSYS* | CYGWIN*)
     if ! podman info >/dev/null 2>&1; then
-      if [ -n "${CONTAINER_HOST:-}${CONTAINER_CONNECTION:-}" ]; then
+      if [ -n "${CONTAINER_HOST:-}" ] || ! machine="$(mn_podman_connection_machine)"; then
         print_error "The selected Podman connection is unreachable. Check it with podman info."
         return 1
       fi
-      if ! podman machine inspect >/dev/null 2>&1; then
+      if [ -z "$machine" ]; then
+        machines="$(podman machine list --quiet)" || return 1
+        if [ -n "$machines" ]; then
+          print_error "No default Podman connection is selected. Check podman system connection list."
+          return 1
+        fi
         if [ "$mode" != install ]; then
           print_error "No Podman machine is configured. Run podman machine init first."
           return 1
         fi
-        podman machine init --memory 8192 || return 1
+        podman machine init --memory 8192 </dev/null || return 1
+        machine=podman-machine-default
       fi
-      podman machine start || return 1
+      mn_start_podman_machine "$machine" || return 1
     fi
     ;;
   Linux)
@@ -434,13 +536,13 @@ function mn_start_podman() {
         systemctl --user start podman.socket || return 1
       fi
     fi
+    podman info >/dev/null || return 1
     ;;
   *)
     print_error "Unsupported Podman host OS: $host_os"
     return 1
     ;;
   esac
-  podman info >/dev/null || return 1
   [ "$mode" != only ] || print_success "Podman is ready."
 }
 
@@ -955,20 +1057,83 @@ function mn_print_cli_verification_prompt() {
 }
 
 function mn_print_runtime_connect_command() {
-  # Read the endpoint written by startup. The local gRPC target can be loopback.
-  if ! "$VENV_DIR/bin/python" - "$INSTALL_DIR" >&3 2>/dev/null <<'PY_CONNECT'; then
+  local status=0
+  # The endpoint file also serves local clients and can contain a loopback host.
+  "$VENV_DIR/bin/python" - "$INSTALL_DIR" >&3 2>/dev/null <<'PY_CONNECT' || status=$?
+from ipaddress import IPv6Address, ip_address
+import os
 from pathlib import Path
+import re
 import shlex
+import socket
+import subprocess
 import sys
 
-from mn_sdk.runtime_connection import DEFAULT_PORT, normalize_target, read_object
+from mn_sdk_shared.config.loaders import read_env_file
+from mn_sdk_shared.runtime.connection import DEFAULT_PORT, normalize_target, read_object
+
+def is_network_ip(address):
+    if isinstance(address, IPv6Address):
+        address = address.ipv4_mapped or address
+    return not (address.is_loopback or address.is_unspecified or address.is_multicast)
+
+def is_network_host(host):
+    try:
+        return is_network_ip(ip_address(host.strip("[]")))
+    except ValueError:
+        name = host.lower().rstrip(".")
+        return (
+            bool(name)
+            and name not in {"localhost", "localhost.localdomain"}
+            and not name.endswith(".localhost")
+        )
+
+def detect_lan_ip():
+    # UDP connect selects a source address through the routing table without sending traffic.
+    for family, destination in (
+        (socket.AF_INET, ("192.0.2.1", 1)),
+        (socket.AF_INET6, ("2001:db8::1", 1)),
+    ):
+        try:
+            with socket.socket(family, socket.SOCK_DGRAM) as probe:
+                probe.connect(destination)
+                host = probe.getsockname()[0]
+        except OSError:
+            continue
+        if is_network_ip(ip_address(host)):
+            return host
+
+    # A LAN can have an address without a default route.
+    for command in (["ip", "-o", "addr", "show", "scope", "global"], ["ifconfig"]):
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, check=True, timeout=3)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        for host in re.findall(r"\binet6?\s+([^/%\s]+)", result.stdout):
+            try:
+                address = ip_address(host)
+            except ValueError:
+                continue
+            if is_network_ip(address) and not address.is_link_local:
+                return host
+    return ""
 
 home = Path(sys.argv[1])
 grpc = read_object(home / "runtime-endpoints.json")["grpc"]
-host = grpc["host"]
+port = int(grpc["port"])
+host = grpc["host"].strip()
+if not is_network_host(host):
+    compose_env = read_env_file(home / "docker-compose.env")
+    for setting in ("MN_NETWORK_ADVERTISE_HOST", "MN_GRPC_BIND_HOST"):
+        host = (os.environ.get(setting) or compose_env.get(setting, "")).strip()
+        if is_network_host(host):
+            break
+    else:
+        host = detect_lan_ip()
+    if not host:
+        raise SystemExit(2)
 if ":" in host and not host.startswith("["):
     host = f"[{host}]"
-port = int(grpc["port"])
 host = normalize_target(host, port).rsplit(":", 1)[0]
 token = (home / "runtime.token").read_text(encoding="utf-8").strip()
 if not token:
@@ -981,6 +1146,9 @@ command.extend(["--token", token])
 print("  Connect to this runtime")
 print(f"    {shlex.join(command)}")
 PY_CONNECT
+  if [ "$status" -eq 2 ]; then
+    print_warning "No LAN IP detected. Connect this host to a network or set MN_NETWORK_ADVERTISE_HOST to the address clients should use."
+  elif [ "$status" -ne 0 ]; then
     print_warning "Could not display the runtime connection command. Check ${INSTALL_DIR}/runtime-endpoints.json and ${INSTALL_DIR}/runtime.token."
   fi
 }
